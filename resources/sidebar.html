@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src %%CSP_SOURCE%%; script-src 'nonce-%%NONCE%%';"
+    />
+    <link rel="stylesheet" href="%%CSS_URI%%" />
+    <title>Cursor Chat Transit</title>
+  </head>
+  <body>
+    <main class="sidebar">
+      <header class="intro">
+        <div class="brand" aria-hidden="true">%%BRAND_ICON%%</div>
+        <div>
+          <h1>Cursor Chat Transit</h1>
+          <p>Take your chats with you.</p>
+        </div>
+      </header>
+      <section class="source" aria-labelledby="source-label">
+        <div class="section-top">
+          <h2 id="source-label">WORKSPACE</h2>
+          <button class="text-button" data-action="chooseWorkspace">
+            Change…
+          </button>
+        </div>
+        <span class="location" id="workspace-location"></span>
+        <strong id="workspace-name">Choose a workspace</strong>
+        <p id="workspace-detail" class="secondary">
+          Export from or import into this workspace.
+        </p>
+      </section>
+      <section class="actions" aria-label="Chat actions">
+        <button class="primary" data-action="export">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 15V4m-4 4 4-4 4 4M5 14v5h14v-5" /></svg
+          >Export chats
+        </button>
+        <button class="secondary-button" data-action="import">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 4v11m-4-4 4 4 4-4M5 14v5h14v-5" /></svg
+          >Import chats
+        </button>
+      </section>
+      <p class="file-hint">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <rect x="3" y="4" width="18" height="12" rx="2" />
+          <path d="M8 20h8m-4-4v4" /></svg
+        >Import and export JSON files. Existing chats are kept.
+      </p>
+      <section
+        class="operation"
+        aria-labelledby="operation-label"
+        data-status="idle"
+      >
+        <h2 id="operation-label">RECENT ACTIVITY</h2>
+        <div class="status-heading">
+          <span class="status-mark" aria-hidden="true">○</span
+          ><strong id="status-title">Ready when you are</strong>
+        </div>
+        <p
+          id="status-detail"
+          class="secondary"
+          role="status"
+          aria-live="polite"
+        >
+          Choose Export or Import to begin.
+        </p>
+        <ul id="status-items" class="status-items" hidden></ul>
+        <div
+          id="progress"
+          class="progress"
+          hidden
+          role="progressbar"
+          aria-label="Operation progress"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="status-actions operation-actions">
+          <button class="text-button" data-action="logs">
+            Open operation log <span aria-hidden="true">↗</span></button
+          ><button
+            type="button"
+            class="text-button"
+            data-action="quitCursor"
+            hidden
+          >
+            Quit Cursor
+          </button>
+          <button class="text-button" data-action="cancel" hidden>
+            Cancel
+          </button>
+        </div>
+      </section>
+      <footer>
+        <button class="footer-button" data-action="diagnostics">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path
+              d="M9 3h6m-3 0v5l6 10a2 2 0 0 1-1.7 3H6.7A2 2 0 0 1 5 18l7-10M8 15h8"
+            /></svg
+          >Diagnostics
+        </button>
+        <button class="text-button" data-action="diagnosticLogs">
+          Diagnostic log <span aria-hidden="true">↗</span>
+        </button>
+      </footer>
+    </main>
+    <script nonce="%%NONCE%%" src="%%SCRIPT_URI%%"></script>
+  </body>
+</html>

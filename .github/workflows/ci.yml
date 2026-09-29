@@ -1,0 +1,177 @@
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run compile
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test:unit
+
+  sqlite-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run ensure-ci-sqlite
+      - name: Wrapper stdout, exit, and compile
+        if: runner.os != 'Windows'
+        run: |
+          set -eu
+          out=$(sh scripts/dev-node.sh -- node -e "process.stdout.write('wrapper-ok')")
+          printf '%s\n' "$out" | grep -q wrapper-ok
+          set +e
+          sh scripts/dev-node.sh -- node -e "process.exit(7)"
+          code=$?
+          set -e
+          test "$code" -eq 7
+          sh scripts/dev-node.sh -- npm run compile
+      - name: Wrapper exit and compile (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call scripts\dev-node.cmd -- node -e "process.stdout.write('wrapper-ok')"
+          if errorlevel 1 exit /b 1
+          call scripts\dev-node.cmd -- node -e "process.exit(7)"
+          if not "%ERRORLEVEL%"=="7" exit /b 1
+          call scripts\dev-node.cmd -- npm run compile
+          if errorlevel 1 exit /b 1
+      - run: npm test
+
+  host-smoke:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        vscode: ['1.85.0', 'stable']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: xvfb-run -a npm run test:host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+
+  package:
+    needs: [check, sqlite-integration, host-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run ensure-ci-sqlite
+      - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) process.exit(1)'
+      - run: npm run package
+      - run: npm run check-package
+      - name: Write checksum
+        working-directory: dist
+        run: sha256sum cursor-chat-transit.vsix > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: cursor-chat-transit-${{ github.sha }}
+          path: |
+            dist/cursor-chat-transit.vsix
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  ci-result:
+    name: CI required
+    if: ${{ always() }}
+    needs: [check, sqlite-integration, host-smoke, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require all validation jobs
+        env:
+          CHECK: ${{ needs.check.result }}
+          CORE: ${{ needs.sqlite-integration.result }}
+          HOST: ${{ needs.host-smoke.result }}
+          PACKAGE: ${{ needs.package.result }}
+        run: |
+          for result in "$CHECK" "$CORE" "$HOST" "$PACKAGE"; do
+            test "$result" = success || exit 1
+          done
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: [package, ci-result]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.ref_name }}
+      ARTIFACT_NAME: cursor-chat-transit-${{ github.sha }}
+    steps:
+      - name: Download validated package from this run
+        run: |
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" \
+            --dir release-artifact
+      - name: Verify package checksum
+        working-directory: release-artifact
+        run: sha256sum --check SHA256SUMS
+      - name: Create draft release
+        run: |
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --draft --generate-notes \
+            release-artifact/cursor-chat-transit.vsix \
+            release-artifact/SHA256SUMS

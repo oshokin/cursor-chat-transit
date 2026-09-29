@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "compile",
+      "type": "shell",
+      "command": "sh",
+      "args": ["scripts/dev-node.sh", "--", "npm", "run", "compile"],
+      "windows": {
+        "command": "scripts/dev-node.cmd",
+        "args": ["--", "npm", "run", "compile"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "watch:src",
+      "type": "shell",
+      "command": "sh",
+      "args": ["scripts/dev-node.sh", "--", "npm", "run", "watch:src"],
+      "windows": {
+        "command": "scripts/dev-node.cmd",
+        "args": ["--", "npm", "run", "watch:src"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": "$tsc-watch"
+    },
+    {
+      "label": "watch:webview",
+      "type": "shell",
+      "command": "sh",
+      "args": ["scripts/dev-node.sh", "--", "npm", "run", "watch:webview"],
+      "windows": {
+        "command": "scripts/dev-node.cmd",
+        "args": ["--", "npm", "run", "watch:webview"]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": "$tsc-watch"
+    },
+    {
+      "label": "watch",
+      "dependsOn": ["watch:src", "watch:webview"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    }
+  ]
+}

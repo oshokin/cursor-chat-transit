@@ -1,0 +1,71 @@
+version: '3'
+
+# npm scripts remain the source of truth. Recipes go through scripts/dev-node.sh
+# (Linux/macOS) or scripts/dev-node.cmd (Windows 10/11 PowerShell 5.1).
+# Contributor loop: task setup → task check → task package.
+# Keep ordered work in cmds: Task deps run in parallel.
+vars:
+  DEV_NODE: '{{if eq OS "windows"}}scripts/dev-node.cmd{{else}}sh scripts/dev-node.sh{{end}}'
+
+tasks:
+  default:
+    desc: List available development tasks
+    cmds:
+      - task --list
+  setup:
+    desc: Install Node from .nvmrc if needed, then npm ci
+    cmds:
+      - '{{.DEV_NODE}} --setup'
+  node:
+    desc: Show the Node.js and npm that Task will use
+    cmds:
+      - '{{.DEV_NODE}} --status'
+  build:
+    desc: Compile the extension and sidebar
+    cmds:
+      - '{{.DEV_NODE}} -- npm run compile'
+  watch:
+    desc: Recompile extension and sidebar as files change
+    cmds:
+      - '{{.DEV_NODE}} -- npm run watch'
+  typecheck:
+    desc: Check types in source, scripts and tests
+    cmds:
+      - '{{.DEV_NODE}} -- npm run typecheck'
+  lint:
+    desc: Run required ESLint checks
+    cmds:
+      - '{{.DEV_NODE}} -- npm run lint'
+  format:
+    desc: Apply formatting
+    cmds:
+      - '{{.DEV_NODE}} -- npm run format'
+  format:check:
+    desc: Check formatting without changing files
+    cmds:
+      - '{{.DEV_NODE}} -- npm run format:check'
+  test:
+    desc: Run all core tests (sqlite3 required)
+    cmds:
+      - '{{.DEV_NODE}} -- npm test'
+  test:unit:
+    desc: Run tests without SQLite integration fixtures
+    cmds:
+      - '{{.DEV_NODE}} -- npm run test:unit'
+  test:sqlite:
+    desc: Run SQLite integration tests (sqlite3 required)
+    cmds:
+      - '{{.DEV_NODE}} -- npm run test:sqlite'
+  check:
+    desc: Compile, check types, lint, check formatting and run core tests
+    cmds:
+      - '{{.DEV_NODE}} -- npm run check'
+  package:
+    desc: Run prepublish checks, build the VSIX and verify its contents
+    cmds:
+      - '{{.DEV_NODE}} -- npm run package'
+      - '{{.DEV_NODE}} -- npm run check-package'
+  clean:
+    desc: Remove build output (keeps .dev profiles and dependencies)
+    cmds:
+      - '{{.DEV_NODE}} -- npm run clean'

@@ -1,0 +1,306 @@
+:root {
+  color-scheme: light dark;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--vscode-sideBar-background, #181818);
+  color: var(--vscode-foreground, #ddd);
+  font: var(--vscode-font-size, 13px)/1.5
+    var(--vscode-font-family, system-ui, sans-serif);
+}
+.sidebar {
+  padding: 24px 18px 16px;
+  min-width: 0;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+}
+button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 3px;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+[hidden] {
+  display: none !important;
+}
+svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.brand {
+  color: var(--vscode-textLink-foreground, #80baff);
+  display: flex;
+}
+.brand svg {
+  width: 32px;
+  height: 32px;
+  stroke-width: 1.5;
+}
+h1 {
+  font-size: 16px;
+  line-height: 1.35;
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.intro p {
+  margin: 4px 0 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 12px;
+}
+h2 {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  margin: 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.source {
+  border: 1px solid var(--vscode-widget-border, #444);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--vscode-editor-background, #1f1f1f);
+}
+.section-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.location {
+  display: inline-block;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.location:empty {
+  display: none;
+}
+#workspace-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.secondary {
+  font-size: 12px;
+  margin: 5px 0 0;
+  color: var(--vscode-descriptionForeground, #aaa);
+  overflow-wrap: anywhere;
+}
+#workspace-detail {
+  line-height: 1.5;
+}
+.actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+.primary,
+.secondary-button {
+  min-height: 36px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 6px;
+  padding: 8px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.primary {
+  background: var(--vscode-button-background, #0078d4);
+  color: var(--vscode-button-foreground, white);
+}
+.primary:hover:enabled {
+  background: var(--vscode-button-hoverBackground, #026ec1);
+}
+.secondary-button {
+  background: var(--vscode-button-secondaryBackground, #363636);
+  color: var(--vscode-button-secondaryForeground, #fff);
+}
+.secondary-button:hover:enabled {
+  background: var(--vscode-button-secondaryHoverBackground, #444);
+}
+.file-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--vscode-descriptionForeground, #aaa);
+  font-size: 11px;
+  margin: 12px 0 0;
+}
+.file-hint svg {
+  width: 14px;
+  height: 14px;
+}
+.operation {
+  margin-top: 26px;
+  padding-top: 19px;
+  border-top: 1px solid var(--vscode-widget-border, #444);
+}
+.status-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+}
+.status-heading strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.status-mark {
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+[data-status='completed'] .status-mark {
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+[data-status='failed'] .status-mark,
+[data-status='partial'] .status-mark {
+  color: var(--vscode-errorForeground, #f48771);
+}
+[data-status='incomplete'] .status-mark {
+  color: var(--vscode-editorWarning-foreground, #dcca7c);
+}
+.text-button {
+  background: none;
+  border: 0;
+  padding: 3px 0;
+  color: var(--vscode-textLink-foreground, #80baff);
+  font-size: 12px;
+  text-align: left;
+}
+.text-button:hover:enabled {
+  text-decoration: underline;
+}
+.status-items {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #aaa);
+}
+.status-items li {
+  overflow-wrap: anywhere;
+  padding: 2px 0;
+}
+.status-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 13px;
+}
+.operation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.operation-actions button {
+  min-height: 32px;
+}
+.operation-actions button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+.progress {
+  width: 100%;
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--vscode-button-secondaryBackground, #333);
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: var(--vscode-progressBar-background, #0078d4);
+  transition: width 160ms linear;
+}
+.progress.is-indeterminate .progress-fill {
+  width: 40%;
+  transition: none;
+  animation: loading 1.8s linear infinite;
+}
+@keyframes loading {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(350%);
+  }
+}
+footer {
+  border-top: 1px solid var(--vscode-widget-border, #444);
+  margin-top: 22px;
+  padding-top: 13px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.footer-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: 0;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.footer-button:hover {
+  color: var(--vscode-textLink-foreground, #80baff);
+}
+.vscode-high-contrast .source,
+.vscode-high-contrast-light .source,
+.vscode-high-contrast button,
+.vscode-high-contrast-light button {
+  border: 1px solid var(--vscode-contrastBorder, currentColor);
+}
+@media (max-width: 280px) {
+  .sidebar {
+    padding: 16px 12px;
+  }
+  .actions {
+    grid-template-columns: 1fr;
+  }
+  h1 {
+    font-size: 14px;
+  }
+  .intro {
+    gap: 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

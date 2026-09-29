@@ -1,0 +1,12 @@
+node_modules
+dist
+out
+.dev
+.vscode-test
+coverage
+tmp
+package-lock.json
+*.vsix
+resources/icons/preview.png
+resources/icons/preview.svg
+resources/sidebar-client.js

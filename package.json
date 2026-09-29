@@ -1,0 +1,194 @@
+{
+  "name": "cursor-chat-transit",
+  "displayName": "Cursor Chat Transit",
+  "description": "Move your Cursor chats between workspaces and devices.",
+  "version": "1.0.0",
+  "publisher": "oshokin",
+  "icon": "resources/marketplace.png",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "cursor",
+    "chat",
+    "export",
+    "import"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oshokin/cursor-chat-transit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oshokin/cursor-chat-transit/issues"
+  },
+  "homepage": "https://github.com/oshokin/cursor-chat-transit",
+  "main": "./out/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "files": [
+    "out/*.js",
+    "out/*.js.map",
+    "resources/**",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "Cursor Chat Transit",
+      "properties": {
+        "cursorChatTransit.userDataDir": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Local Cursor user-data directory. Empty means auto-detect."
+        },
+        "cursorChatTransit.sqlitePath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Absolute path to the local sqlite3 executable."
+        },
+        "cursorChatTransit.import.allowPartial": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "markdownDescription": "Attempt to recover usable chats from incomplete exports. Missing chat data or images may prevent continuing a recovered conversation. Invalid JSON, unsafe paths and database conflicts are still rejected."
+        },
+        "cursorChatTransit.plansDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Absolute path to the local Cursor plans directory. Empty uses ~/.cursor/plans. This does not change where Cursor saves new plans."
+        },
+        "cursorChatTransit.sqlite.operationTimeoutSeconds": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 30,
+          "maximum": 3600,
+          "scope": "machine",
+          "description": "Maximum time for each SQLite process during import or export, including backups. This is not a timeout for the entire transfer. Increase for unusually large databases or slow disks."
+        },
+        "cursorChatTransit.sqlite.busyTimeoutSeconds": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 30,
+          "scope": "machine",
+          "description": "How long SQLite waits for a database lock before failing. Applies to reads, writes and backups. Increase only for brief database contention."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cursorChatTransit",
+          "title": "Cursor Chat Transit",
+          "icon": "resources/icons/activity-bar.svg"
+        }
+      ]
+    },
+    "views": {
+      "cursorChatTransit": [
+        {
+          "type": "webview",
+          "id": "cursorChatTransit.view",
+          "name": "Chat Transit",
+          "icon": "resources/icons/activity-bar.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cursorChatTransit.export",
+        "title": "Export Chats",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/export-light.svg",
+          "dark": "resources/icons/export-dark.svg"
+        }
+      },
+      {
+        "command": "cursorChatTransit.import",
+        "title": "Import Chats",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/import-light.svg",
+          "dark": "resources/icons/import-dark.svg"
+        }
+      },
+      {
+        "command": "cursorChatTransit.exportCurrentWorkspace",
+        "title": "Export Current Workspace",
+        "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.diagnostics",
+        "title": "Diagnostics",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/diagnostics-light.svg",
+          "dark": "resources/icons/diagnostics-dark.svg"
+        }
+      },
+      {
+        "command": "cursorChatTransit.showOutput",
+        "title": "Open Operation Log",
+        "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.showDiagnosticOutput",
+        "title": "Open Diagnostic Log",
+        "category": "Cursor Chat Transit"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json && tsc -p tsconfig.webview.json",
+    "watch": "node --import tsx scripts/watch.ts",
+    "watch:src": "tsc -p tsconfig.json -w --preserveWatchOutput",
+    "watch:webview": "tsc -p tsconfig.webview.json -w --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit && tsc -p tsconfig.webview.json --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --import tsx scripts/test-core.ts test",
+    "test:watch": "node --import tsx scripts/test-core.ts --watch test",
+    "test:unit": "node --import tsx scripts/test-core.ts --unit test",
+    "test:sqlite": "node --import tsx scripts/test-core.ts --sqlite test",
+    "test:host": "node --import tsx scripts/test-host.ts",
+    "check-package": "node --import tsx scripts/check-package.ts",
+    "ensure-ci-sqlite": "node --import tsx scripts/ensure-ci-sqlite.ts",
+    "check": "npm run compile && npm run typecheck && npm run lint && npm run format:check && npm test",
+    "package": "node --import tsx scripts/prepare-dist.ts && vsce package --out dist/cursor-chat-transit.vsix",
+    "vscode:prepublish": "npm run check",
+    "lint:complexity": "eslint src --rule \"max-lines-per-function: [warn, {max: 80, skipBlankLines: true, skipComments: true}]\" --rule \"complexity: [warn, 15]\"",
+    "clean": "node --import tsx scripts/clean.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.5.2",
+    "@types/vscode": "1.85.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "eslint": "^10.11.0",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.71.0",
+    "yauzl": "3.4.0"
+  },
+  "overrides": {
+    "qs": "6.16.0"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.1.0": true,
+    "esbuild@0.28.2": true
+  }
+}

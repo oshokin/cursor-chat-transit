@@ -1,0 +1,12 @@
+*.vsix
+node_modules
+tmp
+dist
+out
+.tools
+.dev
+.vscode-test
+coverage
+*.vscdb
+*.vscdb-wal
+*.vscdb-shm
