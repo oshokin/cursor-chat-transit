@@ -21,9 +21,23 @@ export interface BundleManifest {
   /** Format version. */
   formatVersion: typeof EXPORT_FORMAT_VERSION;
   /** Inventory file hash. */
-  inventory: { path: string; bytes: number; sha256: string };
+  inventory: {
+    /** Relative path of the inventory file. */
+    path: string;
+    /** Byte length of that file. */
+    bytes: number;
+    /** SHA-256 of that file. */
+    sha256: string;
+  };
   /** Counts recorded by the exporter. */
-  counts: { chats: number; files: number; contentBytes: number };
+  counts: {
+    /** Chats recorded in the manifest. */
+    chats: number;
+    /** Files recorded in the manifest. */
+    files: number;
+    /** Uncompressed content bytes recorded in the manifest. */
+    contentBytes: number;
+  };
   /** Optional provenance. */
   source?: unknown;
   /** Export summary when the writer stored one. */

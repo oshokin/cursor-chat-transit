@@ -34,21 +34,14 @@ export async function verifyImport(opts: {
   workspace: WorkspaceEntry;
   /** Open connections and detected layouts for both databases. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
-  /** Cloned chats, required records, and backup paths from prepare. */
+  /** Cloned chats, required records, from prepare. */
   prepared: Awaited<ReturnType<typeof prepareImport>>;
 }): Promise<string[]> {
   const { ctx, workspace } = opts;
   const { connWs, connGl, wsInfo, glInfo } = opts.pair;
 
-  const {
-    cloned,
-    requiredComposers,
-    requiredBubbles,
-    plansDir,
-    canvasesDir,
-    glBackup,
-    wsBackup,
-  } = opts.prepared;
+  const { cloned, requiredComposers, requiredBubbles, plansDir, canvasesDir } =
+    opts.prepared;
 
   ctx.onPhase?.('verify', { chats: cloned.allComposers.length });
   const verifyConn = connOf(ctx, workspace.globalDbPath, true);
@@ -79,7 +72,6 @@ export async function verifyImport(opts: {
         'Import verification failed: not all composer bodies are present.',
       );
 
-      err.backups = { global: glBackup, workspace: wsBackup };
       err.code = 'PARTIAL';
 
       throw err;
@@ -99,14 +91,12 @@ export async function verifyImport(opts: {
         'Import verification failed: resolver did not find the imported chat(s).',
       );
 
-      err.backups = { global: glBackup, workspace: wsBackup };
       err.code = 'PARTIAL';
 
       throw err;
     }
   } catch (err) {
     if (err instanceof TransferError) {
-      err.backups = err.backups || { global: glBackup, workspace: wsBackup };
       if (!err.code) err.code = 'PARTIAL';
 
       throw err;
@@ -116,7 +106,6 @@ export async function verifyImport(opts: {
       err instanceof Error ? err.message : String(err),
     );
 
-    wrapped.backups = { global: glBackup, workspace: wsBackup };
     wrapped.code = 'PARTIAL';
 
     throw wrapped;

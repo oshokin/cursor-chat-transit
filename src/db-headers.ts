@@ -198,7 +198,9 @@ export async function resolveComposers(
   const { storageId, identity, layoutWs, layoutGl } = opts;
 
   const sources: Array<{
+    /** Headers read from this source. */
     records: ComposerHeader[];
+    /** Which table or list produced them. */
     source: HeaderMergeSource;
   }> = [];
 

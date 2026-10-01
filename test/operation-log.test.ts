@@ -29,7 +29,6 @@ test('all phase names are readable sentences with bracketed levels and chat cont
     'validate',
     'collect',
     'prepare',
-    'backup',
     'write',
     'global-commit',
     'workspace-commit',

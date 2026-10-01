@@ -116,7 +116,7 @@ test(
       '0',
     );
 
-    const { execSqlHexRows, backupDatabase } = await import('../src/sqlite');
+    const { execSqlHexRows } = await import('../src/sqlite');
     const rows: string[] = [];
 
     await execSqlHexRows({
@@ -130,15 +130,6 @@ test(
     });
 
     assert.deepEqual(rows, ['2345']);
-
-    await assert.rejects(
-      backupDatabase({
-        ...conn,
-        dest: path.join(path.dirname(conn.database), 'copy.db'),
-        busyTimeoutMs: -1,
-      }),
-      /busy timeout/,
-    );
   },
 );
 

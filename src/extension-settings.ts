@@ -69,8 +69,11 @@ function seconds(
 
 /** Snapshot once per operation; changes in Settings affect the next transfer. */
 export function transferSettings(): {
+  /** Deadline for each query or session request. */
   timeoutMs: number;
+  /** Busy-handler wait for supported lock contention. */
   busyTimeoutMs: number;
+  /** Absolute plans directory from the user setting, when set. */
   plansDir?: string;
 } {
   return {

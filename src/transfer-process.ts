@@ -41,6 +41,7 @@ export async function runTransfer<T>(
     signal?: AbortSignal;
     /** Progress from the child. */
     onPhase?: (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void;
+    /** Structured file and byte events from the child. */
     onEvent?: (event: TransferEvent) => void;
     /** Bounded note from the child. */
     onNote?: (message: string) => void;
@@ -73,15 +74,25 @@ export async function runTransfer<T>(
     const fail = (err: Error) => finish(() => reject(err));
 
     const onMessage = (message: {
+      /** IPC kind: event, phase, note, done, or error. */
       type: string;
+      /** File or byte event when `type` is `event`. */
       event?: TransferEvent;
+      /** Named transfer stage when `type` is `phase`. */
       phase?: TransferPhase;
+      /** Counts for that stage. */
       metrics?: TransferPhaseMetrics;
+      /** Bounded note when `type` is `note`. */
       note?: string;
+      /** Transfer result when `type` is `done`. */
       result?: T;
+      /** Error text when `type` is `error`. */
       message?: string;
+      /** Error name copied onto the thrown Error. */
       name?: string;
+      /** Stable error code copied onto the thrown Error. */
       code?: string;
+      /** Extra error detail copied onto the thrown Error. */
       detail?: string;
     }) => {
       if (message.type === 'event' && message.event)

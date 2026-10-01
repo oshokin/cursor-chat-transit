@@ -17,6 +17,7 @@ export const runtime: {
   busy: boolean;
   /** AbortController for the in-flight operation. */
   activeAbort?: AbortController;
+  /** Repaints elapsed time while a transfer is running. */
   progressTimer?: ReturnType<typeof setInterval>;
   /** Workspace selected as the transfer source or target. */
   sourceWorkspace?: WorkspaceEntry;
@@ -75,7 +76,7 @@ export function attachPhaseProgress(
   return (phase, metrics = {}) => {
     log.phase(phase, metrics);
     model.update(phase, metrics);
-    const message = phaseMessage(phase, metrics);
+    const message = phaseMessage(phase, metrics, kind);
 
     vscodeProgress.report({ message });
     setUi({ statusDetail: message, ...model.snapshot() });
@@ -158,7 +159,8 @@ export async function withLock<T>(
       busy: false,
       canCancel: false,
       progress: undefined,
-      timingLabel: runtime.uiState.timingLabel?.split(' · ')[0] || '',
+      timingLabel:
+        runtime.uiState.timingLabel?.split('\n')[0]?.split(' · ')[0] || '',
     });
   }
 }

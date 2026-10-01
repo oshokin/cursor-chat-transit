@@ -1,3 +1,4 @@
+import { sqliteTimeoutError } from './sqlite-timeout';
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { busyTimeoutCommand } from './sqlite';
@@ -13,6 +14,8 @@ export class SqliteSession {
   private stderr = '';
   /** Previous statement on this connection. */
   private chain: Promise<unknown> = Promise.resolve();
+  /** In-flight stdout consumer, awaited before failure escapes or close returns. */
+  private consuming: Promise<void> = Promise.resolve();
   /** Error that ended the session. */
   private failure?: Error;
   /** True after the child has exited. */
@@ -25,10 +28,14 @@ export class SqliteSession {
   private killTimer?: NodeJS.Timeout;
   /** Reply expected for the statement in flight. */
   private waiter?: {
+    /** Completes the in-flight statement with its stdout. */
     resolve: (text: string) => void;
+    /** Rejects the in-flight statement. */
     reject: (error: Error) => void;
+    /** Stdout accumulated for this statement. */
     text: string;
-    onLine?: (line: string) => void;
+    /** Optional per-line consumer instead of buffering the whole reply. */
+    onLine?: (line: string) => unknown | Promise<unknown>;
   };
   /** Stop the session when the caller aborts. */
   private readonly abort = () =>
@@ -40,9 +47,14 @@ export class SqliteSession {
 
   /** Own one sqlite3 child. Use `open`. */
   private constructor(
+    /** sqlite3 child this session owns. */
     private readonly child: ChildProcessWithoutNullStreams,
+    /** Cancellation that stops the child. */
     private readonly signal?: AbortSignal,
+    /** Wall-clock limit for one statement. */
     private readonly timeoutMs = 120000,
+    /** Maximum encoded row length, independently bounded from collected replies. */
+    private readonly maxLineBytes = 4 * 1024 * 1024,
   ) {
     this.exited = new Promise((resolve) =>
       child.once('close', () => {
@@ -75,11 +87,16 @@ export class SqliteSession {
     child.stdout.setEncoding('utf8');
 
     child.stdout.on('data', (chunk: string) => {
-      try {
-        this.onStdout(chunk);
-      } catch (error) {
-        this.stop(error instanceof Error ? error : new Error(String(error)));
-      }
+      if (this.failure) return;
+      child.stdout.pause();
+
+      this.consuming = this.onStdout(chunk)
+        .catch((error: unknown) => {
+          this.stop(error instanceof Error ? error : new Error(String(error)));
+        })
+        .finally(() => {
+          if (!this.closed && !this.failure) child.stdout.resume();
+        });
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
@@ -92,13 +109,22 @@ export class SqliteSession {
 
   /** Open without changing the database journal or locking mode. */
   static async open(opts: {
+    /** sqlite3 executable. */
     executable: string;
+    /** Database file to open. */
     database: string;
+    /** When true, open the database read-only. */
     readOnly?: boolean;
+    /** sqlite3 `-init` file. */
     initFile: string;
+    /** Cancellation for the child. */
     signal?: AbortSignal;
+    /** SQLite busy timeout in milliseconds. */
     busyTimeoutMs?: number;
+    /** Wall-clock limit for one statement. */
     timeoutMs?: number;
+    /** Maximum encoded row size for bounded export records. */
+    maxLineBytes?: number;
   }): Promise<SqliteSession> {
     opts.signal?.throwIfAborted();
 
@@ -115,7 +141,12 @@ export class SqliteSession {
       { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
     );
 
-    const session = new SqliteSession(child, opts.signal, opts.timeoutMs);
+    const session = new SqliteSession(
+      child,
+      opts.signal,
+      opts.timeoutMs,
+      opts.maxLineBytes,
+    );
 
     try {
       await session.exec(
@@ -136,8 +167,17 @@ export class SqliteSession {
   }
 
   /** Consume result rows without retaining the whole result. */
-  queryLines(sql: string, onLine: (line: string) => void): Promise<void> {
-    return this.enqueue(sql, onLine).then(() => undefined);
+  queryLines(
+    sql: string,
+    onLine: (line: string) => unknown | Promise<unknown>,
+  ): Promise<void> {
+    return this.enqueue(sql, onLine)
+      .then(() => undefined)
+      .catch(async (error: unknown) => {
+        await this.consuming;
+
+        throw error;
+      });
   }
 
   /** Wait for child exit; never return while it can still hold a database lock. */
@@ -148,6 +188,7 @@ export class SqliteSession {
     }
 
     await this.exited;
+    await this.consuming;
   }
 
   /** Fail the current query and kill the sqlite child. */
@@ -157,6 +198,8 @@ export class SqliteSession {
     this.waiter?.reject(this.failure);
     this.waiter = undefined;
     if (this.closed) return;
+    // Drain discarded stdout so child close is not held by paused pipe buffers.
+    this.child.stdout.resume();
     this.child.kill();
     this.killTimer ??= setTimeout(() => this.child.kill('SIGKILL'), 2000);
   }
@@ -164,7 +207,7 @@ export class SqliteSession {
   /** Run SQL after the previous statement on this connection. */
   private enqueue(
     sql: string,
-    onLine?: (line: string) => void,
+    onLine?: (line: string) => unknown | Promise<unknown>,
   ): Promise<string> {
     const run = this.chain.then(() => {
       if (this.failure || this.closed)
@@ -174,7 +217,7 @@ export class SqliteSession {
         this.waiter = { resolve, reject, text: '', onLine };
 
         this.timer = setTimeout(
-          () => this.stop(new Error('SQLite operation timed out.')),
+          () => this.stop(sqliteTimeoutError(this.timeoutMs)),
           this.timeoutMs,
         );
 
@@ -193,10 +236,10 @@ export class SqliteSession {
   }
 
   /** Split sqlite stdout into result lines and the end marker. */
-  private onStdout(chunk: string): void {
+  private async onStdout(chunk: string): Promise<void> {
     this.buffer += chunk;
-    if (this.buffer.length > 4 * 1024 * 1024)
-      throw new Error('SQLite result row exceeds 4 MiB.');
+    if (this.buffer.length > this.maxLineBytes)
+      throw new Error(`SQLite result row exceeds ${this.maxLineBytes} bytes.`);
 
     for (;;) {
       const nl = this.buffer.indexOf('\n');
@@ -212,7 +255,7 @@ export class SqliteSession {
 
         this.waiter = undefined;
         waiter?.resolve(waiter.text);
-      } else if (this.waiter?.onLine) this.waiter.onLine(line);
+      } else if (this.waiter?.onLine) await this.waiter.onLine(line);
       else if (this.waiter) {
         this.waiter.text += `${line}\n`;
         if (this.waiter.text.length > 4 * 1024 * 1024)

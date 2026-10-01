@@ -19,7 +19,6 @@ const result = (overrides: Partial<ImportResult>): ImportResult => ({
   alreadyPresent: 0,
   newVersions: 0,
   incomplete: 0,
-  backups: null,
   composerIds: [],
   historyOnlyIds: [],
   skippedChats: [],
@@ -146,7 +145,7 @@ test('completion notification does not have to be awaited', async () => {
 });
 
 test('import phases have visible labels before work finishes', () => {
-  assert.match(phaseMessage('backup'), /backup/i);
+  assert.match(phaseMessage('read', {}, 'export'), /chat data/i);
   assert.match(phaseMessage('verify'), /verif/i);
   assert.match(phaseMessage('validate'), /validat/i);
   assert.match(phaseMessage('collect'), /dependenc/i);
@@ -208,7 +207,6 @@ test('formatImportNotice prefers a calm already-imported result', () => {
     alreadyPresent: 5,
     newVersions: 0,
     incomplete: 0,
-    backups: null,
     composerIds: [],
     historyOnlyIds: [],
     skippedChats: [],

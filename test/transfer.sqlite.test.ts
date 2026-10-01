@@ -129,41 +129,6 @@ ${opts.globalExtra || ''}`,
 }
 
 test(
-  'dot-command quoting preserves this OS path, including backslashes',
-  { skip },
-  async (t) => {
-    const { dir, gl } = await fixture(t);
-
-    const dest =
-      process.platform === 'win32'
-        ? path.join(dir, 'backup-dir', 'new.vscdb')
-        : path.join(dir, String.raw`backup\new.vscdb`);
-
-    if (process.platform === 'win32') {
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-    }
-
-    await sql.backupDatabase({ ...gl, dest });
-    assert.ok((await fs.stat(dest)).size > 0);
-  },
-);
-
-test(
-  'backup supports an apostrophe in its destination directory',
-  { skip },
-  async (t) => {
-    const { dir, gl } = await fixture(t);
-    const destDir = path.join(dir, "O'Brien");
-
-    await fs.mkdir(destDir);
-    const dest = path.join(destDir, 'backup.vscdb');
-
-    await sql.backupDatabase({ ...gl, dest });
-    assert.ok((await fs.stat(dest)).size > 0);
-  },
-);
-
-test(
   'unsupported workspace constraint is rejected before global writes',
   { skip },
   async (t) => {

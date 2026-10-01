@@ -1,4 +1,3 @@
-import { SqliteSession } from './sqlite-session';
 import { readSessionKv } from './kv-session';
 import { inChat, transferEvent, traceIO } from './transfer-events';
 import { createHash } from 'node:crypto';
@@ -59,6 +58,8 @@ export async function exportBundle(opts: {
   selected: ComposerHeader[];
   /** Provenance stored in the manifest. */
   source: unknown;
+  /** Release source database locks before inventory hashing and ZIP compression. */
+  readComplete: () => Promise<void>;
 }): Promise<NonNullable<ExportObject['summary']>> {
   const writer = await BundleWriter.open(opts.destPath, {
     signal: opts.ctx.signal,
@@ -149,6 +150,7 @@ export async function exportBundle(opts: {
       issues,
     };
 
+    await opts.readComplete();
     opts.ctx.onPhase?.('write', { chats: exported, bubbles });
     await writer.finish(summary);
 
@@ -164,14 +166,23 @@ export async function exportBundle(opts: {
 
 /** Export one composer: body, bubbles, and the blob closure. */
 async function exportOneChat(opts: {
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext;
+  /** Workspace whose global database is being read. */
   workspace: WorkspaceEntry;
+  /** Read-only connection to the export snapshot. */
   conn: SqliteConn;
+  /** Composer header for this chat. */
   header: ComposerHeader;
+  /** Archive writer receiving this chat. */
   writer: BundleWriter;
+  /** Directory for spilled resource bytes. */
   tmp: string;
+  /** Incomplete-chat reasons collected for the summary. */
   issues: ExportChatIssue[];
+  /** Composer ids that were not fully exported. */
   incomplete: string[];
+  /** Called once per bubble so the caller can report progress. */
   onBubble: () => void;
 }): Promise<boolean> {
   const id = opts.header.composerId;
@@ -260,17 +271,29 @@ async function exportOneChat(opts: {
 
 /** Write kv blobs from the closure, then images, plans, and canvases. */
 async function writeResources(opts: {
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext;
+  /** Workspace that owns plans and canvases on disk. */
   workspace: WorkspaceEntry;
+  /** Read-only connection to the export snapshot. */
   conn: SqliteConn;
+  /** Composer header for this chat. */
   header: ComposerHeader;
+  /** Archive writer receiving resource pointers. */
   writer: BundleWriter;
+  /** Directory for spilled resource bytes. */
   tmp: string;
+  /** Incomplete-chat reasons collected for the summary. */
   issues: ExportChatIssue[];
+  /** Composer JSON used to discover blob dependencies. */
   body: string;
+  /** Image, plan, and canvas names already found on this chat. */
   refs: {
+    /** Image uuid to the basenames that referenced it. */
     images: Map<string, Set<string>>;
+    /** Plan basenames referenced by this chat. */
     plans: Set<string>;
+    /** Canvas basenames referenced by this chat. */
     canvases: Set<string>;
   };
 }): Promise<void> {
@@ -288,8 +311,9 @@ async function writeResources(opts: {
 
   const parsed = JSON.parse(opts.body) as { conversationState?: unknown };
   const written = new Set<string>();
-  const session = await SqliteSession.open({ ...opts.conn, readOnly: true });
-  let closed: Awaited<ReturnType<typeof readBlobGraph>>;
+  const session = opts.conn.session;
+
+  if (!session) throw new Error('Export requires an owned read transaction.');
   let lastProgress = 0;
 
   opts.ctx.onPhase?.('collect', {
@@ -298,8 +322,9 @@ async function writeResources(opts: {
     chatName: opts.header.name,
   });
 
-  try {
-    closed = await readBlobGraph(parsed.conversationState, async (digests) => {
+  const closed = await readBlobGraph(
+    parsed.conversationState,
+    async (digests) => {
       const batch = new Map<string, Buffer | null>();
 
       for (const digest of digests) {
@@ -341,10 +366,8 @@ async function writeResources(opts: {
       }
 
       return batch;
-    });
-  } finally {
-    await session.close();
-  }
+    },
+  );
 
   if (closed.status !== 'ok') {
     const err = new TransferError(

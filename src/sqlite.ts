@@ -70,6 +70,7 @@ function candidateExecutables(configured?: string): string[] {
 async function runAndCollect(
   opts: SqliteConn & { sql: string; readOnly?: boolean },
 ): Promise<string> {
+  if (opts.session) return opts.session.exec(opts.sql);
   const sink = collectText();
 
   await runSqlite({
@@ -113,15 +114,6 @@ export async function ensureInitFile(dir: string): Promise<string> {
   await fs.promises.writeFile(initFile, '', { flag: 'w' });
 
   return initFile;
-}
-
-/** Quote a filesystem path for sqlite3 dot-commands (C-style escapes, not SQL). */
-export function quoteDotPath(filePath: string): string {
-  if (typeof filePath !== 'string' || !filePath || /[\0\r\n]/u.test(filePath)) {
-    throw new TypeError('Invalid SQLite dot-command path');
-  }
-
-  return `"${filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /** Run a read query in list/tab mode. */
@@ -188,34 +180,6 @@ export async function sqliteVersion(
       /* ignore */
     }
   }
-}
-
-/** SQLite `.backup` (fail closed if the dest file is missing or empty). */
-export async function backupDatabase(opts: {
-  /** Absolute path of the sqlite3 executable. */
-  executable: string;
-  /** Database file to back up. */
-  database: string;
-  /** Destination backup file path. */
-  dest: string;
-  /** sqlite3 `-init` file that sets timeouts and modes. */
-  initFile: string;
-  /** Cancellation for the backup child. */
-  signal?: AbortSignal;
-  /** Wall-clock limit for the backup child. */
-  timeoutMs?: number;
-  /** SQLite busy timeout applied through the init file. */
-  busyTimeoutMs?: number;
-}): Promise<void> {
-  await runAndCollect({
-    executable: opts.executable,
-    database: opts.database,
-    initFile: opts.initFile,
-    sql: `${busyTimeoutCommand(opts.busyTimeoutMs)}\n.backup ${quoteDotPath(opts.dest)}\n`,
-    readOnly: true,
-    timeoutMs: opts.timeoutMs ?? 600000,
-    signal: opts.signal,
-  });
 }
 
 /** Decode hex ASCII bytes to binary without creating a JS string. */
@@ -337,8 +301,11 @@ export function createHexRowParser(
 /** Run a hex-encoded list query and invoke `onRow` per decoded row. */
 export async function execSqlHexRows(
   opts: SqliteConn & {
+    /** SQL that emits hex list rows. */
     sql: string;
+    /** Expected column count of each row. */
     cols: number;
+    /** Called with decoded columns for one row. */
     onRow: (fields: Buffer[]) => void | Promise<void>;
   },
 ): Promise<void> {
@@ -349,6 +316,14 @@ export async function execSqlHexRows(
     opts.sql,
     '',
   ].join('\n');
+
+  if (opts.session) {
+    await opts.session.queryLines(preamble, async (line) => {
+      if (line) await opts.onRow(parseHexRowLine(Buffer.from(line), opts.cols));
+    });
+
+    return;
+  }
 
   const output = createHexRowParser(opts.cols, opts.onRow);
 

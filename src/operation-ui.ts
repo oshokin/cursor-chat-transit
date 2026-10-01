@@ -129,6 +129,7 @@ export function formatIncompleteExportNotice(
 export function phaseMessage(
   phase: TransferPhase,
   metrics: TransferPhaseMetrics = {},
+  kind?: TransferKind,
 ): string {
   if (
     typeof metrics.processed === 'number' &&
@@ -156,7 +157,7 @@ export function phaseMessage(
     case 'pack':
       return 'Packing archive…';
     case 'read':
-      return 'Reading export file…';
+      return kind === 'export' ? 'Reading chat data…' : 'Reading export file…';
     case 'validate':
       return 'Validating export…';
     case 'collect':
@@ -165,8 +166,6 @@ export function phaseMessage(
       return 'Preparing chat records…';
     case 'selection':
       return 'Reading selected chats…';
-    case 'backup':
-      return 'Creating backups…';
     case 'write':
       return 'Writing data…';
     case 'global-commit':
@@ -198,8 +197,11 @@ export interface ImportNotice {
 
 /** Display name for a chat row, with an optional reason suffix. */
 function chatItemLabel(chat: {
+  /** Composer id used when the chat has no name. */
   composerId: string;
+  /** Display name when Cursor stored one. */
   name?: string;
+  /** Short reason appended after the name. */
   reason?: string;
 }): string {
   const raw = typeof chat.name === 'string' ? chat.name.trim() : '';

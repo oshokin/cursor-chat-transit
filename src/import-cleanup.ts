@@ -9,10 +9,15 @@ import { IMPORT_BATCH_BYTES } from './import-batches';
 
 /** Recover an unpublished partial chat; never delete modified, unknown or published rows. */
 export async function cleanUnpublishedBubbles(opts: {
+  /** Journal that recorded the expected bubble hashes. */
   journal: JournalStore;
+  /** Pending operation being recovered. */
   operationId: string;
+  /** Chat whose unpublished rows may be removed. */
   chat: PendingChatRow;
+  /** Writable connection to the destination database. */
   conn: SqliteConn;
+  /** Destination schema, used to choose the bubble table. */
   layout: Layout;
 }): Promise<void> {
   const expected = new Map<string, string>();
@@ -31,7 +36,7 @@ export async function cleanUnpublishedBubbles(opts: {
 
   const problem = () => {
     const error = new TransferError(
-      'An unfinished chat changed. Its rows were preserved; inspect the operation log and backups.',
+      'An unfinished chat changed. Its rows were preserved; inspect the operation log.',
     );
 
     error.code = 'NEEDS_ATTENTION';

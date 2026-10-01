@@ -141,7 +141,9 @@ export class NdjsonPartWriter {
 
   /** Open parts under `directory`. The next write stops when `signal` aborts. */
   constructor(
+    /** Directory that receives rotated part files. */
     private readonly directory: string,
+    /** Cancellation checked before each write. */
     private readonly signal?: AbortSignal,
   ) {}
 

@@ -105,6 +105,34 @@ async function refuseExistingLock(lockPath: string): Promise<never> {
   throw error;
 }
 
+/** Publish a finished owner record. The lock name appears only after the bytes exist. */
+async function claimLock(
+  lockPath: string,
+  payload: string,
+  token: string,
+): Promise<void> {
+  const temporary = `${lockPath}.${token}.partial`;
+
+  try {
+    await fs.promises.writeFile(temporary, payload, {
+      flag: 'wx',
+      mode: 0o600,
+    });
+
+    const handle = await fs.promises.open(temporary, 'r+');
+
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    await fs.promises.link(temporary, lockPath);
+  } finally {
+    await fs.promises.unlink(temporary).catch(() => undefined);
+  }
+}
+
 /** Exclusive transfer lock. A leftover file is never unlinked automatically. */
 export async function acquireLock(
   lockDir: string,
@@ -124,7 +152,7 @@ export async function acquireLock(
   });
 
   try {
-    await fs.promises.writeFile(lockPath, payload, { flag: 'wx', mode: 0o600 });
+    await claimLock(lockPath, payload, token);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
 
@@ -134,10 +162,7 @@ export async function acquireLock(
       if ((inner as NodeJS.ErrnoException).code !== 'ENOENT') throw inner;
 
       try {
-        await fs.promises.writeFile(lockPath, payload, {
-          flag: 'wx',
-          mode: 0o600,
-        });
+        await claimLock(lockPath, payload, token);
       } catch (retry) {
         if ((retry as NodeJS.ErrnoException).code !== 'EEXIST') throw retry;
         await refuseExistingLock(lockPath);

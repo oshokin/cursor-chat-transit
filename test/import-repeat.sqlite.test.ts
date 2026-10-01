@@ -180,7 +180,6 @@ test(
     assert.equal(await bodyCount(gl), 1);
     assert.equal(second.imported, 0);
     assert.equal(second.alreadyImported, 1);
-    assert.equal(second.backups, null);
   },
 );
 
@@ -1478,5 +1477,50 @@ test(
     );
 
     assert.equal(await bodyCount(gl), 1);
+  },
+);
+
+test(
+  'successful import and repeat use journals without database backup files',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const journalDir = path.join(workspace.storageRoot, 'no-backup-journal');
+    const phases: string[] = [];
+
+    const first = await transfer.importFromObject(
+      {
+        ...ctx,
+        onPhase: (phase) => {
+          phases.push(phase);
+        },
+      },
+      payload(),
+      workspace,
+      { journalDir },
+    );
+
+    assert.equal(first.imported, 1);
+    assert.equal(await bodyCount(gl), 1);
+    assert.equal(phases.includes('backup'), false);
+    const names = await fs.readdir(journalDir);
+
+    assert.ok(names.some((name) => name.endsWith('.sqlite')));
+
+    assert.equal(
+      names.some(
+        (name) => name.includes('.backup-') || name.endsWith('.vscdb'),
+      ),
+      false,
+    );
+
+    assert.equal(await backupCount(workspace), 0);
+
+    const second = await transfer.importFromObject(ctx, payload(), workspace, {
+      journalDir,
+    });
+
+    assert.equal(second.imported, 0);
+    assert.equal(second.alreadyImported, 1);
   },
 );

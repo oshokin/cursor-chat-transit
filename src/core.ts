@@ -8,10 +8,15 @@ import type {
 
 /** Normalize a URI-like object into identity components. */
 function uriPartsFrom(uri: {
+  /** Scheme such as `file` or `vscode-remote`. */
   scheme: string;
+  /** Host or SSH authority. */
   authority?: string;
+  /** Decoded URI path. */
   path: string;
+  /** Query string without `?`. */
   query?: string;
+  /** Fragment without `#`. */
   fragment?: string;
 }): UriParts {
   return {
@@ -104,20 +109,31 @@ export function identityFromWorkspaceJson(meta: unknown): WorkspaceIdentity {
 export function currentIdentity(
   workspaceFile?:
     | {
+        /** Scheme such as `file` or `vscode-remote`. */
         scheme: string;
+        /** Host or SSH authority. */
         authority?: string;
+        /** Decoded URI path. */
         path: string;
+        /** Query string without `?`. */
         query?: string;
+        /** Fragment without `#`. */
         fragment?: string;
       }
     | undefined,
   workspaceFolders?:
     | ReadonlyArray<{
+        /** URI of one workspace folder. */
         uri: {
+          /** Scheme such as `file` or `vscode-remote`. */
           scheme: string;
+          /** Host or SSH authority. */
           authority?: string;
+          /** Decoded URI path. */
           path: string;
+          /** Query string without `?`. */
           query?: string;
+          /** Fragment without `#`. */
           fragment?: string;
         };
       }>
@@ -138,7 +154,9 @@ export function currentIdentity(
 
 /** Inclusive/exclusive key bounds for `bubbleId:<uuid>:` rows. */
 export function bubbleRange(composerId: string): {
+  /** Inclusive lower bound for this composer's bubble keys. */
   lower: string;
+  /** Exclusive upper bound for this composer's bubble keys. */
   upper: string;
 } {
   if (

@@ -1,0 +1,32 @@
+{
+  "git": {
+    "requireCleanWorkingDir": true,
+    "requireUpstream": false,
+    "commit": false,
+    "tag": false,
+    "push": false,
+    "tagName": "v${version}",
+    "tagMatch": "v[0-9]*.[0-9]*.[0-9]*",
+    "tagExclude": "v*-*"
+  },
+  "npm": {
+    "publish": false,
+    "skipChecks": true
+  },
+  "github": {
+    "release": false
+  },
+  "gitlab": {
+    "release": false
+  },
+  "plugins": {
+    "@release-it/conventional-changelog": {
+      "preset": "conventionalcommits",
+      "infile": "CHANGELOG.md",
+      "gitRawCommitsOpts": {
+        "to": "HEAD",
+        "format": "%B%n-hash-%n%H%n-committerDate-%n%ci"
+      }
+    }
+  }
+}

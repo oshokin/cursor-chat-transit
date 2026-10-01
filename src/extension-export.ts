@@ -242,7 +242,7 @@ export async function doExport(opts: {
 
     setUi({
       status: 'running',
-      statusTitle: 'Exporting…',
+      statusTitle: 'Exporting chats…',
       statusDetail: 'Reading selected chats.',
     });
 

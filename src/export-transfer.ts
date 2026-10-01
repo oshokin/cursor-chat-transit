@@ -5,7 +5,8 @@ import { readBundleObject } from './bundle-object';
 import { selectChats } from './core';
 import * as db from './db';
 import { exportBundle } from './export-bundle';
-import { inspectPair, withGlobalSnapshot } from './transfer-context';
+import { connOf, inspectPair } from './transfer-context';
+import { openReadTransaction } from './read-transaction';
 import type {
   ComposerHeader,
   ExportObject,
@@ -20,6 +21,13 @@ export async function listWorkspaceChats(
   options: {
     /** When true, merge timestamp columns from composerHeaders into listed headers. */
     includeColumnDates?: boolean;
+    /** Read views owned by the export, when resolving headers for an archive. */
+    connections?: {
+      /** Workspace header view, released after catalogue resolution. */
+      connWs: import('./types').SqliteConn;
+      /** Global view shared by headers, bodies, messages and dependencies. */
+      connGl: import('./types').SqliteConn;
+    };
   } = {},
 ): Promise<{
   /** Merged composer headers visible in this workspace. */
@@ -27,7 +35,15 @@ export async function listWorkspaceChats(
   /** Provenance recorded for a later export. */
   source: NonNullable<ExportObject['source']>;
 }> {
-  const { connWs, connGl, wsInfo, glInfo } = await inspectPair(ctx, workspace);
+  const pair = options.connections;
+
+  const { connWs, connGl, wsInfo, glInfo } = pair
+    ? {
+        ...pair,
+        wsInfo: await db.inspectDatabase(pair.connWs),
+        glInfo: await db.inspectDatabase(pair.connGl),
+      }
+    : await inspectPair(ctx, workspace);
 
   if (glInfo.layout.writeBlocked && !glInfo.layout.cursorDiskKV) {
     throw new Error(
@@ -95,19 +111,40 @@ export async function exportToFile(
     return { skipped: true, reason: 'empty-selection' };
   }
 
-  const listed = await listWorkspaceChats(ctx, workspace);
+  const global = await openReadTransaction(
+    connOf(ctx, workspace.globalDbPath, true),
+  );
 
-  ctx.onPhase?.('selection', { chats: listed.allComposers.length });
-  const selected = selectChats(listed.allComposers, selectedIds);
+  let local: Awaited<ReturnType<typeof openReadTransaction>> | undefined;
 
-  return withGlobalSnapshot(ctx, workspace, (connGl) =>
-    exportBundle({
+  try {
+    local = await openReadTransaction(
+      connOf(ctx, workspace.workspaceDbPath, true),
+    );
+
+    const listed = await listWorkspaceChats(ctx, workspace, {
+      connections: { connGl: global.conn, connWs: local.conn },
+    });
+
+    await local.close();
+    const selected = selectChats(listed.allComposers, selectedIds);
+
+    ctx.onPhase?.('selection', { chats: selected.length });
+
+    return await exportBundle({
       ctx,
       workspace,
-      conn: connGl,
+      conn: global.conn,
       destPath,
       selected,
       source: listed.source,
-    }),
-  );
+      readComplete: global.close,
+    });
+  } finally {
+    try {
+      await local?.close();
+    } finally {
+      await global.close();
+    }
+  }
 }

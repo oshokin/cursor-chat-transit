@@ -2,16 +2,20 @@ name: ci
 on:
   push:
     branches: [master]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Check and publish the version already recorded on this commit of the default branch
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && format('ci-{0}-{1}', github.workflow, github.ref) || format('ci-{0}-{1}', github.workflow, github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -94,10 +98,35 @@ jobs:
         env:
           VSCODE_TEST_VERSION: ${{ matrix.vscode }}
 
+  version-decision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - id: decide
+        env:
+          BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release && 'true' || 'false' }}
+        run: node --import tsx scripts/release-decision.ts
+
   package:
     needs: [check, sqlite-integration, host-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      artifact_name: ${{ steps.artifact.outputs.name }}
+      vsix: ${{ steps.artifact.outputs.vsix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -108,22 +137,21 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ensure-ci-sqlite
-      - name: Validate release version
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) process.exit(1)'
       - run: npm run package
       - run: npm run check-package
-      - name: Write checksum
-        working-directory: dist
-        run: sha256sum cursor-chat-transit.vsix > SHA256SUMS
+      - id: artifact
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          name="cursor-chat-transit-${ver}.vsix"
+          cp "dist/cursor-chat-transit.vsix" "dist/${name}"
+          (cd dist && sha256sum "$name" > SHA256SUMS)
+          echo "name=cursor-chat-transit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "vsix=dist/${name}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: cursor-chat-transit-${{ github.sha }}
+          name: ${{ steps.artifact.outputs.name }}
           path: |
-            dist/cursor-chat-transit.vsix
+            ${{ steps.artifact.outputs.vsix }}
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
@@ -131,7 +159,7 @@ jobs:
   ci-result:
     name: CI required
     if: ${{ always() }}
-    needs: [check, sqlite-integration, host-smoke, package]
+    needs: [check, sqlite-integration, host-smoke, package, version-decision]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -141,26 +169,39 @@ jobs:
           CORE: ${{ needs.sqlite-integration.result }}
           HOST: ${{ needs.host-smoke.result }}
           PACKAGE: ${{ needs.package.result }}
+          VERSION: ${{ needs.version-decision.result }}
         run: |
-          for result in "$CHECK" "$CORE" "$HOST" "$PACKAGE"; do
+          for result in "$CHECK" "$CORE" "$HOST" "$PACKAGE" "$VERSION"; do
             test "$result" = success || exit 1
           done
 
   release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: [package, ci-result]
+    needs: [package, ci-result, version-decision]
+    if: needs.version-decision.outputs.publish == 'true' && needs.package.result == 'success' && needs.ci-result.result == 'success' && needs.version-decision.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
+    concurrency:
+      group: ci-publish-${{ github.workflow }}
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ github.ref_name }}
-      ARTIFACT_NAME: cursor-chat-transit-${{ github.sha }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
       - name: Download validated package from this run
+        env:
+          ARTIFACT_NAME: ${{ needs.package.outputs.artifact_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          test -n "$ARTIFACT_NAME"
           gh run download "$GITHUB_RUN_ID" \
             --repo "$GITHUB_REPOSITORY" \
             --name "$ARTIFACT_NAME" \
@@ -168,10 +209,8 @@ jobs:
       - name: Verify package checksum
         working-directory: release-artifact
         run: sha256sum --check SHA256SUMS
-      - name: Create draft release
-        run: |
-          gh release create "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --verify-tag --draft --generate-notes \
-            release-artifact/cursor-chat-transit.vsix \
-            release-artifact/SHA256SUMS
+      - name: Publish the recorded version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_DIR: release-artifact
+        run: node --import tsx scripts/publish-release.ts

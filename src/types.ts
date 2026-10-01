@@ -98,6 +98,8 @@ export interface WorkspaceEntry {
 export interface SqliteConn {
   /** Absolute path of the sqlite3 executable. */
   executable: string;
+  /** Owned persistent read session; never serialized to a worker. */
+  session?: import('./sqlite-session').SqliteSession;
   /** Database file this connection will open. */
   database: string;
   /** sqlite3 `-init` file that sets timeouts and modes. */
@@ -122,7 +124,6 @@ export type TransferPhase =
   | 'collect'
   | 'prepare'
   | 'write'
-  | 'backup'
   | 'verify'
   | 'global-commit'
   | 'workspace-commit';
@@ -339,7 +340,7 @@ export interface ExportSourceWorkspaceHint {
   };
 }
 
-/** Absolute SQLite backup paths written immediately before an import mutates storage. */
+/** Legacy backup paths retained only when reading an existing import journal. */
 export interface DatabaseBackupPair {
   /** Backup of the global `state.vscdb`. */
   global: string;
@@ -421,8 +422,6 @@ export interface ImportResult {
   newVersions: number;
   /** Incomplete outcomes in this run. */
   incomplete: number;
-  /** Backup paths when writes happened; null on a no-op. */
-  backups: DatabaseBackupPair | null;
   /** Destination composer ids created in this run. */
   composerIds: string[];
   /** Destination ids imported as history-only. */
@@ -439,14 +438,12 @@ export interface ImportResult {
   restoredChats?: ImportChatRef[];
 }
 
-/** Transfer failure with optional incomplete ids or backup paths. */
+/** Transfer failure with optional incomplete ids. */
 export class TransferError extends Error {
   /** Machine-readable code such as `LOCKED`, `LOCK_RECOVERY_REQUIRED`, or `PARTIAL`. */
   code?: string;
   /** Composer ids that could not be completed. */
   missing?: string[];
-  /** Backup paths when the failure happened after a backup. */
-  backups?: DatabaseBackupPair;
   /** Bounded diagnostic facts for the operation log; never payloads or SQL. */
   detail?: string;
 }

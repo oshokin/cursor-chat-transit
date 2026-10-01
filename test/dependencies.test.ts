@@ -103,13 +103,28 @@ test('resource envelope rejects bad checksum and non-canonical base64', () => {
   );
 });
 
-test('unknown composer version with state is unsupported, not complete', () => {
-  const found = blobKeysFromComposerBody(
-    JSON.stringify({ _v: 99, conversationState: '~' }),
-  );
+test('composer versions 13 through 18 share the walked state; others do not', () => {
+  const turn = Buffer.alloc(32, 7);
 
-  assert.equal(found.status, 'unsupported');
-  assert.equal(found.keys.length, 0);
+  const state = encode(Buffer.concat([Buffer.from([66, 32]), turn]));
+
+  for (const version of [13, 14, 15, 16, 17, 18]) {
+    const found = blobKeysFromComposerBody(
+      JSON.stringify({ _v: version, conversationState: state }),
+    );
+
+    assert.equal(found.status, 'ok');
+    assert.deepEqual(found.keys, [`agentKv:blob:${turn.toString('hex')}`]);
+  }
+
+  for (const version of [11, 12, 19, 99]) {
+    const found = blobKeysFromComposerBody(
+      JSON.stringify({ _v: version, conversationState: '~' }),
+    );
+
+    assert.equal(found.status, 'unsupported');
+    assert.equal(found.keys.length, 0);
+  }
 });
 
 test('_v 18 without conversationState has no blob dependencies', () => {

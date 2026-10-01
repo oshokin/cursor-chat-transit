@@ -321,6 +321,7 @@ function createGraph(seeds: Node[]): BlobGraph {
   for (const node of seeds) push(node);
 
   return {
+    /** `unsupported` after a blob payload cannot be parsed. */
     get status() {
       return status;
     },
@@ -333,6 +334,7 @@ function createGraph(seeds: Node[]): BlobGraph {
             ),
           ]
         : [],
+    /** Parse the supplied frontier and enqueue newly discovered digests. */
     provide(batch) {
       const end = queue.length;
 
@@ -397,8 +399,11 @@ export async function readBlobGraph(
   state: unknown,
   loadMany: (digests: string[]) => Promise<ReadonlyMap<string, Buffer | null>>,
 ): Promise<{
+  /** `unsupported` when conversation state cannot be decoded. */
   status: 'ok' | 'unsupported';
+  /** Blob keys that were loaded. */
   keys: string[];
+  /** Required blob keys that were absent. */
   missing: string[];
 }> {
   const graph = openBlobGraph(state);

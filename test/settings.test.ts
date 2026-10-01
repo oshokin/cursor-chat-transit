@@ -8,8 +8,11 @@ import fs from 'node:fs';
 const values = new Map<
   string,
   {
+    /** User-level value, the only one Transit reads. */
     globalValue?: unknown;
+    /** Workspace value. Transit must ignore it. */
     workspaceValue?: unknown;
+    /** Workspace-folder value. Transit must ignore it. */
     workspaceFolderValue?: unknown;
   }
 >();
@@ -26,6 +29,7 @@ const loader = Module as unknown as {
 /** Original Node module loader. */
 const original = loader._load;
 
+/** Return the vscode stub and delegate every other module to Node. */
 loader._load = function (id, parent, isMain) {
   if (id !== 'vscode') return original.call(this, id, parent, isMain);
 
@@ -155,5 +159,23 @@ test('all contributed settings use Transit prefix and retain appropriate scopes'
   assert.equal(
     properties['cursorChatTransit.sqlite.busyTimeoutSeconds'].scope,
     'machine',
+  );
+});
+
+test('removed backup timeout is neither exposed nor consumed', () => {
+  values.clear();
+  values.set('sqlite.backupTimeoutSeconds', { globalValue: 'obsolete' });
+  assert.equal(settings.transferSettings().timeoutMs, 600000);
+  assert.equal('backupTimeoutMs' in settings.transferSettings(), false);
+
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'),
+  );
+
+  assert.equal(
+    pkg.contributes.configuration.properties[
+      'cursorChatTransit.sqlite.backupTimeoutSeconds'
+    ],
+    undefined,
   );
 });

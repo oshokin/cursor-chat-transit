@@ -162,9 +162,13 @@ export class ExportFileWriter {
 
   /** Bind the destination, sibling temp file, and open handle. */
   private constructor(
+    /** Final path of the export file. */
     private readonly destPath: string,
+    /** Sibling temporary file written until finalize. */
     private readonly tmpPath: string,
+    /** Open handle for `tmpPath`. */
     private readonly file: FileHandle,
+    /** Cancellation for further writes. */
     private readonly signal?: AbortSignal,
   ) {}
 

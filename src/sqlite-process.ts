@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { pipeline } from 'node:stream/promises';
 import { Readable, type Writable } from 'node:stream';
+import { sqliteTimeoutError } from './sqlite-timeout';
 import { SqliteError } from './types';
 
 /** sqlite3 child process: executable, database, streams, and cancellation. */
@@ -91,7 +92,7 @@ export async function runSqlite({
   if (signal?.aborted) abort();
 
   const timer = setTimeout(
-    () => stop(new Error('SQLite operation timed out')),
+    () => stop(sqliteTimeoutError(timeoutMs, database)),
     timeoutMs,
   );
 

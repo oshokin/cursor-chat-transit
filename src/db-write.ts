@@ -1,58 +1,5 @@
-import { traceIO } from './transfer-events';
-import fs from 'node:fs';
-import path from 'node:path';
 import { finiteInt, sqlText } from './core';
-import { backupDatabase } from './sqlite';
 import type { ComposerHeader } from './types';
-
-/** `.backup` into destDir and refuse to continue if the file was not created. */
-export async function createVerifiedBackup(opts: {
-  /** Absolute path of the sqlite3 executable. */
-  executable: string;
-  /** Database file to back up. */
-  database: string;
-  /** Directory that will receive the timestamped backup file. */
-  destDir: string;
-  /** sqlite3 `-init` file that sets timeouts and modes. */
-  initFile: string;
-  /** Cancellation for the backup child. */
-  signal?: AbortSignal;
-  /** Wall-clock limit for the backup child. */
-  timeoutMs?: number;
-  /** SQLite busy timeout applied through the init file. */
-  busyTimeoutMs?: number;
-}): Promise<string> {
-  const { executable, database, destDir, initFile, signal } = opts;
-
-  await fs.promises.mkdir(destDir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-  const dest = path.join(
-    destDir,
-    `${path.basename(database, '.vscdb')}.backup-${stamp}.vscdb`,
-  );
-
-  await traceIO(
-    'Back up database',
-    { source: database, destination: dest },
-    () =>
-      backupDatabase({
-        executable,
-        database,
-        dest,
-        initFile,
-        signal,
-        timeoutMs: opts.timeoutMs,
-        busyTimeoutMs: opts.busyTimeoutMs,
-      }),
-  );
-
-  if (!fs.existsSync(dest) || fs.statSync(dest).size === 0) {
-    throw new Error(`Backup was not created: ${dest}`);
-  }
-
-  return dest;
-}
 
 /** INSERT missing cursorDiskKV rows (caller wraps BEGIN/COMMIT). */
 export function kvInsertSql(

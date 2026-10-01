@@ -171,7 +171,7 @@ export async function commitImport(opts: {
   workspace: WorkspaceEntry;
   /** Open connections and detected layouts for both databases. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
-  /** Cloned chats, resources, backups, and pending journal row. */
+  /** Cloned chats, resources and pending journal row. */
   prepared: Awaited<ReturnType<typeof prepareImport>>;
   /** Persist journal phase after the global transaction succeeds. */
   onAfterGlobalCommit?: () => Promise<void>;
@@ -181,8 +181,7 @@ export async function commitImport(opts: {
   const { ctx, workspace } = opts;
   const { connWs, connGl, wsInfo, glInfo } = opts.pair;
 
-  const { cloned, plansDir, canvasesDir, plan, glBackup, wsBackup } =
-    opts.prepared;
+  const { cloned, plansDir, canvasesDir, plan } = opts.prepared;
 
   ctx.onPhase?.('write', {
     resources: plan.toWrite.length,
@@ -309,7 +308,6 @@ export async function commitImport(opts: {
       );
 
       wrapped.code = 'PARTIAL';
-      wrapped.backups = { global: glBackup, workspace: wsBackup };
 
       throw wrapped;
     }

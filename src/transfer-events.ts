@@ -23,6 +23,8 @@ export interface TransferEvent {
   bytes?: number;
   /** Duration of this step. */
   elapsedMs?: number;
+  /** Wall-clock deadline for this step. */
+  timeoutMs?: number;
   /** Stable code when `status` is `failed`. */
   errorCode?: string;
 }

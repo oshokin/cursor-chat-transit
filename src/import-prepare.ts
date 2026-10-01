@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   attachmentDirectory,
   attachmentFilename,
@@ -12,7 +12,6 @@ import {
   rewriteChatCanvasUris,
 } from './canvases';
 import { cloneExportObjectForCopy } from './chat-copy';
-import * as db from './db';
 import { missingDependencyMessage, planImportResources } from './dependencies';
 import { pendingChatsFromClone } from './import-reconcile';
 import { selectImportChats } from './import-selection';
@@ -34,11 +33,11 @@ import type {
 } from './types';
 import { TransferError } from './types';
 
-/** Clone selected chats, validate resources and back up both target databases. */
+/** Clone selected chats and validate resources before writing. */
 export async function prepareImport(opts: {
   /** Transfer context, including cancellation and phase reporting. */
   ctx: TransferContext;
-  /** Destination workspace whose databases will be backed up and written. */
+  /** Destination workspace whose databases will be written. */
   workspace: WorkspaceEntry;
   /** Validated export object being imported. */
   exportObj: ExportObject;
@@ -133,33 +132,6 @@ export async function prepareImport(opts: {
     throw err;
   }
 
-  const backupDir = path.join(
-    path.dirname(workspace.globalDbPath),
-    'cursor-chat-transit-backups',
-  );
-
-  ctx.onPhase?.('backup');
-
-  const glBackup = await db.createVerifiedBackup({
-    executable: ctx.executable,
-    database: workspace.globalDbPath,
-    destDir: backupDir,
-    initFile: ctx.initFile,
-    signal: ctx.signal,
-    timeoutMs: ctx.timeoutMs,
-    busyTimeoutMs: ctx.busyTimeoutMs,
-  });
-
-  const wsBackup = await db.createVerifiedBackup({
-    executable: ctx.executable,
-    database: workspace.workspaceDbPath,
-    destDir: backupDir,
-    initFile: ctx.initFile,
-    signal: ctx.signal,
-    timeoutMs: ctx.timeoutMs,
-    busyTimeoutMs: ctx.busyTimeoutMs,
-  });
-
   const destByFilename = new Map<string, string>();
 
   const suppliedPlans = new Set(
@@ -234,7 +206,6 @@ export async function prepareImport(opts: {
       snapshotBySource,
       quality,
     }),
-    backups: { global: glBackup, workspace: wsBackup },
   };
 
   return {
@@ -245,8 +216,6 @@ export async function prepareImport(opts: {
     plansDir,
     canvasesDir,
     plan,
-    glBackup,
-    wsBackup,
     pending,
   };
 }

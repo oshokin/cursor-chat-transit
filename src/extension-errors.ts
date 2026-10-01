@@ -23,8 +23,7 @@ export async function recoverStaleTransfer(log: TransitLog): Promise<void> {
     canRecoverLock: false,
     status: 'idle',
     statusTitle: 'Transfer unlocked',
-    statusDetail:
-      'Retry Import or Export. Journals and backups were preserved.',
+    statusDetail: 'Retry Import or Export. Import journals were preserved.',
   });
 }
 
@@ -72,11 +71,7 @@ export function userFacingError(err: unknown): string {
     return 'One value in this export is larger than the runtime can hold.';
   }
 
-  if (
-    code === 'UNSUPPORTED_STATE' ||
-    code === 'UNSUPPORTED_BODY' ||
-    code === 'INVALID_RESOURCE'
-  ) {
+  if (code === 'UNSUPPORTED_BODY' || code === 'INVALID_RESOURCE') {
     return 'This file is not a supported Cursor chat export.';
   }
 

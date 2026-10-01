@@ -136,17 +136,28 @@ Review the operation result and log. Turn recovery off again when you no longer 
 
 ## Settings
 
-| Setting                                            | Default | When to change it                                                                                                       |
-| -------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `cursorChatTransit.userDataDir`                    | Empty   | Point to a specific **local Cursor user-data directory** instead of automatic discovery                                 |
-| `cursorChatTransit.sqlitePath`                     | Empty   | Use a local SQLite executable that is not on `PATH`                                                                     |
-| `cursorChatTransit.import.allowPartial`            | `false` | Attempt to recover readable history from an incomplete export                                                           |
-| `cursorChatTransit.plansDirectory`                 | Empty   | Read and restore local plan files in a non-default directory; empty uses `~/.cursor/plans`                              |
-| `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`   | Increase the deadline for each SQLite process on unusually large databases or slow disks; allowed range 30–3600 seconds |
-| `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`     | Wait longer for brief database contention; allowed range 0–30 seconds, with 0 meaning no wait                           |
-| `cursorChatTransit.logLevel`                       | `info`  | Show less in the operation log: `warn` or `error`. Lines are marked `[INFO]`, `[WARN]`, or `[ERROR]`                    |
+| Setting                                            | Default | When to change it                                                                                    |
+| -------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `cursorChatTransit.userDataDir`                    | Empty   | Point to a specific **local Cursor user-data directory** instead of automatic discovery              |
+| `cursorChatTransit.sqlitePath`                     | Empty   | Use a local SQLite executable that is not on `PATH`                                                  |
+| `cursorChatTransit.import.allowPartial`            | `false` | Attempt to recover readable history from an incomplete export                                        |
+| `cursorChatTransit.plansDirectory`                 | Empty   | Read and restore local plan files in a non-default directory; empty uses `~/.cursor/plans`           |
+| `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`   | Deadline for a query/process or one session request; 30–3600 seconds.                                |
+| `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`     | Wait longer for brief database contention; allowed range 0–30 seconds, with 0 meaning no wait        |
+| `cursorChatTransit.logLevel`                       | `info`  | Show less in the operation log: `warn` or `error`. Lines are marked `[INFO]`, `[WARN]`, or `[ERROR]` |
 
 Path and SQLite timeout settings are machine-scoped. Paths must be absolute; shell variables and `~` are not expanded. The plans setting changes where this extension looks, not where Cursor saves new plans. Recovery and the operation log level are user/application settings. Workspace settings cannot silently enable recovery, hide log lines, or redirect the extension to another profile.
+
+To adjust a slow query deadline or lock wait, open **User Settings** and search `@ext:oshokin.cursor-chat-transit`, or set:
+
+```json
+{
+  "cursorChatTransit.sqlite.operationTimeoutSeconds": 600,
+  "cursorChatTransit.sqlite.busyTimeoutSeconds": 5
+}
+```
+
+Settings are captured at the start of the transfer; cancel and retry to apply changes. Query deadlines and lock waits are independent. Export reads selected chat records through one read-only transaction on the global database, without copying the full database. It closes the transaction before inventory hashing and ZIP compression. In WAL mode writers can continue, although a reader can delay checkpoint progress while it is active. The extension does not force a checkpoint or change Cursor's journal mode. Non-WAL databases retain SQLite's normal reader/writer contention.
 
 For `userDataDir`, select the directory containing `User`, not the project directory or an individual `state.vscdb` file. Typical locations are:
 
@@ -176,7 +187,7 @@ Open the Command Palette and search for **Cursor Chat Transit**:
 
 Each line uses local time with milliseconds and an explicit UTC offset, for example `[2026-10-01 13:40:48.802+03:00] [INFO] Verify imported chat data`. Action messages use sentence case; severity is bracketed. The labelled `operation=…` field correlates one transfer. File actions include full source/destination paths, the chat name and ID when known, exact byte counts with binary units, duration and error code. Message bodies and SQL are not logged. Review private paths and chat titles before sharing logs.
 
-The sidebar shows the current stage, chat/file, elapsed time and measured progress. Remaining time estimates apply to the current measurable file or stage; unknown work stays indeterminate. ZIP extraction measures the whole archive rather than resetting its estimate for each file. Verification and resource preparation report measured counts. Backups explain that SQLite does not report their duration; dependency discovery explains that its total is not known yet. A counter unchanged for ten seconds shows the time since measured progress, without diagnosing a database lock. Estimates describe the current step, not the full remaining transfer.
+The sidebar shows the current stage, the current chat or file, and elapsed time. A remaining-time estimate appears only while the current stage has a measured amount of work; otherwise that line is omitted. ZIP extraction measures the whole archive rather than resetting its estimate for each file. Verification and resource preparation report measured counts. An export snapshot is labeled **Creating database snapshot** and shows the temporary file size. The full path, exact byte count, deadline, and that copy's own duration stay in the operation log, with a heartbeat every ten seconds. The CLI does not expose page progress: file size is not a percentage, an estimate, or proof that the snapshot is complete. A counter unchanged for ten seconds shows the time since measured progress, without diagnosing a database lock. Estimates describe the current step, not the full remaining transfer.
 
 | Problem                                      | What to do                                                                                      |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -186,7 +197,7 @@ The sidebar shows the current stage, chat/file, elapsed time and measured progre
 | Cursor cannot find an old project file       | Open or restore the project at the destination; chat export does not copy the project tree      |
 | An imported chat does not appear             | Use **Quit Cursor** after a successful import, reopen Cursor, then check the selected workspace |
 | Existing resource data differs               | Keep the existing file or data; inspect the conflict instead of overwriting it                  |
-| The previous import needs checking           | Keep the export, log, and backups; do not delete the journal merely to bypass the check         |
+| The previous import needs checking           | Keep the export and log; do not delete the journal merely to bypass the check                   |
 | Another operation is running                 | Let it finish or cancel it before starting another import/export                                |
 | A previous transfer needs attention          | Use **Clear stale lock** when offered, then retry; a running or changed owner is never removed  |
 
@@ -208,11 +219,11 @@ For portable installs, custom `--user-data-dir` profiles or another Cursor chann
 
 SQLite must be executable on the client OS and architecture. Local filesystems with normal SQLite locking and hard-link support are the intended storage target; unusual network/removable filesystems may reject the safe no-overwrite resource write. Filesystem permissions and antivirus software can also prevent a write. The extension reports failures rather than bypassing checks.
 
-The CI definition runs core tests on Linux, macOS and Windows. A configured matrix is not evidence that every Cursor version has passed a native smoke test; release notes should record the actual tested Cursor builds and systems. A `v*` tag builds one verified VSIX and opens a draft GitHub Release; Marketplace publishing remains a separate maintainer action.
+The CI definition runs core tests on Linux, macOS and Windows. A configured matrix is not evidence that every Cursor version has passed a native smoke test; release notes should record the actual tested Cursor builds and systems. A version increase on the default branch, after those checks pass, publishes one VSIX and `SHA256SUMS` as a GitHub Release. Marketplace publishing remains a separate maintainer action.
 
 ## Data safety and compatibility
 
-- Imports create SQLite backups of both target databases before writing new chat data. Backups remain in `cursor-chat-transit-backups` beside the global database until you remove them.
+- Import does not create full database backups. It validates the archive and existing records, writes bounded transactions, and retains its journal for repeat-import reconciliation after interruption. This is not a full rollback of the Cursor profile. Existing backup files from older builds are not deleted.
 - Existing resource files are reused only when their contents match. Conflicting files are not overwritten.
 - Concurrent metadata changes are checked before a write is committed. An interrupted write is reported as incomplete rather than silently accepted.
 - Cursor's global and workspace databases are separate. Their updates cannot be treated as one crash-atomic transaction.
@@ -220,7 +231,7 @@ The CI definition runs core tests on Linux, macOS and Windows. A configured matr
 
 Continuing an imported conversation depends on the Cursor version, conversation format, and availability of required data. Successful transfers have been manually checked by the maintainer, but that is not a compatibility guarantee for every Cursor release or every historical export.
 
-Backups are a recovery aid, not an automatic rollback feature. Do not replace a live Cursor database while Cursor is running.
+The import journal supports retrying interrupted transfers; it is not a copy of the Cursor profile. Existing backup files from older builds remain untouched.
 
 ## Development
 
@@ -256,6 +267,8 @@ Useful commands:
 | `npm run lint:complexity` | Review long functions and branch-heavy code   |
 | `npm run package`         | Build `dist/cursor-chat-transit.vsix`         |
 | `npm run check-package`   | Inspect the packaged file inventory           |
+| `npm run release:preview` | Show the next version without writing files   |
+| `npm run release:prepare` | Update the version, lockfile, and changelog   |
 
 See the [development guide](docs/development.md) for build, debug, CI, and release details. The [architecture document](docs/architecture.md) describes module responsibilities, import behavior, and the known Cursor storage contract.
 

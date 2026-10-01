@@ -16,7 +16,9 @@ import { workspacePresentation } from './workspace-presentation';
 
 /** Resolve sqlite3 and an empty `-init` file in globalStorage. */
 export async function prepareSqlite(context: vscode.ExtensionContext): Promise<{
+  /** sqlite3 executable. */
   executable: string;
+  /** sqlite3 `-init` file in globalStorage. */
   initFile: string;
 }> {
   const { sqlitePath } = config();
@@ -38,8 +40,11 @@ export async function prepareSqlite(context: vscode.ExtensionContext): Promise<{
 
 /** List local storage entries without requiring sqlite3. */
 export function listHostEntries(): {
+  /** Cursor user-data directory that was searched. */
   userDir: string;
+  /** Discovered workspace storage pairs. */
   entries: WorkspaceEntry[];
+  /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
 } {
   const userDir = paths.preferStorageRoot(storageOptions());
@@ -56,9 +61,13 @@ export function listHostEntries(): {
 
 /** Load sqlite, storage root, workspace entries, and current identity. */
 export async function hostState(context: vscode.ExtensionContext): Promise<{
+  /** sqlite3 executable and init file. */
   sqlite: { executable: string; initFile: string };
+  /** Cursor user-data directory that was searched. */
   userDir: string;
+  /** Discovered workspace storage pairs. */
   entries: WorkspaceEntry[];
+  /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
 }> {
   const sqlite = await prepareSqlite(context);

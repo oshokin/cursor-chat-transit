@@ -287,7 +287,9 @@ footer {
   font-variant-numeric: tabular-nums;
   font-size: 11px;
   margin-top: 8px;
+  white-space: pre-line;
 }
+#status-detail:empty,
 .stage-label:empty,
 .current-item:empty,
 .timing-label:empty {

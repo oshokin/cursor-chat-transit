@@ -158,8 +158,11 @@ export async function resolveAttachmentPath(
   }
 
   const matches: Array<{
+    /** Absolute path of one cache file. */
     filePath: string;
+    /** Lowercase image extension. */
     extension: string;
+    /** How closely the basename matches the uuid. Lower is closer. */
     rank: number;
   }> = [];
 
@@ -328,9 +331,13 @@ export async function collectAttachmentVariants(
   }
 
   const files: Array<{
+    /** Cache basename. */
     name: string;
+    /** Absolute path of that cache file. */
     filePath: string;
+    /** Lowercase image extension. */
     extension: string;
+    /** How closely the basename matches the uuid. Lower is closer. */
     rank: number;
   }> = [];
 

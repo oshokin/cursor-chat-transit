@@ -607,7 +607,9 @@ function assessBody(
   raw: string | null,
   bubbleIds: ReadonlySet<string>,
 ): {
+  /** Absent, a JSON object, or damaged. */
   shape: 'absent' | 'valid' | 'invalid';
+  /** Whether every referenced bubble id is present. */
   references: 'satisfied' | 'missing';
 } {
   if (!raw) return { shape: 'absent', references: 'satisfied' };

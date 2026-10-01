@@ -3,7 +3,14 @@ import { openBlobGraph } from './blob-graph';
 import { resourceError as fail } from './resource-bytes';
 import type { BubbleRecord, DependencyAssessment } from './types';
 
-/** Composer `_v` this adapter reads for conversationState blobs. */
+/**
+ * Composer `_v` values whose `conversationState` is the walked `~` protobuf.
+ * 13 through 18 were compared on a live Cursor database: same encoding and
+ * the same field numbers. 10 has no state. 11 uses a different encoding.
+ */
+export const MIN_WALKED_COMPOSER_VERSION = 13;
+
+/** Newest composer `_v` checked against that walker. */
 export const SUPPORTED_COMPOSER_VERSION = 18;
 
 /** `agentKv:blob:` plus a 64-character lowercase hex digest. */
@@ -19,10 +26,12 @@ export function isBlobKey(key: string): boolean {
  * Turns, todos, summaries, plans, and file-state ids are included.
  * Nested ids inside those blobs are not: callers that have the bytes use
  * `readBlobGraph` / `resolveBlobGraph`.
- * Unknown `_v` / wire encodings return unsupported instead of an empty list.
+ * `_v` outside 13–18, and wire encodings this walker cannot read, return unsupported instead of an empty list.
  */
 export function blobKeysFromComposerBody(bodyText: string): {
+  /** `unsupported` when the composer body is not readable `_v` 18 state. */
   status: 'ok' | 'unsupported';
+  /** State-level blob keys. Empty when status is unsupported. */
   keys: string[];
 } {
   let body: unknown;
@@ -43,7 +52,13 @@ export function blobKeysFromComposerBody(bodyText: string): {
 
   if (state === undefined || state === null) return { status: 'ok', keys: [] };
 
-  if (version !== undefined && version !== SUPPORTED_COMPOSER_VERSION) {
+  if (
+    version !== undefined &&
+    (typeof version !== 'number' ||
+      !Number.isInteger(version) ||
+      version < MIN_WALKED_COMPOSER_VERSION ||
+      version > SUPPORTED_COMPOSER_VERSION)
+  ) {
     return { status: 'unsupported', keys: [] };
   }
 
@@ -104,7 +119,9 @@ export function imageUuidsFromBubbles(
 
 /** Union required blob keys from composer bodies; fail closed on unknown state. */
 export function requiredBlobKeys(composers: Record<string, string>): {
+  /** `unsupported` when any composer body cannot be read. */
   status: 'ok' | 'unsupported';
+  /** Union of state-level blob keys. Empty when status is unsupported. */
   keys: string[];
 } {
   const keys: string[] = [];

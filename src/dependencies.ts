@@ -10,6 +10,7 @@ export {
 } from './attachments';
 export { readBlobGraph, resolveBlobGraph } from './blob-graph';
 export {
+  MIN_WALKED_COMPOSER_VERSION,
   SUPPORTED_COMPOSER_VERSION,
   blobKeysFromComposerBody,
   imageUuidsFromBubbles,

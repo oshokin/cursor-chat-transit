@@ -73,7 +73,7 @@
           "minimum": 30,
           "maximum": 3600,
           "scope": "machine",
-          "description": "Maximum time for each SQLite process during import or export, including backups. This is not a timeout for the entire transfer. Increase for unusually large databases or slow disks."
+          "description": "Maximum time for a SQLite query/process or one request on a persistent connection, in seconds. This is not a deadline for the entire transfer. Changes apply to the next transfer."
         },
         "cursorChatTransit.sqlite.busyTimeoutSeconds": {
           "type": "integer",
@@ -81,7 +81,7 @@
           "minimum": 0,
           "maximum": 30,
           "scope": "machine",
-          "description": "How long SQLite waits for a database lock before failing. Applies to reads, writes and backups. Increase only for brief database contention."
+          "description": "SQLite busy-handler wait for supported lock contention, in seconds. This is not an operation deadline; some locks may still fail immediately. Changes apply to the next transfer."
         },
         "cursorChatTransit.logLevel": {
           "type": "string",
@@ -171,6 +171,8 @@
     "test:host": "node --import tsx scripts/test-host.ts",
     "test:perf": "node --import tsx scripts/perf-bundle.ts",
     "check-package": "node --import tsx scripts/check-package.ts",
+    "release:preview": "node --import tsx scripts/prepare-release.ts preview",
+    "release:prepare": "node --import tsx scripts/prepare-release.ts prepare",
     "ensure-ci-sqlite": "node --import tsx scripts/ensure-ci-sqlite.ts",
     "check": "npm run compile && npm run typecheck && npm run lint && npm run format:check && npm test",
     "package": "node --import tsx scripts/prepare-dist.ts && vsce package --out dist/cursor-chat-transit.vsix",
@@ -180,8 +182,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@release-it/conventional-changelog": "12.0.2",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^24.5.2",
+    "@types/semver": "7.8.0",
     "@types/vscode": "1.85.0",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^2.4.6",
@@ -190,6 +194,8 @@
     "eslint": "^10.11.0",
     "globals": "^15.13.0",
     "prettier": "^3.4.2",
+    "release-it": "21.1.0",
+    "semver": "7.8.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.71.0",

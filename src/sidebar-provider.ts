@@ -78,9 +78,13 @@ export class TransferSidebar implements vscode.WebviewViewProvider {
 
   /** Record host callbacks; filesystem and database work stay in the extension. */
   constructor(
+    /** Extension context used to load the sidebar HTML, CSS, and script. */
     private readonly context: vscode.ExtensionContext,
+    /** Current sidebar model. */
     private readonly state: () => SidebarState,
+    /** Host handler for one sidebar button. */
     private readonly run: (action: SidebarAction) => Promise<void>,
+    /** Host handler when an action rejects. */
     private readonly onError: (error: unknown) => void,
   ) {}
 

@@ -130,7 +130,14 @@ async function runImport(
   ctx: TransferContext,
   zipPath: string,
   workspace: WorkspaceEntry,
-  options: { allowPartial: boolean; journalDir: string; targetKey: string },
+  options: {
+    /** When true, keep readable history from an incomplete export. */
+    allowPartial: boolean;
+    /** Directory that holds the private journal database. */
+    journalDir: string;
+    /** Canonical target identity for that journal. */
+    targetKey: string;
+  },
 ): Promise<ImportResult> {
   ctx.onPhase?.('read');
   const bundle = await openBundle(zipPath, ctx.signal);
@@ -234,33 +241,10 @@ CREATE TABLE dep (
     });
 
     await work.exec('COMMIT;');
-    if (!plan.create.length) return resultFrom(plan, [], [], null);
-    ctx.onPhase?.('backup');
-
-    const backups = {
-      global: await db.createVerifiedBackup({
-        executable,
-        database: workspace.globalDbPath,
-        destDir: options.journalDir,
-        initFile,
-        signal: ctx.signal,
-        timeoutMs: ctx.timeoutMs,
-        busyTimeoutMs: ctx.busyTimeoutMs,
-      }),
-      workspace: await db.createVerifiedBackup({
-        executable,
-        database: workspace.workspaceDbPath,
-        destDir: options.journalDir,
-        initFile,
-        signal: ctx.signal,
-        timeoutMs: ctx.timeoutMs,
-        busyTimeoutMs: ctx.busyTimeoutMs,
-      }),
-    };
-
+    if (!plan.create.length) return resultFrom(plan, [], []);
     const operationId = randomUUID();
 
-    await journal.beginPending({ operationId, phase: 'prepared', backups });
+    await journal.beginPending({ operationId, phase: 'prepared' });
     const written: string[] = [];
     const historyOnlyIds: string[] = [];
     let durable = false;
@@ -348,12 +332,11 @@ CREATE TABLE dep (
       );
 
       wrapped.code = 'PARTIAL';
-      wrapped.backups = backups;
 
       throw wrapped;
     }
 
-    return resultFrom(plan, written, historyOnlyIds, backups);
+    return resultFrom(plan, written, historyOnlyIds);
   } finally {
     await work?.close().catch(() => undefined);
     await journal?.close().catch(() => undefined);
@@ -363,13 +346,21 @@ CREATE TABLE dep (
 
 /** Classify every chat in the bundle against the destination. */
 async function scanAll(opts: {
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Extracted bundle root. */
   root: string;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Destination workspace. */
   workspace: WorkspaceEntry;
+  /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
+  /** Receipt store for this destination. */
   journal: JournalStore;
+  /** Canonical target identity. */
   targetKey: string;
+  /** When true, a history-only chat can still be imported. */
   allowPartial: boolean;
 }): Promise<Plan> {
   const plan: Plan = {
@@ -511,17 +502,25 @@ async function scanAll(opts: {
 /** Fingerprint one chat and record the resources it needs. */
 async function scanChat(
   opts: {
+    /** Transfer hooks and cancellation. */
     ctx: TransferContext;
+    /** Extracted bundle root. */
     root: string;
+    /** Temporary index of the bundle. */
     work: SqliteSession;
+    /** Destination workspace. */
     workspace: WorkspaceEntry;
+    /** Open destination databases and their layouts. */
     pair: Awaited<ReturnType<typeof inspectPair>>;
   },
   ordinal: number,
   sourceId: string,
 ): Promise<{
+  /** Canonical snapshot hash. */
   hash: string;
+  /** complete or history-only. */
   quality: 'complete' | 'history-only';
+  /** Destination composer id chosen for this copy. */
   targetId: string;
 }> {
   const optsPhase = opts.ctx.onPhase;
@@ -879,12 +878,22 @@ function validateResourceRef(value: unknown): BundleResourceRef {
 
 /** Fingerprint row for one required resource. */
 function dependencyFrom(
-  need: { kind: string; id: string },
+  need: {
+    /** Resource class recorded in the work index. */
+    kind: string;
+    /** Resource id recorded in the work index. */
+    id: string;
+  },
   row: {
+    /** SHA-256 of the resource bytes. */
     sha256: string;
+    /** Decoded byte length. */
     byte_length: number;
+    /** SQLite storage class for a kv value. */
     storage_class: string;
+    /** Basename written for a file resource. */
     filename: string;
+    /** Image extension. */
     extension: string;
   },
 ): Record<string, unknown> {
@@ -904,17 +913,29 @@ function dependencyFrom(
 
 /** Import one accepted chat and record its journal receipt. */
 async function writeOne(opts: {
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Destination workspace. */
   workspace: WorkspaceEntry;
+  /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
+  /** Extracted bundle root. */
   root: string;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Receipt store for this destination. */
   journal: JournalStore;
+  /** Pending operation that will own this chat's receipt. */
   operationId: string;
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Scanned source and target ids for this chat. */
   row: ChatRow;
+  /** Destination plans directory. */
   plansDir: string;
+  /** Destination canvases directory, or null when this workspace has none. */
   canvasesDir: string | null;
+  /** Called after a durable batch is committed. */
   onDurable?: () => void;
 }): Promise<void> {
   opts.ctx.onPhase?.('prepare', { chats: 1 });
@@ -1185,12 +1206,19 @@ WHERE s.key=${sqlText(`composerData:${opts.row.targetId}`)} AND NOT EXISTS(SELEC
 /** Rebuild composer JSON with destination ids and resource paths. */
 async function assembleComposer(
   opts: {
+    /** Transfer hooks and cancellation. */
     ctx: TransferContext;
+    /** Catalog ordinal of this chat. */
     ordinal: number;
+    /** Scanned source and target ids for this chat. */
     row: ChatRow;
+    /** Temporary index of the bundle. */
     work: SqliteSession;
+    /** Destination plans directory. */
     plansDir: string;
+    /** Destination canvases directory, or null when this workspace has none. */
     canvasesDir: string | null;
+    /** Destination workspace. */
     workspace: WorkspaceEntry;
   },
   dir: string,
@@ -1264,14 +1292,22 @@ async function assembleComposer(
 
 /** Destination paths for plans, canvases, and images already written. */
 async function resourceMaps(opts: {
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Destination plans directory. */
   plansDir: string;
+  /** Destination canvases directory, or null when this workspace has none. */
   canvasesDir: string | null;
+  /** Destination workspace, used to locate images. */
   workspace: WorkspaceEntry;
 }): Promise<{
+  /** Plan basename to the destination file path. */
   plans: Map<string, string>;
+  /** Canvas basename to the destination file path. */
   canvases: Map<string, string>;
+  /** Image basename to the destination file path. */
   images: Map<string, string>;
 }> {
   const plans = new Map<string, string>();
@@ -1299,10 +1335,15 @@ async function resourceMaps(opts: {
     `SELECT json_object('class', class, 'id', id, 'filename', filename, 'extension', extension, 'aliases', aliases) FROM res WHERE ordinal = ${opts.ordinal};`,
     (line) => {
       const row = json<{
+        /** Resource class stored in the work index. */
         class: string;
+        /** Resource id. */
         id: string;
+        /** Basename for a file resource. */
         filename: string;
+        /** Image extension. */
         extension: string;
+        /** JSON list of other basenames with these bytes. */
         aliases: string;
       }>(line);
 
@@ -1334,19 +1375,28 @@ async function resourceMaps(opts: {
 /** Rewrite composer and bubble ids and resource paths for the destination. */
 async function remapValue(
   opts: {
+    /** Catalog ordinal of this chat. */
     ordinal: number;
+    /** Scanned source and target ids for this chat. */
     row: ChatRow;
+    /** Temporary index of the bundle. */
     work: SqliteSession;
+    /** Destination plans directory. */
     plansDir: string;
+    /** Destination canvases directory, or null when this workspace has none. */
     canvasesDir: string | null;
+    /** Destination workspace. */
     workspace: WorkspaceEntry;
   },
   value: unknown,
   sourceBubbleId: string,
   targetBubbleId: string,
   maps?: {
+    /** Plan basename to the destination file path. */
     plans: Map<string, string>;
+    /** Canvas basename to the destination file path. */
     canvases: Map<string, string>;
+    /** Image basename to the destination file path. */
     images: Map<string, string>;
   },
 ): Promise<Record<string, unknown>> {
@@ -1443,12 +1493,19 @@ async function remapValue(
 
 /** Copy image, plan, and canvas bytes into the workspace. */
 async function copyResources(opts: {
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Extracted bundle root. */
   root: string;
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Destination workspace. */
   workspace: WorkspaceEntry;
+  /** Destination plans directory. */
   plansDir: string;
+  /** Destination canvases directory, or null when this workspace has none. */
   canvasesDir: string | null;
 }): Promise<void> {
   const rows: Array<{
@@ -1500,9 +1557,13 @@ async function copyResources(opts: {
 async function insertKv(
   global: SqliteSession,
   opts: {
+    /** Catalog ordinal of this chat. */
     ordinal: number;
+    /** Temporary index of the bundle. */
     work: SqliteSession;
+    /** Extracted bundle root. */
     root: string;
+    /** Transfer hooks and cancellation. */
     ctx: TransferContext;
   },
 ): Promise<void> {
@@ -1558,9 +1619,13 @@ async function insertKv(
 /** CAS-write the composer header into the workspace item table. */
 async function writeWorkspace(
   opts: {
+    /** Transfer hooks and cancellation. */
     ctx: TransferContext;
+    /** Destination workspace. */
     workspace: WorkspaceEntry;
+    /** Open destination databases and their layouts. */
     pair: Awaited<ReturnType<typeof inspectPair>>;
+    /** Scanned source and target ids for this chat. */
     row: ChatRow;
   },
   bound: ComposerHeader,
@@ -1784,9 +1849,13 @@ interface Plan {
 /** Load one scanned chat row from the work database. */
 async function oneChat(work: SqliteSession, ordinal: number): Promise<ChatRow> {
   const row = json<{
+    /** Source composer id. */
     source_id: string;
+    /** Destination composer id. */
     target_id: string;
+    /** Canonical snapshot hash. */
     snapshot_hash: string;
+    /** complete or history-only. */
     quality: 'complete' | 'history-only';
   }>(
     (
@@ -1809,7 +1878,6 @@ function resultFrom(
   plan: Plan,
   written: string[],
   historyOnlyIds: string[],
-  backups: ImportResult['backups'],
 ): ImportResult {
   return {
     imported: written.length,
@@ -1821,7 +1889,6 @@ function resultFrom(
     newVersions: plan.newVersions.length,
     restored: plan.restored.length,
     incomplete: 0,
-    backups,
     composerIds: written,
     historyOnlyIds,
     skippedChats: plan.skipped,
@@ -1853,8 +1920,11 @@ function isSkippableChat(err: unknown): boolean {
 /** SHA-256 of a resource already stored at the destination. */
 async function reusedSha(
   opts: {
+    /** Transfer hooks and cancellation. */
     ctx: TransferContext;
+    /** Destination workspace. */
     workspace: WorkspaceEntry;
+    /** Open destination databases and their layouts. */
     pair: Awaited<ReturnType<typeof inspectPair>>;
   },
   kind: string,
@@ -1894,10 +1964,15 @@ async function reusedSha(
 
 /** Fail when an existing blob key has different bytes or storage class. */
 async function assertKvCompatible(opts: {
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
+  /** Extracted bundle root. */
   root: string;
 }): Promise<void> {
   const rows: Array<{ id: string; sha256: string; storage_class: string }> = [];
@@ -1967,9 +2042,13 @@ async function assertKvCompatible(opts: {
 
 /** Confirm written blob keys still match the bundle hashes. */
 async function verifyStoredResources(opts: {
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
 }): Promise<void> {
   const rows: Array<{ id: string; sha256: string; storage_class: string }> = [];
@@ -2038,10 +2117,15 @@ async function verifyStoredResources(opts: {
 
 /** Record expected resource hashes on the pending journal batch. */
 async function rememberResources(opts: {
+  /** Catalog ordinal of this chat. */
   ordinal: number;
+  /** Temporary index of the bundle. */
   work: SqliteSession;
+  /** Receipt store for this destination. */
   journal: JournalStore;
+  /** Pending operation that will own these hashes. */
   operationId: string;
+  /** Scanned source and target ids for this chat. */
   row: ChatRow;
 }): Promise<void> {
   const rows: Array<{

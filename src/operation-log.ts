@@ -189,7 +189,6 @@ const phaseLabels: Record<TransferPhase, string> = {
   collect: 'Collect chat dependencies',
   prepare: 'Prepare chat records',
   write: 'Write chat records',
-  backup: 'Create database backups',
   'global-commit': 'Chat data committed; update workspace',
   'workspace-commit': 'Workspace updated',
   verify: 'Verify imported chat data',

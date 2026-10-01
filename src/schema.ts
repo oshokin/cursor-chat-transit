@@ -179,8 +179,11 @@ export function detectLayout(schema: SchemaInfo): Layout {
 
 /** Index range scan for `bubbleId:<composerId>:` keys. */
 export function bubbleKeySql(composerId: string): {
+  /** Inclusive lower bound for this composer's bubble keys. */
   lower: string;
+  /** Exclusive upper bound for this composer's bubble keys. */
   upper: string;
+  /** Query that lists those keys as hex rows. */
   sql: string;
 } {
   const { lower, upper } = bubbleRange(composerId);

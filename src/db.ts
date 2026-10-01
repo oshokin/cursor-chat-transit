@@ -29,7 +29,6 @@ export {
   testHooks,
 } from './db-read';
 export {
-  createVerifiedBackup,
   headerUpsertSql,
   isCasConflict,
   isResourceConflict,

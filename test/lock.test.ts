@@ -76,22 +76,24 @@ test('a held lock blocks a second acquirer', async () => {
 
 test('two concurrent acquires of a free lock yield exactly one owner', async () => {
   await withLockDir(async (dir) => {
-    const results = await Promise.allSettled([
-      acquireLock(dir, 'transfer'),
-      acquireLock(dir, 'transfer'),
-    ]);
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const results = await Promise.allSettled([
+        acquireLock(dir, 'transfer'),
+        acquireLock(dir, 'transfer'),
+      ]);
 
-    const owners = results.filter((row) => row.status === 'fulfilled');
-    const blocked = results.filter((row) => row.status === 'rejected');
+      const owners = results.filter((row) => row.status === 'fulfilled');
+      const blocked = results.filter((row) => row.status === 'rejected');
 
-    assert.equal(owners.length, 1);
-    assert.equal(blocked.length, 1);
+      assert.equal(owners.length, 1);
+      assert.equal(blocked.length, 1);
 
-    if (blocked[0].status === 'rejected') {
-      assert.equal((blocked[0].reason as TransferError).code, 'LOCKED');
+      if (blocked[0].status === 'rejected') {
+        assert.equal((blocked[0].reason as TransferError).code, 'LOCKED');
+      }
+
+      if (owners[0].status === 'fulfilled') await owners[0].value.release();
     }
-
-    if (owners[0].status === 'fulfilled') await owners[0].value.release();
   });
 });
 

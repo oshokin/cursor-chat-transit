@@ -5,7 +5,9 @@ export function fileUriMetadata(
   uri: UriParts,
   platform: NodeJS.Platform = process.platform,
 ): {
+  /** `file://` URI with encoded path segments. */
   external: string;
+  /** Native path for this platform, including a UNC host. */
   fsPath: string;
 } {
   if (uri.scheme !== 'file') throw new TypeError('Expected a file URI');

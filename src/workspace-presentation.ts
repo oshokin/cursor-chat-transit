@@ -76,9 +76,13 @@ export function sshDisplayHost(authority: string): string | undefined {
 
 /** Compact user labels, with path and technical identity kept separate. */
 export function workspacePresentation(entry: WorkspaceEntry): {
+  /** Short workspace title. */
   name: string;
+  /** Host or location line. */
   location: string;
+  /** Path or extra identity line. */
   path: string;
+  /** Location group used by the picker. */
   group: string;
 } {
   const uri = entry.identity?.uri;

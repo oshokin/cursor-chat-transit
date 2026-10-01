@@ -8,10 +8,15 @@ export const IMPORT_BATCH_BYTES = 8 * 1024 * 1024;
 
 /** Copy immutable dependencies and hidden bubbles; publish the composer in a later transaction. */
 export async function writePreparedBatches(opts: {
+  /** Writable connection to the destination database. */
   conn: SqliteConn;
+  /** Temporary database that holds the prepared rows. */
   stagedPath: string;
+  /** KV key of the composer row, published in a later transaction. */
   composerKey: string;
+  /** Transfer hooks and cancellation. */
   ctx: TransferContext;
+  /** Called after a batch has been committed. */
   onDurable?: () => void;
 }): Promise<void> {
   const session = await SqliteSession.open({ ...opts.conn, readOnly: false });

@@ -62,9 +62,12 @@ export class BundleWriter {
 
   /** Stage one archive beside `destPath`. Use `open`. */
   private constructor(
+    /** Final archive path. Staging is created beside it. */
     private readonly destPath: string,
     root: string,
+    /** Cancellation for packing. */
     private readonly signal: AbortSignal | undefined,
+    /** Provenance stored on the manifest when present. */
     private readonly source: unknown,
   ) {
     this.root = root;
@@ -74,7 +77,12 @@ export class BundleWriter {
   /** Create a staging directory next to the destination archive. */
   static async open(
     destPath: string,
-    opts?: { signal?: AbortSignal; source?: unknown },
+    opts?: {
+      /** Cancellation for packing. */
+      signal?: AbortSignal;
+      /** Provenance stored on the manifest when present. */
+      source?: unknown;
+    },
   ): Promise<BundleWriter> {
     const { mkdtemp } = await import('node:fs/promises');
     const root = await mkdtemp(`${destPath}.staging-`);

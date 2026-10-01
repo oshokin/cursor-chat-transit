@@ -1,11 +1,6 @@
-import { traceIO } from './transfer-events';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import * as db from './db';
 import { canvasesDirectoryForWorkspace } from './canvases';
 import { defaultPlansDirectory } from './plans';
-import { backupDatabase } from './sqlite';
 import type {
   ComposerHeader,
   ExportChatIssue,
@@ -84,9 +79,13 @@ export async function inspectPair(
   ctx: TransferContext,
   workspace: WorkspaceEntry,
 ): Promise<{
+  /** Read-only connection to the workspace database. */
   connWs: SqliteConn;
+  /** Read-only connection to the global database. */
   connGl: SqliteConn;
+  /** Workspace schema and layout. */
   wsInfo: Awaited<ReturnType<typeof db.inspectDatabase>>;
+  /** Global schema and layout. */
   glInfo: Awaited<ReturnType<typeof db.inspectDatabase>>;
 }> {
   const connWs = connOf(ctx, workspace.workspaceDbPath, true);
@@ -101,40 +100,4 @@ export async function inspectPair(
 export async function yieldToHost(signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
   await new Promise<void>((resolve) => setImmediate(resolve));
-}
-
-/** Read composer bodies and bubbles from a WAL-safe snapshot of the global DB. */
-export async function withGlobalSnapshot<T>(
-  ctx: TransferContext,
-  workspace: WorkspaceEntry,
-  fn: (conn: SqliteConn) => Promise<T>,
-): Promise<T> {
-  const dir = await fs.promises.mkdtemp(
-    path.join(os.tmpdir(), 'cct-export-snap-'),
-  );
-
-  const dest = path.join(dir, 'global-snapshot.vscdb');
-
-  try {
-    ctx.onPhase?.('backup');
-
-    await traceIO(
-      'Create read snapshot',
-      { source: workspace.globalDbPath, destination: dest },
-      () =>
-        backupDatabase({
-          executable: ctx.executable,
-          database: workspace.globalDbPath,
-          dest,
-          initFile: ctx.initFile,
-          signal: ctx.signal,
-          timeoutMs: ctx.timeoutMs,
-          busyTimeoutMs: ctx.busyTimeoutMs,
-        }),
-    );
-
-    return await fn(connOf(ctx, dest, true));
-  } finally {
-    await fs.promises.rm(dir, { recursive: true, force: true });
-  }
 }

@@ -65,6 +65,14 @@ tasks:
     cmds:
       - '{{.DEV_NODE}} -- npm run package'
       - '{{.DEV_NODE}} -- npm run check-package'
+  release:preview:
+    desc: Show the recommended version and changelog draft without writing files
+    cmds:
+      - '{{.DEV_NODE}} -- npm run release:preview'
+  release:prepare:
+    desc: Update package.json, the lockfile, and CHANGELOG.md for the next version
+    cmds:
+      - '{{.DEV_NODE}} -- npm run release:prepare -- {{.CLI_ARGS}}'
   clean:
     desc: Remove build output (keeps .dev profiles and dependencies)
     cmds:

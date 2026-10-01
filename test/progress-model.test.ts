@@ -80,15 +80,12 @@ test('new phase, chat, unit and decreasing counters reset the estimator', () => 
   ].entries()) {
     model.update('prepare', metrics, 3000 + i * 1000);
 
-    assert.match(
-      model.snapshot(3000 + i * 1000).timingLabel,
-      /Measuring processing speed/,
-    );
+    const timing = model.snapshot(3000 + i * 1000).timingLabel;
+
+    assert.match(timing, /^Elapsed /);
+    assert.doesNotMatch(timing, /left in|Measuring|Time remaining/);
   }
 
-  model.update('backup', {}, 6000);
-  assert.equal(model.snapshot(6000).progress, undefined);
-  assert.match(model.snapshot(6000).timingLabel, /not reported by SQLite/);
   assert.doesNotMatch(model.snapshot(60000).timingLabel, /estimating/);
 });
 
@@ -110,4 +107,19 @@ test('unknown totals, invalid numbers and late initial samples never invent an E
 
   model.update('verify', { processed: 90, total: 100 }, 9000);
   assert.doesNotMatch(model.snapshot(9000).timingLabel, /left in/);
+});
+
+test('export and import stages contain only work that is performed', () => {
+  const exporting = new ProgressModel('export', 0);
+
+  exporting.update('read', {}, 1000);
+  assert.equal(exporting.snapshot(1000).stageLabel, 'Stage 2 of 4');
+  exporting.update('pack', {}, 2000);
+  assert.equal(exporting.snapshot(2000).stageLabel, 'Stage 4 of 4');
+  const importing = new ProgressModel('import', 0);
+
+  importing.update('prepare', {}, 1000);
+  assert.equal(importing.snapshot(1000).stageLabel, 'Stage 3 of 5');
+  importing.update('verify', {}, 2000);
+  assert.equal(importing.snapshot(2000).stageLabel, 'Stage 5 of 5');
 });

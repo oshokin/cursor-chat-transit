@@ -13,7 +13,12 @@ export interface PendingHead {
   /** How far the write progressed. */
   phase: 'prepared' | 'global-written' | 'workspace-written';
   /** Backup paths when the write started. */
-  backups?: { global: string; workspace: string };
+  backups?: {
+    /** Backup of the global database. */
+    global: string;
+    /** Backup of the workspace database. */
+    workspace: string;
+  };
 }
 
 /** One chat row inside a pending batch, without message bodies. */
@@ -36,8 +41,11 @@ export interface PendingChatRow {
 export class JournalStore {
   /** Bind an open sqlite session. Use `open`. */
   private constructor(
+    /** Open sqlite session for this journal file. */
     private readonly session: SqliteSession,
+    /** Absolute path of the journal database. */
     readonly filePath: string,
+    /** Canonical target identity this journal is partitioned by. */
     readonly targetKey: string,
   ) {}
 
@@ -580,9 +588,13 @@ DELETE FROM pending;`);
 
   /** Record one verified chat immediately. */
   async addReceipt(input: {
+    /** Source composer id. */
     sourceComposerId: string;
+    /** Canonical hash of the imported snapshot. */
     snapshotHash: string;
+    /** Destination composer id. */
     targetComposerId: string;
+    /** complete or history-only. */
     quality: 'complete' | 'history-only';
   }): Promise<void> {
     await this.session.exec(

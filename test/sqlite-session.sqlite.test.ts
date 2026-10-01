@@ -129,3 +129,95 @@ test(
     await session.close();
   },
 );
+
+test(
+  'async row consumers apply backpressure and finish before the next request',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const session = await SqliteSession.open(options);
+    let active = 0;
+    let maximum = 0;
+    let count = 0;
+
+    try {
+      await session.queryLines(
+        'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<2000) SELECT x FROM n;',
+        async (line) => {
+          active += 1;
+          maximum = Math.max(maximum, active);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          assert.equal(Number(line), count + 1);
+          count += 1;
+          active -= 1;
+        },
+      );
+
+      assert.equal(maximum, 1);
+      assert.equal(count, 2000);
+      assert.equal((await session.exec('SELECT 7;')).trim(), '7');
+
+      await assert.rejects(
+        () =>
+          session.queryLines('SELECT 1;', async () => {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+
+            throw new Error('async consumer failed');
+          }),
+        /async consumer failed/,
+      );
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test(
+  'abort drains SQLite and waits for an active async consumer before returning',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const controller = new AbortController();
+
+    const session = await SqliteSession.open({
+      ...options,
+      signal: controller.signal,
+    });
+
+    let release!: () => void;
+    let entered!: () => void;
+
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let settled = false;
+
+    const query = session
+      .queryLines(
+        'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000) SELECT x FROM n;',
+        async () => {
+          entered();
+          await gate;
+        },
+      )
+      .finally(() => {
+        settled = true;
+      });
+
+    // Attach rejection handling before aborting to exercise the real cancellation path.
+    const rejected = assert.rejects(() => query, /Cancelled/);
+
+    await enteredPromise;
+    controller.abort(new Error('Cancelled'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    release();
+    await rejected;
+    await session.close();
+  },
+);

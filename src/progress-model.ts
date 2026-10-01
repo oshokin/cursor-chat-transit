@@ -4,7 +4,6 @@ import type { TransferPhase, TransferPhaseMetrics } from './types';
 const steps = {
   export: [
     ['selection'],
-    ['backup'],
     ['read', 'prepare', 'collect'],
     ['write', 'verify'],
     ['pack'],
@@ -12,7 +11,6 @@ const steps = {
   import: [
     ['read', 'extract'],
     ['validate', 'collect'],
-    ['backup'],
     ['prepare'],
     ['write', 'global-commit', 'workspace-commit'],
     ['verify'],
@@ -44,7 +42,9 @@ export class ProgressModel {
   private initial = 0;
   /** Begin one transfer using a monotonic clock for durations. */
   constructor(
+    /** Export or import; selects which stage list this model uses. */
     private readonly kind: 'export' | 'import',
+    /** Monotonic time when this transfer's elapsed clock started. */
     private readonly started = performance.now(),
   ) {
     this.scopeStarted = started;
@@ -112,20 +112,14 @@ export class ProgressModel {
         ? ` · Chat ${m.chatIndex} of ${m.chatTotal}`
         : '';
 
-    const state =
+    const estimate =
       valid && m.processed! >= m.total!
         ? 'Step complete'
         : now - this.lastAdvance >= 10000 && valid
           ? `No measured progress for ${duration(now - this.lastAdvance)}`
           : remaining !== undefined
             ? `About ${duration(Math.max(1000, Math.ceil(remaining / 1000) * 1000))} left in this ${m.file && !m.scope ? 'file' : 'step'}`
-            : valid
-              ? 'Measuring processing speed…'
-              : this.phase === 'backup'
-                ? 'Backup duration is not reported by SQLite'
-                : this.phase === 'collect'
-                  ? 'Discovering dependencies; total not yet known'
-                  : 'Time remaining unavailable for this step';
+            : '';
 
     const counts = valid
       ? ` · ${m.processed!.toLocaleString('en-US')} / ${m.total!.toLocaleString('en-US')} ${m.unit || 'items'}`
@@ -137,7 +131,7 @@ export class ProgressModel {
       progress,
       stageLabel: `Stage ${Math.max(0, index) + 1} of ${steps[this.kind].length}${chat}`,
       currentItem: [m.chatName, m.file].filter(Boolean).join(' · '),
-      timingLabel: `Elapsed ${duration(now - this.started)} · ${state}${counts}`,
+      timingLabel: `Elapsed ${duration(now - this.started)}${estimate ? ` · ${estimate}` : ''}${counts}`,
     };
   }
 }

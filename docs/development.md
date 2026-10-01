@@ -75,17 +75,51 @@ The extension discovers the real local Cursor user-data directory unless you set
 
 ## Release
 
-Pushing tag `v*` runs the same CI gates, builds one VSIX, writes `SHA256SUMS`, and opens a **draft** GitHub Release with those two files. That is not Marketplace or Open VSX publishing. After the draft exists:
+`task release:prepare` is the only local command that changes the version. Ordinary commits, amends, rebases, pushes, tests, and builds do not. It recommends a bump from Conventional Commits since the latest stable `vX.Y.Z` tag reachable from `HEAD`, then updates `package.json`, both version fields in `package-lock.json`, and prepends one `CHANGELOG.md` section. It does not commit, tag, push, or publish. `task release:preview` prints that plan and writes nothing. Pass `patch`, `minor`, `major`, or `X.Y.Z` after `--` to override the recommendation; a smaller bump than a breaking change still prints release-it's warning.
 
-1. Download the VSIX from the draft (the same artifact CI already verified).
-2. Install it in the real Cursor you use and smoke export/import locally and, when relevant, over Remote SSH.
-3. Publish the GitHub Release only after that check. A new version is a new tag; do not replace a published VSIX.
+`git.tagMatch` is only a glob, so `.release-it.json` also sets `git.tagExclude` to `v*-*`. That drops prerelease tags such as `v1.0.0-beta` from the baseline. The `v` prefix keeps release-it's shell `git describe` from expanding the exclude pattern against files like `package-lock.json`.
 
-Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself.
+```bash
+task release:preview
+task release:prepare
+git diff -- package.json package-lock.json CHANGELOG.md
+task check
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "chore(release): 1.0.1"
+git push
+```
+
+Edit the new changelog section before committing. CI publishes that text; it does not regenerate the changelog. The repository file stays `CHANGELOG.md`. vsce packs that file as `extension/changelog.md`, which is the name the Marketplace reads. The GitHub Release notes are that version's section plus short VSIX install steps.
+
+CI publishes only when a push to the default branch increases `package.json` `version`, or when someone starts the existing workflow with `publish_release=true` on that branch. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A push that does not change the version says that the release was not requested.
+
+As of 2026-10-01 the GitHub repository has no tags and no releases. `1.0.0` is recorded in the tree and is the first version to publish, via `workflow_dispatch` with `publish_release=true`, once that commit is the one you want to ship. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
+
+Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
+
+### First release and recovery
+
+For the first release, push the reviewed implementation to `master`, open **GitHub → Actions → ci → Run workflow**, select `master`, and enable `publish_release`. Keep it disabled for a checks-only run. The recorded version is published only after the validation jobs and package job succeed. No local release preparation is needed for the initial `1.0.0`.
+
+| Situation                                                         | Developer action                                                                                             |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Prepare produced an empty changelog section for a technical patch | Write the user-facing notes before committing; CI rejects empty notes                                        |
+| Fix or clarify notes before publication                           | Keep the prepared version and edit its existing section                                                      |
+| CI rejected the code before tag creation                          | Commit the fix without another bump, then run `ci` on `master` with `publish_release=true`                   |
+| Upload or API failure, same code and artifact                     | Use **Re-run failed jobs** on the original run                                                               |
+| Draft already contains different bytes after a complete rebuild   | Stop; retry the original publisher/artifact, never overwrite the existing asset                              |
+| Tag already points to another commit                              | Do not move it; finish that candidate or explicitly resolve the unpublished candidate before another version |
+| Published release needs a fix                                     | Make a fix commit and prepare the next patch                                                                 |
+
+Wait until GitHub shows a completed, published release before preparing the next version. The local guard checks Git tags; a tag can already exist while CI is still uploading a draft. A tag alone does not prove publication succeeded.
+
+The changelog generator reads exactly the baseline-to-HEAD range without tag decorations. This prevents intermediate prerelease or unrelated tags from splitting the new stable section; the bump recommendation still comes from the pinned Conventional Commits plugin. Older changelog sections remain in place.
+
+GitHub's tag-name endpoint is used for published releases. On a 404 the publisher searches the authenticated, paginated release list, which also includes drafts. A 403/5xx is an error, never an empty list. Mock tests cover this distinction; real GitHub acceptance is still required before declaring deployment verified.
 
 ## Stale transfer lock
 
-After a crash, use **Clear stale lock** when offered in the sidebar or error notification, then retry. The extension rechecks the recorded owner PID and token before removing that same `.lock` file. A live or changed owner is never removed. A lock whose owner cannot be verified needs inspection; opening the operation log shows its path. This action does not unlock SQLite, delete receipts/backups, or modify Cursor's `state.vscdb`, `-wal`, or `-shm` files.
+After a crash, use **Clear stale lock** when offered in the sidebar or error notification, then retry. The extension rechecks the recorded owner PID and token before removing that same `.lock` file. A live or changed owner is never removed. A lock whose owner cannot be verified needs inspection; opening the operation log shows its path. This action does not unlock SQLite, delete receipts or existing backup files, or modify Cursor's `state.vscdb`, `-wal`, or `-shm` files.
 
 ## Keeping the code understandable
 
@@ -119,6 +153,8 @@ The contributor loop is `task setup` → `task check` → `task package`. `task 
 | `test`, `test:unit`, `test:sqlite`  | Core tests and filtered suites                                         |
 | `check`                             | Local pre-commit validation                                            |
 | `package`                           | Validate, build and inspect the VSIX; does not publish                 |
+| `release:preview`                   | Show the recommended version and changelog draft; writes nothing       |
+| `release:prepare`                   | Apply the recommended or explicit version bump to local files only     |
 | `clean`                             | Remove `out/`, `dist/`, `coverage/`; preserve `.dev/` and dependencies |
 
 Ordered steps use `cmds`, because Task dependencies run in parallel. `package` does not call `check` twice: `vsce` invokes `vscode:prepublish`, which already runs it. CI uses the same npm commands without requiring Task.

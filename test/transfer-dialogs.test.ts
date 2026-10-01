@@ -141,7 +141,7 @@ const transfer = {
   },
   /** Count an export and optionally throw the requested failure. */
   async exportToFile() {
-    assert.equal(state.runtime.uiState.statusTitle, 'Exporting…');
+    assert.equal(state.runtime.uiState.statusTitle, 'Exporting chats…');
     assert.equal(state.runtime.uiState.statusDetail, 'Reading selected chats.');
     host.exports += 1;
     failIfRequested();
