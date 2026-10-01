@@ -40,6 +40,31 @@ test('ndjson reader keeps a record under the limit', async () => {
   }
 });
 
+test('a mention selection larger than 64 KiB stays one object key', () => {
+  const selection = JSON.stringify({
+    uri: 'vscode-test-data://results/example',
+    range: { positionLineNumber: 1, positionColumn: 1 },
+    text: 'x'.repeat(70_000),
+  });
+
+  const parsed = parseBoundedJson(
+    Buffer.from(
+      JSON.stringify({
+        context: { mentions: { selections: { [selection]: [] } } },
+      }),
+    ),
+    'bubble',
+  ) as {
+    context: { mentions: { selections: Record<string, unknown> } };
+  };
+
+  const keys = Object.keys(parsed.context.mentions.selections);
+
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0], selection);
+  assert.deepEqual(parsed.context.mentions.selections[selection], []);
+});
+
 test('bounded JSON rejects invalid UTF-8 even when replacement has the same byte count', () => {
   const bytes = Buffer.concat([
     Buffer.from('{"x":"'),

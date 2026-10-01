@@ -22,9 +22,6 @@ export const MAX_JSON_DEPTH = 64;
 /** Property-count limit for one JSON record. */
 export const MAX_JSON_KEYS = 100_000;
 
-/** Maximum UTF-8 length of one object key. */
-export const MAX_JSON_KEY_BYTES = 64 * 1024;
-
 /** SQLite value this adapter will read or write as one row. */
 export const MAX_SQLITE_VALUE_BYTES = 32 * 1024 * 1024;
 

@@ -1,6 +1,5 @@
 import {
   MAX_JSON_DEPTH,
-  MAX_JSON_KEY_BYTES,
   MAX_JSON_KEYS,
   MAX_JSON_RECORD_BYTES,
 } from './bundle-limits';
@@ -69,10 +68,6 @@ export function assertJsonLimits(value: unknown, label: string): void {
 
       if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
         throw new Error(`${label} contains a forbidden property name.`);
-      }
-
-      if (Buffer.byteLength(key, 'utf8') > MAX_JSON_KEY_BYTES) {
-        throw new Error(`${label} contains an oversized property name.`);
       }
 
       visit((node as Record<string, unknown>)[key], depth + 1);

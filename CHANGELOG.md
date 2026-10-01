@@ -2,6 +2,7 @@
 
 ## 1.0.0
 
+- Keep Cursor mention selections whose selected text makes the object key larger than 64 KiB. The record size limit still bounds that key. Forbidden property names are still rejected.
 - Read agent blob dependencies from composer versions 13 through 18. Those versions store `conversationState` as the same `~` protobuf; an older or newer number is still rejected. An unsupported conversation state keeps its own error text instead of being described as a bad export file.
 - Export and import Cursor chats between workspaces and devices as a version-4 ZIP archive: a manifest, bounded NDJSON parts, and original resource bytes. Included when available: conversation records, message bodies, referenced blobs, image attachments, plan files, and canvases.
 - Stream NDJSON records and resource installation so a transfer does not keep every message body in memory or write one temporary file per message.

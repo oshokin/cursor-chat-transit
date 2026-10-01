@@ -119,9 +119,14 @@ export function workspacePickItems(
   return items;
 }
 
-/** Most recently updated chats first; IDs appear only to distinguish otherwise identical rows. */
+/** Most recently updated chats first. Untitled names stay last, still by recency. */
 export function chatPickItems(composers: ComposerHeader[]): ChatPickItem[] {
-  const rows = recentChats(composers).map((composer) => {
+  const ordered = recentChats(composers);
+
+  const rows = [
+    ...ordered.filter((composer) => hasChatTitle(composer.name)),
+    ...ordered.filter((composer) => !hasChatTitle(composer.name)),
+  ].map((composer) => {
     return {
       label: chatListLabel(composer.name),
       description: chatActivityLabel(composer),

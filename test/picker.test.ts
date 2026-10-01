@@ -221,17 +221,24 @@ test('untitled chats use a UI fallback and keep the id off the primary label', (
   assert.equal(chatListLabel('   '), 'Untitled chat');
 
   const items = chatPickItems([
-    { composerId: 'id-1' },
-    { composerId: 'id-2', name: '  Починить SSH ✨  ' },
+    { composerId: 'id-1', lastUpdatedAt: 5000 },
+    { composerId: 'id-2', name: '  Починить SSH ✨  ', lastUpdatedAt: 1000 },
+    { composerId: 'id-3', name: 'Older named', createdAt: 100 },
+    { composerId: 'id-0' },
   ]);
 
-  assert.equal(items[0].label, 'Untitled chat');
+  assert.deepEqual(
+    items.map((item) => item.id),
+    ['id-2', 'id-3', 'id-1', 'id-0'],
+  );
+
+  assert.equal(items[2].label, 'Untitled chat');
+  assert.equal(items[2].detail, '');
+  assert.match(items[2].description, /^Updated /);
+  assert.equal(items[3].label, 'Untitled chat');
+  assert.equal(items[3].description, 'Date unavailable');
+  assert.equal(items[0].label, '  Починить SSH ✨  ');
   assert.equal(items[0].detail, '');
-  assert.equal(items[0].description, 'Date unavailable');
-  assert.equal(items[1].label, '  Починить SSH ✨  ');
-  assert.equal(items[1].detail, '');
-  assert.equal(items[0].id, 'id-1');
-  assert.equal(items[1].id, 'id-2');
 });
 
 test('picker shows a decoded SSH host, not encoded authority', () => {
