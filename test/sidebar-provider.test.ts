@@ -5,26 +5,34 @@ import path from 'node:path';
 
 /** vscode.Uri.joinPath built from node path. */
 const Uri = {
+  /** Join path segments onto a file URI. */
   joinPath(base: { fsPath: string }, ...parts: string[]) {
     return { fsPath: path.join(base.fsPath, ...parts) };
   },
 };
+
 /** vscode module stub used to resolve the packaged sidebar. */
 const fakeVscode = {
   Uri,
   window: {},
 };
+
 /** Node module loader, used to intercept `require('vscode')`. */
 const loader = Module as unknown as {
+  /** Node's internal module loader, replaced for the duration of the test. */
   _load(id: string, parent: unknown, isMain: boolean): unknown;
 };
+
 /** Original Node module loader. */
 const original = loader._load;
+
 loader._load = function (id, parent, isMain) {
   return id === 'vscode' ? fakeVscode : original.call(this, id, parent, isMain);
 };
+
 /** Sidebar provider loaded against the vscode stub. */
 let sidebar: typeof import('../src/sidebar-provider');
+
 try {
   sidebar = require('../src/sidebar-provider') as typeof sidebar;
 } finally {
@@ -33,6 +41,7 @@ try {
 
 test('resolveWebviewView substitutes assets and keeps a strict CSP nonce', async () => {
   const root = path.resolve(__dirname, '..');
+
   const provider = new sidebar.TransferSidebar(
     {
       extensionUri: { fsPath: root },
@@ -52,6 +61,7 @@ test('resolveWebviewView substitutes assets and keeps a strict CSP nonce', async
     async () => undefined,
     () => undefined,
   );
+
   const view = {
     webview: {
       options: {
@@ -60,49 +70,70 @@ test('resolveWebviewView substitutes assets and keeps a strict CSP nonce', async
       },
       cspSource: 'https://csp.test',
       html: '',
+      /** Turn a local file URI into a webview URI string. */
       asWebviewUri(uri: { fsPath: string }) {
         return {
           toString: () => `https://webview.test/${path.basename(uri.fsPath)}`,
         };
       },
+      /** Accept a webview message listener and return an inert disposable. */
       onDidReceiveMessage() {
-        return { dispose() {} };
+        return {
+          /** Ignore disposal of the message subscription. */
+          dispose() {},
+        };
       },
+      /** Ignore a state message posted into the webview. */
       postMessage() {},
     },
+    /** Accept a visibility listener and return an inert disposable. */
     onDidChangeVisibility() {
-      return { dispose() {} };
+      return {
+        /** Ignore disposal of the visibility subscription. */
+        dispose() {},
+      };
     },
     visible: true,
   };
+
   await provider.resolveWebviewView(view as never);
   assert.equal(view.webview.options.enableScripts, true);
   assert.equal(view.webview.options.localResourceRoots?.length, 1);
+
   assert.equal(
     view.webview.options.localResourceRoots?.[0]?.fsPath,
     path.join(root, 'resources'),
   );
+
   assert.doesNotMatch(view.webview.html, /%%/);
+
   assert.match(
     view.webview.html,
     /src="https:\/\/webview\.test\/sidebar-client\.js"/,
   );
+
   assert.match(view.webview.html, /script-src 'nonce-[A-Za-z0-9+/=]+'/);
   assert.match(view.webview.html, /Quit Cursor/);
+
   // This fixed action group may contain buttons and whitespace, never bare text.
   // Check the rendered template, not the fake DOM used by client-state tests.
   const actions = view.webview.html.match(
     /<div class="status-actions operation-actions">([\s\S]*?)<\/div>/,
   )?.[1];
+
   assert.ok(actions, 'operation action group must exist');
+
   const buttons = [
     ...actions.matchAll(/<button\b[^>]*>[\s\S]*?<\/button\s*>/g),
   ];
-  assert.equal(buttons.length, 3);
+
+  assert.equal(buttons.length, 4);
+
   assert.deepEqual(
     buttons.map((match) => match[0].match(/data-action="([^"]+)"/)?.[1]),
-    ['logs', 'quitCursor', 'cancel'],
+    ['recoverLock', 'logs', 'quitCursor', 'cancel'],
   );
+
   assert.equal(
     actions.replace(/<button\b[^>]*>[\s\S]*?<\/button\s*>/g, '').trim(),
     '',

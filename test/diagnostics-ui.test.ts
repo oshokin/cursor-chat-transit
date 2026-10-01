@@ -20,6 +20,7 @@ test('report labels VS Code API separately from the editor name', () => {
     ...base,
     checks: [{ label: 'Host', status: 'ok', summary: 'Local UI host' }],
   });
+
   assert.match(text, /Editor: Cursor/);
   assert.match(text, /VS Code API: 1\.128\.0/);
   assert.doesNotMatch(text, /Cursor version 1\.128/);
@@ -33,6 +34,7 @@ test('title follows the actual check results', () => {
     }),
     'Diagnostics: checks passed',
   );
+
   assert.equal(
     diagnosticTitle({
       ...base,
@@ -40,6 +42,7 @@ test('title follows the actual check results', () => {
     }),
     'Diagnostics: needs attention',
   );
+
   assert.equal(
     diagnosticTitle({
       ...base,
@@ -62,6 +65,7 @@ test('collectChecks keeps other probes when one fails', async () => {
       },
     },
   ]);
+
   assert.equal(checks[0].status, 'ok');
   assert.equal(checks[1].status, 'error');
   assert.equal(checks[1].label, 'boom');

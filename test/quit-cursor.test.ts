@@ -41,6 +41,7 @@ const UIKind = {
   /** Web host, which never exposes `workbench.action.quit`. */
   Web: 2,
 };
+
 /** vscode module stub: env, commands, and native messages. */
 const fakeVscode = {
   UIKind,
@@ -59,6 +60,7 @@ const fakeVscode = {
     getCommands: async () => {
       host.commandReads += 1;
       await host.onGetCommands?.();
+
       return host.commands;
     },
     /** Record a command invocation, then optionally pause before resolving. */
@@ -71,16 +73,19 @@ const fakeVscode = {
     /** Capture an information toast. */
     showInformationMessage: async (message: string) => {
       host.info.push(message);
+
       return undefined;
     },
     /** Capture an error toast. */
     showErrorMessage: async (message: string) => {
       host.errors.push(message);
+
       return undefined;
     },
     /** Count an extension confirmation; this path must stay unused after the fix. */
     showWarningMessage: async () => {
       host.dialogCount += 1;
+
       return undefined;
     },
   },
@@ -91,14 +96,18 @@ const loader = Module as unknown as {
   /** Load a module by id; tests replace this to inject the vscode stub. */
   _load(id: string, parent: unknown, isMain: boolean): unknown;
 };
+
 /** Original Node module loader. */
 const original = loader._load;
+
 /** Serve the vscode stub, then restore ordinary module loading. */
 loader._load = function loadVscodeStub(id, parent, isMain) {
   return id === 'vscode' ? fakeVscode : original.call(this, id, parent, isMain);
 };
+
 /** Quit helpers loaded against the vscode stub. */
 let quitCursor: typeof import('../src/quit-cursor');
+
 try {
   quitCursor = require('../src/quit-cursor') as typeof quitCursor;
 } finally {
@@ -153,14 +162,17 @@ function gate(): QuitTestGate {
   let enter!: () => void;
   /** Completes `released` so the paused call may continue. */
   let release!: () => void;
+
   /** Resolves when the paused host call has started. */
   const entered = new Promise<void>((resolve) => {
     enter = resolve;
   });
+
   /** Resolves when the test allows the paused call to continue. */
   const released = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   return {
     entered,
     release,
@@ -230,8 +242,10 @@ test('unsupported hosts never request quit', async () => {
 test('a transfer starting during capability lookup blocks quit', async () => {
   reset();
   const lookup = gate();
+
   host.onGetCommands = lookup.run;
   const pending = action()();
+
   await lookup.entered;
   host.busy = true;
   lookup.release();
@@ -244,8 +258,10 @@ test('a transfer starting during capability lookup blocks quit', async () => {
 test('a new operation invalidates Quit even if it finishes during lookup', async () => {
   reset();
   const lookup = gate();
+
   host.onGetCommands = lookup.run;
   const pending = action()();
+
   await lookup.entered;
   host.importNeedsRestart = false;
   host.busy = false;
@@ -258,9 +274,11 @@ test('a new operation invalidates Quit even if it finishes during lookup', async
 test('a second click during capability lookup does not start another request', async () => {
   reset();
   const lookup = gate();
+
   host.onGetCommands = lookup.run;
   const run = action();
   const pending = run();
+
   await lookup.entered;
   await run();
   assert.equal(host.commandReads, 1);
@@ -273,9 +291,11 @@ test('a second click during capability lookup does not start another request', a
 test('a second click while the native command is pending is ignored', async () => {
   reset();
   const command = gate();
+
   host.onExecute = command.run;
   const run = action();
   const pending = run();
+
   await command.entered;
   await run();
   assert.equal(host.commandReads, 1);
@@ -288,9 +308,11 @@ test('a second click while the native command is pending is ignored', async () =
 test('executeCommand failure preserves the import result and allows retry', async () => {
   reset();
   const run = action();
+
   host.onExecute = async () => {
     throw new Error('host rejected quit');
   };
+
   await run();
   assert.equal(host.importNeedsRestart, true);
   assert.match(host.logError[0] || '', /host rejected quit/);
@@ -304,9 +326,11 @@ test('executeCommand failure preserves the import result and allows retry', asyn
 test('capability lookup failure releases the guard for retry', async () => {
   reset();
   const run = action();
+
   host.onGetCommands = async () => {
     throw new Error('lookup failed');
   };
+
   await run();
   assert.deepEqual(host.executeCalls, []);
   assert.match(host.logError[0] || '', /lookup failed/);
@@ -318,6 +342,7 @@ test('capability lookup failure releases the guard for retry', async () => {
 test('a resolved command is not proof of shutdown; preserve state and allow retry', async () => {
   reset();
   const run = action();
+
   // A native veto may resolve without a result; it is not an extension failure.
   await run();
   assert.equal(host.importNeedsRestart, true);

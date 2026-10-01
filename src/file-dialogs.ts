@@ -1,10 +1,13 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import * as vscode from 'vscode';
-import { readJsonFile } from './format';
 
-/** File picker filter for `*.json` exports. */
-export const JSON_FILTER = { JSON: ['json'] };
-/** Ceiling for a provider-buffered remote read; larger files are refused before parse. */
-export const MAX_REMOTE_EXPORT_BYTES = 512 * 1024 * 1024;
+/** File picker filter for `*.zip` exports. */
+export const ZIP_FILTER = { 'Cursor chat export': ['zip'] };
+
+/** @deprecated Use ZIP_FILTER. Kept so older call sites fail closed on JSON. */
+export const JSON_FILTER = ZIP_FILTER;
 
 /** Local default is independent of the selected chat's workspace scheme. */
 export function importDialogOptions(
@@ -16,34 +19,45 @@ export function importDialogOptions(
     canSelectFiles: true,
     canSelectFolders: false,
     canSelectMany: false,
-    filters: JSON_FILTER,
+    filters: ZIP_FILTER,
     openLabel: 'Import',
   };
 }
 
-/** Remote URI is read through its provider, never converted to a local fsPath. */
-export async function readExportUri(
+/**
+ * Return a local filesystem path for an export.
+ * A remote file is copied by the editor; this process does not buffer the archive.
+ */
+export async function localBundlePath(
   uri: vscode.Uri,
   signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<string> {
   signal?.throwIfAborted();
-  if (uri.scheme === 'file') return readJsonFile(uri.fsPath, signal);
-  if (uri.scheme !== 'vscode-remote')
+
+  if (uri.scheme === 'file') return uri.fsPath;
+
+  if (uri.scheme !== 'vscode-remote') {
     throw new Error(
-      'Choose a JSON file on this computer or the connected remote host.',
+      'Choose an export on this computer or the connected remote host.',
     );
-  const stat = await vscode.workspace.fs.stat(uri);
-  signal?.throwIfAborted();
-  if (
-    !(stat.type & vscode.FileType.File) ||
-    stat.size > MAX_REMOTE_EXPORT_BYTES
-  ) {
-    throw new Error('Choose a JSON file no larger than 512 MiB.');
   }
-  // workspace.fs.readFile has no CancellationToken overload. Cancellation is checked on return.
-  const bytes = await vscode.workspace.fs.readFile(uri);
-  signal?.throwIfAborted();
-  if (bytes.byteLength > MAX_REMOTE_EXPORT_BYTES)
-    throw new Error('The JSON file exceeds 512 MiB.');
-  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-remote-'));
+  const dest = path.join(dir, 'import.cursor-chat.zip');
+
+  try {
+    signal?.throwIfAborted();
+
+    await vscode.workspace.fs.copy(uri, vscode.Uri.file(dest), {
+      overwrite: true,
+    });
+
+    signal?.throwIfAborted();
+
+    return dest;
+  } catch (error) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+
+    throw error;
+  }
 }

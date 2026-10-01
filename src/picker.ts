@@ -50,6 +50,7 @@ export interface ChatPickItem {
 /** QuickPick title for the workspace step. */
 export function workspacePickTitle(action: WorkspacePickAction): string {
   if (action === 'select') return 'Choose workspace';
+
   return action === 'export'
     ? 'Export chats — choose source workspace'
     : 'Import chats — choose destination workspace';
@@ -76,12 +77,15 @@ export function workspacePickItems(
   current: WorkspaceIdentity | undefined,
 ): WorkspacePickItem[] {
   const currentKey = current ? workspaceKey(current.kind, current.uri) : null;
+
   const items = entries.map((entry) => {
     const isCurrent =
       !!currentKey &&
       !!entry.identity &&
       workspaceKey(entry.identity.kind, entry.identity.uri) === currentKey;
+
     const label = workspacePresentation(entry);
+
     return {
       label: label.name,
       description: isCurrent ? `Current · ${label.location}` : label.location,
@@ -90,6 +94,7 @@ export function workspacePickItems(
       isCurrent,
     };
   });
+
   items.sort(
     (a, b) =>
       Number(b.isCurrent) - Number(a.isCurrent) ||
@@ -100,6 +105,7 @@ export function workspacePickItems(
       compareText(a.entry.key, b.entry.key) ||
       compareText(a.entry.storageId, b.entry.storageId),
   );
+
   // Distinct storage entries can have the same human name/path (notably containers).
   // Add an identifier only for ambiguous rows; never merge their databases.
   disambiguateRows(
@@ -109,6 +115,7 @@ export function workspacePickItems(
       item.detail += ` · Storage ${id}`;
     },
   );
+
   return items;
 }
 
@@ -126,6 +133,7 @@ export function chatPickItems(composers: ComposerHeader[]): ChatPickItem[] {
       picked: true,
     };
   });
+
   disambiguateRows(
     rows,
     (row) => row.id,
@@ -133,6 +141,7 @@ export function chatPickItems(composers: ComposerHeader[]): ChatPickItem[] {
       row.description += ` · ${id}`;
     },
   );
+
   return rows;
 }
 
@@ -145,22 +154,29 @@ function disambiguateRows<
   annotate: (row: T, id: string) => void,
 ): void {
   const groups = new Map<string, T[]>();
+
   for (const row of rows) {
     const key = JSON.stringify([row.label, row.description, row.detail]);
     const group = groups.get(key) || [];
+
     group.push(row);
     groups.set(key, group);
   }
+
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const counts = new Map<string, number>();
+
     for (const row of group) {
       const prefix = idOf(row).slice(0, 8);
+
       counts.set(prefix, (counts.get(prefix) || 0) + 1);
     }
+
     for (const row of group) {
       const id = idOf(row);
       const prefix = id.slice(0, 8);
+
       annotate(row, counts.get(prefix) === 1 ? prefix : id);
     }
   }

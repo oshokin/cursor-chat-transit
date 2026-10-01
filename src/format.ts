@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { EXPORT_FORMAT_VERSION as BUNDLE_VERSION } from './bundle-limits';
+import { readBundleObject } from './bundle-object';
 import type { FileHandle } from 'node:fs/promises';
 import type {
   BubbleRecord,
@@ -21,15 +23,19 @@ export function assertExportShape(obj: unknown): ExportObject {
   if (!obj || typeof obj !== 'object')
     throw new Error('Invalid export file format.');
   const rec = obj as Record<string, unknown>;
+
   if (
     rec.formatVersion !== undefined &&
     rec.formatVersion !== EXPORT_FORMAT_VERSION &&
-    rec.formatVersion !== LEGACY_EXPORT_FORMAT_VERSION
+    rec.formatVersion !== LEGACY_EXPORT_FORMAT_VERSION &&
+    rec.formatVersion !== BUNDLE_VERSION
   ) {
     throw new Error(`Unsupported export formatVersion: ${rec.formatVersion}`);
   }
+
   if (!Array.isArray(rec.allComposers))
     throw new Error('Invalid export: allComposers must be an array.');
+
   if (
     rec.composers === null ||
     typeof rec.composers !== 'object' ||
@@ -37,6 +43,7 @@ export function assertExportShape(obj: unknown): ExportObject {
   ) {
     throw new Error('Invalid export: composers must be an object.');
   }
+
   if (
     rec.bubbles !== null &&
     rec.bubbles !== undefined &&
@@ -44,6 +51,7 @@ export function assertExportShape(obj: unknown): ExportObject {
   ) {
     throw new Error('Invalid export: bubbles must be an object.');
   }
+
   if (
     rec.resources !== undefined &&
     (rec.resources === null ||
@@ -52,7 +60,9 @@ export function assertExportShape(obj: unknown): ExportObject {
   ) {
     throw new Error('Invalid export: resources must be an object.');
   }
+
   const ids = new Set<string>();
+
   for (const c of rec.allComposers) {
     if (
       !c ||
@@ -62,23 +72,29 @@ export function assertExportShape(obj: unknown): ExportObject {
     ) {
       throw new Error('Invalid export: composer metadata missing composerId.');
     }
+
     const composerId = (c as { composerId: string }).composerId;
+
     if (ids.has(composerId))
       throw new Error(`Invalid export: duplicate composerId ${composerId}`);
     ids.add(composerId);
   }
+
   return rec as unknown as ExportObject;
 }
 
 /** Composer ids in `allComposers` that have no `composers[id]` body. */
 export function incompleteComposers(obj: ExportObject): string[] {
   const missing: string[] = [];
+
   for (const c of obj.allComposers || []) {
     const id = c && c.composerId;
+
     if (!id) continue;
     if (obj.composers[id] === undefined || obj.composers[id] === null)
       missing.push(id);
   }
+
   return missing;
 }
 
@@ -88,22 +104,28 @@ export async function writeJsonAtomic(
   value: unknown,
 ): Promise<void> {
   const dir = path.dirname(destPath);
+
   const tmp = path.join(
     dir,
     `${path.basename(destPath)}.${process.pid}.${Date.now()}.partial`,
   );
+
   const json = JSON.stringify(value, null, 2);
+
   await fs.promises.writeFile(tmp, json, {
     encoding: 'utf8',
     flag: 'wx',
     mode: 0o600,
   });
+
   const fh = await fs.promises.open(tmp, 'r+');
+
   try {
     await fh.sync();
   } finally {
     await fh.close();
   }
+
   await fs.promises.rename(tmp, destPath);
 }
 
@@ -115,10 +137,12 @@ async function writeChunk(
 ): Promise<void> {
   const bytes = Buffer.from(text, 'utf8');
   let offset = 0;
+
   while (offset < bytes.length) {
     signal?.throwIfAborted();
     const size = Math.min(WRITE_CHUNK, bytes.length - offset);
     const result = await file.write(bytes, offset, size, null);
+
     if (result.bytesWritten === 0)
       throw new Error('File write made no progress');
     offset += result.bytesWritten;
@@ -151,11 +175,14 @@ export class ExportFileWriter {
   ): Promise<ExportFileWriter> {
     signal?.throwIfAborted();
     const dir = path.dirname(destPath);
+
     const tmpPath = path.join(
       dir,
       `${path.basename(destPath)}.${process.pid}.${Date.now()}.partial`,
     );
+
     const file = await fs.promises.open(tmpPath, 'wx', 0o600);
+
     return new ExportFileWriter(destPath, tmpPath, file, signal);
   }
 
@@ -177,13 +204,17 @@ export class ExportFileWriter {
     await this.write('{\n  "formatVersion": ');
     await this.write(JSON.stringify(opts.formatVersion));
     await this.write(',\n  "source": ');
+
     await this.write(
       JSON.stringify(opts.source, null, 2).replace(/\n/g, '\n  '),
     );
+
     await this.write(',\n  "allComposers": ');
+
     await this.write(
       JSON.stringify(opts.allComposers, null, 2).replace(/\n/g, '\n  '),
     );
+
     await this.write(',\n  "composers": {');
   }
 
@@ -232,25 +263,41 @@ export class ExportFileWriter {
     resources?: ExportResources,
   ): Promise<void> {
     await this.write('\n  }');
+
     if (resources) {
       await this.write(',\n  "resources": {\n    "kv": [');
+
       for (let i = 0; i < resources.kv.length; i++) {
         await this.write(i === 0 ? '\n      ' : ',\n      ');
         await this.write(JSON.stringify(resources.kv[i]));
       }
+
       await this.write('\n    ],\n    "attachments": [');
+
       for (let i = 0; i < resources.attachments.length; i++) {
         await this.write(i === 0 ? '\n      ' : ',\n      ');
         await this.write(JSON.stringify(resources.attachments[i]));
       }
+
       await this.write('\n    ],\n    "plans": [');
       const plans = resources.plans || [];
+
       for (let i = 0; i < plans.length; i++) {
         await this.write(i === 0 ? '\n      ' : ',\n      ');
         await this.write(JSON.stringify(plans[i]));
       }
+
+      await this.write('\n    ],\n    "canvases": [');
+      const canvases = resources.canvases || [];
+
+      for (let i = 0; i < canvases.length; i++) {
+        await this.write(i === 0 ? '\n      ' : ',\n      ');
+        await this.write(JSON.stringify(canvases[i]));
+      }
+
       await this.write('\n    ]\n  }');
     }
+
     await this.write(',\n  "summary": ');
     await this.write(JSON.stringify(summary, null, 2).replace(/\n/g, '\n  '));
     await this.write('\n}\n');
@@ -266,12 +313,14 @@ export class ExportFileWriter {
   async abort(): Promise<void> {
     if (!this.closed) {
       this.closed = true;
+
       try {
         await this.file.close();
       } catch {
         /* already closed */
       }
     }
+
     try {
       await fs.promises.unlink(this.tmpPath);
     } catch {
@@ -280,14 +329,26 @@ export class ExportFileWriter {
   }
 }
 
-/** Read and parse a JSON file from disk without blocking the Extension Host on open(). */
+/** Read a v4 archive into the small in-memory shape used by focused tests. */
 export async function readJsonFile(
   filePath: string,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const text = await fs.promises.readFile(filePath, {
-    encoding: 'utf8',
-    signal,
-  });
-  return JSON.parse(text);
+  const handle = await fs.promises.open(filePath, 'r');
+
+  try {
+    const magic = Buffer.alloc(2);
+
+    await handle.read(magic, 0, 2, 0);
+
+    if (magic.toString('utf8') !== 'PK') {
+      throw new Error(
+        'This file is not a Cursor Chat Transit export. Export the chats again with the current extension. Older JSON exports are not imported.',
+      );
+    }
+  } finally {
+    await handle.close();
+  }
+
+  return readBundleObject(filePath, signal);
 }

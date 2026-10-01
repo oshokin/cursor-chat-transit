@@ -8,6 +8,7 @@ import type { SqliteConn } from './types';
 /** Collect stdout into a string. */
 function collectText(): { output: Writable; text: () => string } {
   const chunks: Buffer[] = [];
+
   const output = new Writable({
     /** Append one stdout chunk; decoding happens in `text()`. */
     write(chunk, _enc, cb) {
@@ -15,6 +16,7 @@ function collectText(): { output: Writable; text: () => string } {
       cb();
     },
   });
+
   return {
     /** Writable that stores stdout chunks. */
     output,
@@ -28,19 +30,23 @@ function collectText(): { output: Writable; text: () => string } {
 /** Ordered sqlite3 paths: configured, PATH, then platform fallbacks. */
 function candidateExecutables(configured?: string): string[] {
   const out: string[] = [];
+
   if (configured) return path.isAbsolute(configured) ? [configured] : [];
   const pathVar = process.env.PATH || '';
   const sep = process.platform === 'win32' ? ';' : ':';
   const ext = process.platform === 'win32' ? '.exe' : '';
+
   for (const dir of pathVar.split(sep)) {
     if (!dir) continue;
     out.push(path.join(dir, `sqlite3${ext}`));
   }
+
   if (process.platform === 'win32') {
     out.push(
       'C:\\sqlite3\\sqlite3.exe',
       'C:\\Program Files\\sqlite3\\sqlite3.exe',
     );
+
     if (process.env.USERPROFILE) {
       out.push(
         path.join(
@@ -56,6 +62,7 @@ function candidateExecutables(configured?: string): string[] {
       '/opt/homebrew/bin/sqlite3',
     );
   }
+
   return [...new Set(out.filter(Boolean))];
 }
 
@@ -64,6 +71,7 @@ async function runAndCollect(
   opts: SqliteConn & { sql: string; readOnly?: boolean },
 ): Promise<string> {
   const sink = collectText();
+
   await runSqlite({
     executable: opts.executable,
     database: opts.database,
@@ -74,6 +82,7 @@ async function runAndCollect(
     timeoutMs: opts.timeoutMs,
     signal: opts.signal,
   });
+
   return sink.text();
 }
 
@@ -86,19 +95,23 @@ export function findSqliteExecutable(configured?: string): string | null {
           p,
           process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK,
         );
+
         return p;
       }
     } catch {
       /* skip */
     }
   }
+
   return null;
 }
 
 /** Write an empty `-init` file so sqlite3 does not read `~/.sqliterc`. */
 export async function ensureInitFile(dir: string): Promise<string> {
   const initFile = path.join(dir, 'empty-sqliterc');
+
   await fs.promises.writeFile(initFile, '', { flag: 'w' });
+
   return initFile;
 }
 
@@ -107,6 +120,7 @@ export function quoteDotPath(filePath: string): string {
   if (typeof filePath !== 'string' || !filePath || /[\0\r\n]/u.test(filePath)) {
     throw new TypeError('Invalid SQLite dot-command path');
   }
+
   return `"${filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
@@ -121,6 +135,7 @@ export async function execSql(
     opts.sql,
     '',
   ].join('\n');
+
   return runAndCollect({ ...opts, sql: preamble });
 }
 
@@ -142,6 +157,7 @@ export function busyTimeoutCommand(value = 5000): string {
       'SQLite busy timeout must be an integer from 0 to 30000 ms',
     );
   }
+
   return `.timeout ${value}`;
 }
 
@@ -152,6 +168,7 @@ export async function sqliteVersion(
   signal?: AbortSignal,
 ): Promise<string> {
   const tmpDb = path.join(os.tmpdir(), `cct-version-${process.pid}.db`);
+
   try {
     return (
       await runAndCollect({
@@ -204,15 +221,19 @@ export async function backupDatabase(opts: {
 /** Decode hex ASCII bytes to binary without creating a JS string. */
 export function hexAsciiToBuffer(ascii: Buffer): Buffer {
   const len = ascii.length;
+
   if (!len) return Buffer.alloc(0);
   if (len % 2 !== 0) throw new Error('Odd hex length');
   const out = Buffer.allocUnsafe(len / 2);
+
   for (let i = 0; i < out.length; i++) {
     const hi = fromHexDigit(ascii[i * 2]);
     const lo = fromHexDigit(ascii[i * 2 + 1]);
+
     if (hi < 0 || lo < 0) throw new Error('Invalid hex');
     out[i] = (hi << 4) | lo;
   }
+
   return out;
 }
 
@@ -221,6 +242,7 @@ function fromHexDigit(c: number): number {
   if (c >= 48 && c <= 57) return c - 48;
   if (c >= 97 && c <= 102) return c - 87;
   if (c >= 65 && c <= 70) return c - 55;
+
   return -1;
 }
 
@@ -235,13 +257,16 @@ const CR = 0x0d;
 export function parseHexRowLine(line: Buffer, cols: number): Buffer[] {
   const fields: Buffer[] = [];
   let start = 0;
+
   for (let i = 0; i <= line.length; i++) {
     if (i < line.length && line[i] !== TAB) continue;
     fields.push(hexAsciiToBuffer(line.subarray(start, i)));
     start = i + 1;
     if (fields.length === cols) break;
   }
+
   while (fields.length < cols) fields.push(Buffer.alloc(0));
+
   return fields.slice(0, cols);
 }
 
@@ -252,34 +277,43 @@ export function createHexRowParser(
 ): Writable {
   const parts: Buffer[] = [];
   let partsLen = 0;
+
   /** Join buffered fragments with `suffix` into one sqlite3 list line. */
   const takeLine = (suffix: Buffer): Buffer => {
     if (!partsLen) return suffix;
     const line = Buffer.concat([...parts, suffix], partsLen + suffix.length);
+
     parts.length = 0;
     partsLen = 0;
+
     return line;
   };
+
   /** Strip a trailing CR and decode one complete hex row. */
   const flushLine = async (line: Buffer) => {
     if (line.length && line[line.length - 1] === CR) {
       line = line.subarray(0, line.length - 1);
     }
+
     if (!line.length) return;
     await onRow(parseHexRowLine(line, cols));
   };
+
   return new Writable({
     /** Hex-decode complete lines; keep a partial line in `parts`. */
     write(chunk, _enc, cb) {
       void (async () => {
         let buf = Buffer.from(chunk);
+
         while (buf.length) {
           const nl = buf.indexOf(NL);
+
           if (nl < 0) {
             parts.push(buf);
             partsLen += buf.length;
             break;
           }
+
           await flushLine(takeLine(buf.subarray(0, nl)));
           buf = buf.subarray(nl + 1);
         }
@@ -315,7 +349,9 @@ export async function execSqlHexRows(
     opts.sql,
     '',
   ].join('\n');
+
   const output = createHexRowParser(opts.cols, opts.onRow);
+
   await runSqlite({
     executable: opts.executable,
     database: opts.database,
@@ -331,7 +367,9 @@ export async function execSqlHexRows(
 /** Decode a hex column from sqlite3 list mode. */
 export function hexToBuffer(hex: string): Buffer {
   const clean = (hex || '').trim();
+
   if (!clean) return Buffer.alloc(0);
+
   return Buffer.from(clean, 'hex');
 }
 
@@ -341,9 +379,12 @@ export function parseListRows(text: string, cols: number): string[][] {
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean);
+
   return lines.map((line) => {
     const parts = line.split('\t');
+
     while (parts.length < cols) parts.push('');
+
     return parts.slice(0, cols);
   });
 }

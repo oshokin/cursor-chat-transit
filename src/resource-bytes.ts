@@ -7,7 +7,9 @@ export const MAX_RESOURCE_BYTES = 32 * 1024 * 1024;
 /** Throw a TransferError with a stable code. */
 export function resourceError(code: string, message: string): never {
   const err = new TransferError(message);
+
   err.code = code;
+
   throw err;
 }
 
@@ -24,6 +26,7 @@ export function decodeCanonicalBase64(
   if (typeof encoded !== 'string') {
     resourceError('INVALID_RESOURCE', 'Resource payload is not valid base64.');
   }
+
   if (
     !Number.isInteger(byteLength) ||
     byteLength < 0 ||
@@ -31,15 +34,19 @@ export function decodeCanonicalBase64(
   ) {
     resourceError('INVALID_RESOURCE', 'Resource byteLength is invalid.');
   }
+
   if (encoded.length > Math.ceil(MAX_RESOURCE_BYTES / 3) * 4) {
     resourceError('INVALID_RESOURCE', 'Resource payload exceeds size limit.');
   }
+
   const bytes = Buffer.from(encoded, 'base64');
+
   if (bytes.length !== byteLength || bytes.toString('base64') !== encoded) {
     resourceError(
       'INVALID_RESOURCE',
       'Resource payload does not match byteLength.',
     );
   }
+
   return bytes;
 }

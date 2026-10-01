@@ -81,11 +81,11 @@ Pushing tag `v*` runs the same CI gates, builds one VSIX, writes `SHA256SUMS`, a
 2. Install it in the real Cursor you use and smoke export/import locally and, when relevant, over Remote SSH.
 3. Publish the GitHub Release only after that check. A new version is a new tag; do not replace a published VSIX.
 
-Set the required status check name to **CI required** on `main` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself.
+Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself.
 
 ## Stale transfer lock
 
-After a crash, Cursor Chat Transit may refuse a new export or import because `transfer.lock` is still in the extension global-storage directory. A live owner is reported as `LOCKED`. A leftover file is `LOCK_RECOVERY_REQUIRED`: the operation log lists the path and recovery steps. Close every Cursor window that uses that storage, confirm the recorded pid is gone, then delete **only** that named `.lock` file. Do not delete import journals, receipts, backups, or Cursor databases. Quitting Cursor does not delete the lock. Then open Cursor and retry. This is a rare recovery step, not a prompt on every import.
+After a crash, use **Clear stale lock** when offered in the sidebar or error notification, then retry. The extension rechecks the recorded owner PID and token before removing that same `.lock` file. A live or changed owner is never removed. A lock whose owner cannot be verified needs inspection; opening the operation log shows its path. This action does not unlock SQLite, delete receipts/backups, or modify Cursor's `state.vscdb`, `-wal`, or `-shm` files.
 
 ## Keeping the code understandable
 
@@ -127,4 +127,10 @@ Core/integration tests now fail up front when `sqlite3` is absent. Use `task tes
 
 On Windows 10/11, `task setup` downloads the official Node.js zip when npm is missing. The watch script runs TypeScript via Node.
 
-Settings and command IDs now use `cursorChatTransit.*`. There are no legacy aliases. Set any previously customized values under the new keys and update custom keybindings. Existing user chat exports and journal formats are unchanged.
+Settings and command IDs now use `cursorChatTransit.*`. There are no legacy aliases. Set any previously customized values under the new keys and update custom keybindings. Only v4 ZIP exports and SQLite receipts are supported; old monolithic JSON exports must be exported again.
+
+## Opt-in performance checks
+
+Compile, then run `npm run test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases. Defaults: 3,000 messages, 16 KiB per message. `CCT_BENCH_MESSAGES`, `CCT_BENCH_MESSAGE_BYTES`, and `CCT_BENCH_RANDOM=1` select size and less-compressible payloads. `CCT_BENCH_PROJECT` can point to a separately compiled baseline for comparison. A large check can use `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
+
+Results include import/export/repeat durations, maximum batch transaction duration when instrumented, process peak sampled RSS, logical payload size and final ZIP bytes. Values describe this synthetic workload and machine; they do not predict every Cursor profile. RSS excludes SQLite child processes. The first archive creation is setup, not part of the import timing.

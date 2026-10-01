@@ -18,6 +18,7 @@ test('sparse table header keeps a known workspace name', () => {
     },
     { source: 'table', records: [{ composerId: A }] },
   ]);
+
   assert.equal(merged[0].name, 'Починить SSH');
 });
 
@@ -29,6 +30,7 @@ test('name fallback does not depend on source order', () => {
       records: [{ composerId: A, name: 'Починить SSH' }],
     },
   ]);
+
   assert.equal(merged[0].name, 'Починить SSH');
 });
 
@@ -40,6 +42,7 @@ test('a non-empty higher-rank name still wins', () => {
     },
     { source: 'table', records: [{ composerId: A, name: 'new' }] },
   ]);
+
   assert.equal(merged[0].name, 'new');
 });
 
@@ -51,6 +54,7 @@ test('an explicit empty name is not replaced', () => {
     },
     { source: 'table', records: [{ composerId: A, name: '' }] },
   ]);
+
   assert.equal(merged[0].name, '');
 });
 
@@ -59,6 +63,7 @@ test('when every source omits name, the field stays absent', () => {
     { source: 'workspace', records: [{ composerId: A, createdAt: 9 }] },
     { source: 'table', records: [{ composerId: A, lastUpdatedAt: 11 }] },
   ]);
+
   assert.equal(merged[0].name, undefined);
   assert.equal('name' in merged[0], false);
   assert.equal(chatListLabel(merged[0].name), 'Untitled chat');
@@ -75,8 +80,10 @@ test('duplicate titles stay distinct by composerId', () => {
       ],
     },
   ]);
+
   assert.equal(merged.length, 2);
   const selected = selectChats(merged, [B]);
+
   assert.equal(selected.length, 1);
   assert.equal(selected[0].composerId, B);
   assert.equal(selected[0].name, 'Same title');
@@ -93,22 +100,27 @@ test('authoritative table header wins; unique legacy id is kept', () => {
     },
     { source: 'table', records: [{ composerId: 'a', name: 'new' }] },
   ]);
+
   const byId = Object.fromEntries(merged.map((c) => [c.composerId, c]));
+
   assert.equal(byId.a.name, 'new');
   assert.equal(byId['legacy-only'].name, 'keep');
 });
 
 test('fallback copies only name and does not mutate the chosen record', () => {
   const table: ComposerHeader = { composerId: A, extra: true };
+
   const workspace: ComposerHeader = {
     composerId: A,
     name: 'Keep',
     leftover: 1,
   };
+
   const merged = mergeHeaders([
     { source: 'workspace', records: [workspace] },
     { source: 'table', records: [table] },
   ]);
+
   assert.equal(merged[0].name, 'Keep');
   assert.equal(merged[0].extra, true);
   assert.equal(merged[0].leftover, undefined);

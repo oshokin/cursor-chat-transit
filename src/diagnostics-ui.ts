@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { revealOutput, yieldToHost, type TransitLog } from './output-ui';
 import {
   diagnosticTitle,
   displayLine,
@@ -18,10 +17,9 @@ export {
 /** Show a native modal on explicit request; keep the operation output free of diagnostics. */
 export async function showDiagnosticsDialog(
   report: DiagnosticReport,
-  diagnosticsLog: TransitLog,
 ): Promise<void> {
   const text = formatDiagnosticReport(report);
-  diagnosticsLog.info(text);
+
   const detail = [
     `${displayLine(report.editorName)} · Extension ${displayLine(report.extensionVersion)}`,
     `VS Code API ${displayLine(report.editorApiVersion)}`,
@@ -38,17 +36,14 @@ export async function showDiagnosticsDialog(
     '',
     'Sharing report: paths and connection names are redacted.',
   ].join('\n');
+
   const choice = await vscode.window.showInformationMessage(
     diagnosticTitle(report),
     { modal: true, detail },
-    'Copy report',
-    'Open diagnostic log',
+    { title: 'Copy report' },
+    { title: 'Close', isCloseAffordance: true },
   );
-  if (choice === 'Copy report') await vscode.env.clipboard.writeText(text);
-  if (choice === 'Open diagnostic log') {
-    await revealOutput(diagnosticsLog, {
-      executeCommand: (command) => vscode.commands.executeCommand(command),
-      yieldToHost,
-    });
-  }
+
+  if (choice?.title === 'Copy report')
+    await vscode.env.clipboard.writeText(text);
 }

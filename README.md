@@ -2,14 +2,14 @@
 
 Move your Cursor chats between workspaces and devices.
 
-Export selected conversations or a workspace's chat history to a JSON file, then import it into another Cursor workspace. Supported exports include chat titles, messages, images, plan files, and the local data needed to continue compatible conversations.
+Export selected conversations or a workspace's chat history to a ZIP archive, then import it into another Cursor workspace. Supported exports include chat titles, messages, images, plan files, canvases, and the local data needed to continue compatible conversations.
 
 Choose a workspace once, then select **Export** or **Import**. Importing the same snapshot again does not create another copy; changed snapshots are added as separate conversations, preserving your existing chats.
 
 ## What you can do
 
 - **Move selected chats or an entire workspace's chat history.** Keep conversation titles and messages together.
-- **Work with local and Remote SSH projects.** Choose the project in the sidebar; JSON file dialogs start on your local computer.
+- **Work with local and Remote SSH projects.** Choose the project in the sidebar; ZIP file dialogs start on your local computer.
 - **Carry supported chat resources with you.** Exports include reachable local conversation blobs, chat images, and Cursor plan files when available.
 - **Import the same snapshot again without creating another copy.** Changed snapshots become separate copies, preserving chats you have already continued.
 - **See what happened.** Follow progress in the sidebar, open the operation log, or run Diagnostics for a separate status report.
@@ -49,9 +49,9 @@ To build a package yourself, see [Development](#development). A published Market
 1. In the sidebar, use **Change…** to choose the workspace whose chats you want to export.
 2. Select **Export chats**.
 3. Choose all chats or select individual conversations.
-4. Save the suggested `*.cursor-chat.json` file. You can edit its name before saving.
+4. Save the suggested `*.cursor-chat.zip` file. You can edit its name before saving.
 
-The suggested filename uses the workspace or selected chat name, cleans characters that are unsafe in filenames, and includes an export timestamp. The file remains ordinary JSON with a `.json` extension.
+The suggested filename uses the workspace or selected chat name, cleans characters that are unsafe in filenames, and includes an export timestamp. The archive is format version 4: a small manifest, chat data in bounded NDJSON parts, and resources as original bytes. Older monolithic JSON exports are not imported. Export those chats again with this version.
 
 If an export is incomplete, the result identifies affected chats. Open the operation log for details before treating that file as a complete backup.
 
@@ -74,7 +74,7 @@ The selected workspace identifies **which project's chats** to read or write. It
 
 Cursor Chat Transit runs on the local side of the editor and uses the local Cursor profile's global and workspace databases, including entries associated with Remote SSH projects. A remote project URI is kept distinct from a local path, so projects on different SSH hosts are not grouped merely because their directory names match.
 
-Import and export dialogs start in a local directory. If you explicitly choose a remote JSON file for import, the extension reads it through the editor's remote file provider. Export destinations must be local files; copy the resulting JSON elsewhere using your usual tools.
+Import and export dialogs start in a local directory. If you explicitly choose a remote ZIP archive for import, the extension reads it through the editor's remote file provider. Export destinations must be local files; copy the resulting ZIP archive elsewhere using your usual tools.
 
 This extension does not transfer the project's source files. References to files that only exist on the original machine may still need the project to be checked out or opened at the destination.
 
@@ -94,7 +94,7 @@ Chats are listed by their last update, newest first, with creation time used whe
 | Chat image attachments                | Keep supported attached images with the conversation             |
 | Cursor plan files                     | Carry referenced `.plan.md` files from the local plans directory |
 
-Exports use the extension's versioned JSON format. The current writer produces format 3; the reader also accepts format 2. Older files may lack resources needed to continue a conversation.
+The only supported format is version 4: a ZIP archive containing a manifest, bounded NDJSON parts, and binary resources. Old monolithic JSON exports are rejected; re-export with this version. One JSON record and one SQLite value are limited to 32 MiB; the entire archive may be larger.
 
 This is a chat export, not a complete Cursor profile or project backup. It does not intentionally collect account credentials, extension settings, or arbitrary project files. Chat content and attachments can themselves contain sensitive information, so review an export before sharing it.
 
@@ -144,8 +144,9 @@ Review the operation result and log. Turn recovery off again when you no longer 
 | `cursorChatTransit.plansDirectory`                 | Empty   | Read and restore local plan files in a non-default directory; empty uses `~/.cursor/plans`                              |
 | `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`   | Increase the deadline for each SQLite process on unusually large databases or slow disks; allowed range 30–3600 seconds |
 | `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`     | Wait longer for brief database contention; allowed range 0–30 seconds, with 0 meaning no wait                           |
+| `cursorChatTransit.logLevel`                       | `info`  | Show less in the operation log: `warn` or `error`. Lines are marked `[INFO]`, `[WARN]`, or `[ERROR]`                    |
 
-Path and SQLite timeout settings are machine-scoped. Paths must be absolute; shell variables and `~` are not expanded. The plans setting changes where this extension looks, not where Cursor saves new plans. Recovery is a user/application setting. Workspace settings cannot silently enable recovery or redirect the extension to another profile.
+Path and SQLite timeout settings are machine-scoped. Paths must be absolute; shell variables and `~` are not expanded. The plans setting changes where this extension looks, not where Cursor saves new plans. Recovery and the operation log level are user/application settings. Workspace settings cannot silently enable recovery, hide log lines, or redirect the extension to another profile.
 
 For `userDataDir`, select the directory containing `User`, not the project directory or an individual `state.vscdb` file. Typical locations are:
 
@@ -161,21 +162,21 @@ An explicit directory is authoritative. If its expected databases are missing, t
 
 Open the Command Palette and search for **Cursor Chat Transit**:
 
-| Command                  | Action                                         |
-| ------------------------ | ---------------------------------------------- |
-| Export Chats             | Export from the selected workspace             |
-| Import Chats             | Import a JSON file into the selected workspace |
-| Export Current Workspace | Prefer the workspace open in the editor        |
-| Diagnostics              | Open a status report                           |
-| Open Operation Log       | Show the import/export output channel          |
-| Open Diagnostic Log      | Show the diagnostic output channel             |
+| Command                  | Action                                              |
+| ------------------------ | --------------------------------------------------- |
+| Export Chats             | Export from the selected workspace                  |
+| Import Chats             | Import a v4 ZIP archive into the selected workspace |
+| Export Current Workspace | Prefer the workspace open in the editor             |
+| Diagnostics              | Open a status report                                |
+| Open Operation Log       | Show the import/export output channel               |
 
 ## Diagnostics and troubleshooting
 
-**Diagnostics** opens a status report. Detailed checks and operation logs use separate Output channels:
+**Diagnostics** opens a native dialog with **Copy report** and **Close**. There is one Output channel: **Cursor Chat Transit — Operations**.
 
-- **Cursor Chat Transit — Operations**
-- **Cursor Chat Transit — Diagnostics**
+Each line uses local time with milliseconds and an explicit UTC offset, for example `[2026-10-01 13:40:48.802+03:00] [INFO] Verify imported chat data`. Action messages use sentence case; severity is bracketed. The labelled `operation=…` field correlates one transfer. File actions include full source/destination paths, the chat name and ID when known, exact byte counts with binary units, duration and error code. Message bodies and SQL are not logged. Review private paths and chat titles before sharing logs.
+
+The sidebar shows the current stage, chat/file, elapsed time and measured progress. Remaining time estimates apply to the current measurable file or stage; unknown work stays indeterminate. ZIP extraction measures the whole archive rather than resetting its estimate for each file. Verification and resource preparation report measured counts. Backups explain that SQLite does not report their duration; dependency discovery explains that its total is not known yet. A counter unchanged for ten seconds shows the time since measured progress, without diagnosing a database lock. Estimates describe the current step, not the full remaining transfer.
 
 | Problem                                      | What to do                                                                                      |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -187,7 +188,7 @@ Open the Command Palette and search for **Cursor Chat Transit**:
 | Existing resource data differs               | Keep the existing file or data; inspect the conflict instead of overwriting it                  |
 | The previous import needs checking           | Keep the export, log, and backups; do not delete the journal merely to bypass the check         |
 | Another operation is running                 | Let it finish or cancel it before starting another import/export                                |
-| A previous transfer needs attention          | Open the operation log; close Cursor; delete only the named leftover `.lock` file               |
+| A previous transfer needs attention          | Use **Clear stale lock** when offered, then retry; a running or changed owner is never removed  |
 
 Before filing a bug, collect the extension version, Cursor version, operating system, whether the workspace is local or SSH, and the relevant diagnostic result. Remove private paths, chat text, and other sensitive content from logs. Please do not attach your full Cursor database or chat export to a public issue.
 
@@ -267,3 +268,9 @@ Prefer small functions and cohesive modules over frameworks added for hypothetic
 ## License
 
 [MIT](LICENSE). The license retains the original copyright notice and includes the notice for subsequent work on Cursor Chat Transit.
+
+### Database contention
+
+Import prepares message rows in a private temporary SQLite database and batches journal writes before taking Cursor's global write lock. Prepared dependencies and messages are copied in transactions of at most 128 rows / 8 MiB (a single permitted row can be up to 32 MiB). The composer and its list entry are published after all message batches succeed. On retry, unpublished partial messages are removed only when their recorded hashes and current bytes still match; modified rows are preserved for inspection. Importers sharing that global database are serialized. Cancellation and loss of the Extension Host terminate owned SQLite processes before cleanup returns. Each batch and final publication still need a SQLite write transaction; another writer can cause a busy error. Avoid continuing chats during this final stage and retry after the competing operation finishes.
+
+**Clear stale lock** only removes an extension lock with a verified dead owner. It does not unlock or repair SQLite. Never remove `state.vscdb`, `state.vscdb-wal` or `state.vscdb-shm` as a lock-recovery step. If Cursor itself cannot open storage, close all Cursor processes normally and preserve the database and sidecars together before investigating.

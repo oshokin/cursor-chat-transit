@@ -53,17 +53,24 @@ async function userDirWithWorkspaces(
   }>,
 ): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-picker-'));
+
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
   for (const folder of folders) {
     const storage = path.join(dir, 'User', 'workspaceStorage', folder.id);
+
     await fs.mkdir(storage, { recursive: true });
     const dbPath = path.join(storage, 'state.vscdb');
+
     await fs.writeFile(dbPath, '');
+
     if (folder.mtime !== undefined) {
       await fs.utimes(dbPath, folder.mtime / 1000, folder.mtime / 1000);
     }
+
     if (folder.meta === undefined || folder.meta === 'missing') continue;
     const jsonPath = path.join(storage, 'workspace.json');
+
     if (folder.meta === 'corrupt') {
       await fs.writeFile(jsonPath, '{not-json');
     } else if (folder.meta === 'unsupported') {
@@ -72,6 +79,7 @@ async function userDirWithWorkspaces(
       await fs.writeFile(jsonPath, JSON.stringify(folder.meta));
     }
   }
+
   return dir;
 }
 
@@ -79,11 +87,14 @@ test('missing workspace.json uses an unidentified label, not the storage id', as
   const dir = await userDirWithWorkspaces(t, [
     { id: numericId, meta: 'missing' },
   ]);
+
   const listed = paths.listWorkspaceEntries(dir);
+
   assert.equal(listed.length, 1);
   assert.equal(listed[0].identity, undefined);
   assert.equal(paths.displayLabel(listed[0]), 'Unidentified workspace');
   const item = workspacePickItems(listed, undefined)[0];
+
   assert.equal(item.label, 'Unidentified workspace');
   assert.equal(item.description, 'Workspace name unavailable');
   assert.equal(item.detail, `Storage ID: ${numericId}`);
@@ -96,10 +107,12 @@ test('corrupt workspace.json uses an unidentified label', async (t) => {
   const dir = await userDirWithWorkspaces(t, [
     { id: numericId, meta: 'corrupt' },
   ]);
+
   const item = workspacePickItems(
     paths.listWorkspaceEntries(dir),
     undefined,
   )[0];
+
   assert.equal(item.label, 'Unidentified workspace');
   assert.equal(item.detail, `Storage ID: ${numericId}`);
 });
@@ -108,10 +121,12 @@ test('unsupported workspace metadata uses an unidentified label', async (t) => {
   const dir = await userDirWithWorkspaces(t, [
     { id: numericId, meta: 'unsupported' },
   ]);
+
   const item = workspacePickItems(
     paths.listWorkspaceEntries(dir),
     undefined,
   )[0];
+
   assert.equal(item.label, 'Unidentified workspace');
   assert.equal(item.description, 'Workspace name unavailable');
 });
@@ -120,9 +135,12 @@ test('numeric storageId with valid identity keeps the project name', async (t) =
   const dir = await userDirWithWorkspaces(t, [
     { id: numericId, meta: { folder: 'file:///home/oleg/real-project' } },
   ]);
+
   const listed = paths.listWorkspaceEntries(dir);
+
   assert.equal(paths.displayLabel(listed[0]), 'real-project (local)');
   const item = workspacePickItems(listed, undefined)[0];
+
   assert.match(item.label, /real-project/);
   assert.doesNotMatch(item.label, new RegExp(numericId));
   assert.equal(item.description, 'This computer');
@@ -134,10 +152,12 @@ test('export and import workspace pickers use different titles', () => {
     workspacePickTitle('export'),
     'Export chats — choose source workspace',
   );
+
   assert.equal(
     workspacePickTitle('import'),
     'Import chats — choose destination workspace',
   );
+
   assert.equal(workspacePickTitle('select'), 'Choose workspace');
   assert.notEqual(workspacePickTitle('export'), workspacePickTitle('import'));
 });
@@ -147,12 +167,16 @@ test('Current is only set for a confirmed identity match', () => {
     kind: 'folder',
     uri: uri('ssh-remote+host-a'),
   };
+
   const matched = entry('old', current);
+
   const other = entry('new', {
     kind: 'folder',
     uri: uri('ssh-remote+host-b'),
   });
+
   const items = workspacePickItems([other, matched], current);
+
   assert.equal(items[0].isCurrent, true);
   assert.equal(items[0].entry.storageId, 'old');
   assert.match(items[0].description, /^Current · /);
@@ -165,6 +189,7 @@ test('the newest unidentified folder is not treated as Current', () => {
     kind: 'folder',
     uri: uri('', '/tmp/open', 'file'),
   });
+
   assert.equal(items[0].isCurrent, false);
   assert.equal(items[0].label, 'Unidentified workspace');
 });
@@ -173,6 +198,7 @@ test('same basename on different SSH authorities stay distinct pick rows', () =>
   const a = entry('a', { kind: 'folder', uri: uri('ssh-remote+host-a') });
   const b = entry('b', { kind: 'folder', uri: uri('ssh-remote+host-b') });
   const items = workspacePickItems([a, b], undefined);
+
   assert.equal(items.length, 2);
   assert.notEqual(items[0].entry.key, items[1].entry.key);
   assert.equal(items[0].description, 'SSH · host-a');
@@ -184,6 +210,7 @@ test('same basename on different SSH authorities stay distinct pick rows', () =>
 test('workspace pick items are a projection and do not mutate entries', () => {
   const original = entry(numericId);
   const snapshot = { ...original };
+
   workspacePickItems([original], undefined);
   assert.deepEqual(original, snapshot);
 });
@@ -192,10 +219,12 @@ test('untitled chats use a UI fallback and keep the id off the primary label', (
   assert.equal(chatListLabel(undefined), 'Untitled chat');
   assert.equal(chatListLabel(''), 'Untitled chat');
   assert.equal(chatListLabel('   '), 'Untitled chat');
+
   const items = chatPickItems([
     { composerId: 'id-1' },
     { composerId: 'id-2', name: '  Починить SSH ✨  ' },
   ]);
+
   assert.equal(items[0].label, 'Untitled chat');
   assert.equal(items[0].detail, '');
   assert.equal(items[0].description, 'Date unavailable');
@@ -209,6 +238,7 @@ test('picker shows a decoded SSH host, not encoded authority', () => {
   const hex = Buffer.from(
     JSON.stringify({ hostName: 'oshokin-laptop' }),
   ).toString('hex');
+
   const item = workspacePickItems(
     [
       entry('id', {
@@ -222,6 +252,7 @@ test('picker shows a decoded SSH host, not encoded authority', () => {
     ],
     undefined,
   )[0];
+
   assert.equal(item.label, 'dispersed-object-store');
   assert.equal(item.description, 'SSH · oshokin-laptop');
   assert.equal(item.detail, '/home/oshokin/projects/dispersed-object-store');

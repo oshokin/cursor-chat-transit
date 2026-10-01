@@ -12,13 +12,6 @@
   </head>
   <body>
     <main class="sidebar">
-      <header class="intro">
-        <div class="brand" aria-hidden="true">%%BRAND_ICON%%</div>
-        <div>
-          <h1>Cursor Chat Transit</h1>
-          <p>Take your chats with you.</p>
-        </div>
-      </header>
       <section class="source" aria-labelledby="source-label">
         <div class="section-top">
           <h2 id="source-label">WORKSPACE</h2>
@@ -48,7 +41,7 @@
         <svg aria-hidden="true" viewBox="0 0 24 24">
           <rect x="3" y="4" width="18" height="12" rx="2" />
           <path d="M8 20h8m-4-4v4" /></svg
-        >Import and export JSON files. Existing chats are kept.
+        >Import and export ZIP archives. Existing chats are kept.
       </p>
       <section
         class="operation"
@@ -68,6 +61,9 @@
         >
           Choose Export or Import to begin.
         </p>
+        <p id="stage-label" class="stage-label"></p>
+        <p id="current-item" class="secondary current-item"></p>
+        <p id="timing-label" class="secondary timing-label"></p>
         <ul id="status-items" class="status-items" hidden></ul>
         <div
           id="progress"
@@ -81,6 +77,9 @@
           <div class="progress-fill" id="progress-fill"></div>
         </div>
         <div class="status-actions operation-actions">
+          <button class="secondary-button" data-action="recoverLock" hidden>
+            Clear stale lock
+          </button>
           <button class="text-button" data-action="logs">
             Open operation log <span aria-hidden="true">↗</span></button
           ><button
@@ -103,9 +102,6 @@
               d="M9 3h6m-3 0v5l6 10a2 2 0 0 1-1.7 3H6.7A2 2 0 0 1 5 18l7-10M8 15h8"
             /></svg
           >Diagnostics
-        </button>
-        <button class="text-button" data-action="diagnosticLogs">
-          Diagnostic log <span aria-hidden="true">↗</span>
         </button>
       </footer>
     </main>

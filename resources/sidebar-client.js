@@ -40,6 +40,9 @@ window.addEventListener('message', (event) => {
         ['workspaceDetail', 'workspace-detail'],
         ['statusTitle', 'status-title'],
         ['statusDetail', 'status-detail'],
+        ['stageLabel', 'stage-label'],
+        ['currentItem', 'current-item'],
+        ['timingLabel', 'timing-label'],
     ]) {
         const el = document.getElementById(id);
         if (el && typeof s[field] === 'string')
@@ -67,6 +70,10 @@ window.addEventListener('message', (event) => {
         button.disabled =
             (busy && ['export', 'import', 'chooseWorkspace'].includes(action)) ||
                 (action === 'export' && s.sourceAvailable !== true);
+        if (action === 'recoverLock') {
+            button.hidden = s.canRecoverLock !== true;
+            button.disabled = busy;
+        }
         if (action === 'cancel')
             button.hidden = s.canCancel !== true;
         if (action === 'quitCursor') {

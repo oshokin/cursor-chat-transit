@@ -114,6 +114,8 @@ export interface SqliteConn {
 
 /** Named stage reported to the sidebar and operation log. */
 export type TransferPhase =
+  | 'extract'
+  | 'pack'
   | 'selection'
   | 'read'
   | 'validate'
@@ -127,6 +129,18 @@ export type TransferPhase =
 
 /** Optional counts for a phase; used only for progress, not for correctness. */
 export interface TransferPhaseMetrics {
+  /** Current chat, file and measurable unit. */
+  chatName?: string;
+  /** Path or name of the file currently being measured. */
+  file?: string;
+  /** What `processed` and `total` count, such as messages or blobs. */
+  unit?: string;
+  /** Stable measurable operation; changing display paths must not reset its rate. */
+  scope?: string;
+  /** 1-based position of the current chat in this phase. */
+  chatIndex?: number;
+  /** Number of chats in this phase. */
+  chatTotal?: number;
   /** Chats touched in this phase. */
   chats?: number;
   /** Bubbles touched in this phase. */
@@ -161,6 +175,11 @@ export interface TransferContext {
   onNote?: (message: string) => void;
   /** Local plans directory; default `~/.cursor/plans`. */
   plansDir?: string;
+  /**
+   * Canvas directory for this transfer.
+   * Unset uses `~/.cursor/projects/{slug}/canvases` for the workspace.
+   */
+  canvasesDir?: string;
 }
 
 /** Table names and PRAGMA table_info snapshots for layout detection. */
@@ -213,7 +232,7 @@ export interface KvResource {
   value: SqliteBytes;
 }
 
-/** Image bytes keyed by the bubble `images[].uuid`. No filesystem path. */
+/** Image bytes keyed by the bubble `images[].uuid`. Paths stay out of the envelope. */
 export interface AttachmentResource {
   /** Attachment UUID from the bubble payload. */
   id: string;
@@ -225,6 +244,16 @@ export interface AttachmentResource {
   sha256: string;
   /** File extension Cursor used beside the workspace database. */
   extension: string;
+  /**
+   * Basename to write on import, such as `{uuid}-{variant}.png`.
+   * Absent on older exports; those still write `{uuid}.{ext}`.
+   */
+  filename?: string;
+  /**
+   * Other basenames with these same bytes.
+   * Import rewrites structured paths that use them onto `filename`.
+   */
+  aliases?: string[];
 }
 
 /** Cursor plan markdown keyed by basename. No filesystem path in the envelope. */
@@ -239,7 +268,19 @@ export interface PlanResource {
   sha256: string;
 }
 
-/** Completeness of blobs, images, and plans for the chats being transferred. */
+/** Cursor canvas source keyed by basename. No filesystem path in the envelope. */
+export interface CanvasResource {
+  /** Allowlisted canvas basename. */
+  filename: string;
+  /** Canonical base64 of the canvas source. */
+  base64: string;
+  /** Decoded byte length. */
+  byteLength: number;
+  /** SHA-256 of the decoded bytes. */
+  sha256: string;
+}
+
+/** Completeness of blobs, images, plans, and canvases for the chats being transferred. */
 export interface DependencyAssessment {
   /** Whether every required dependency was found. */
   status: 'complete' | 'incomplete' | 'unsupported';
@@ -249,9 +290,11 @@ export interface DependencyAssessment {
   missingAttachments: string[];
   /** Missing plan basenames. */
   missingPlans: string[];
+  /** Missing canvas basenames. */
+  missingCanvases: string[];
 }
 
-/** Portable kv, image, and plan bytes attached to an export envelope. */
+/** Portable kv, image, plan, and canvas bytes attached to an export envelope. */
 export interface ExportResources {
   /** Allowlisted kv rows. */
   kv: KvResource[];
@@ -259,6 +302,8 @@ export interface ExportResources {
   attachments: AttachmentResource[];
   /** Plan files. */
   plans: PlanResource[];
+  /** Canvas files. Omitted by older exports. */
+  canvases?: CanvasResource[];
 }
 
 /** Why one chat was exported incomplete; counts are facts, not guesses. */
@@ -279,6 +324,8 @@ export interface ExportChatIssue {
   missingImages?: number;
   /** Missing plan count when that is the reason. */
   missingPlans?: number;
+  /** Missing canvas count when that is the reason. */
+  missingCanvases?: number;
 }
 
 /** Partial workspace pointer some older exports stored instead of a full identity. */
@@ -308,9 +355,9 @@ export interface SkippedChatRef {
   reason: string;
 }
 
-/** On-disk export JSON: headers, bodies, bubbles, optional resources, and summary. */
+/** Internal compatibility DTO for transfer helpers and tests; archives use ZIP v4. */
 export interface ExportObject {
-  /** Envelope version; 3 is current, 2 remains readable. */
+  /** Internal DTO version; not the on-disk ZIP format version. */
   formatVersion?: number;
   /** Provenance of the export, never a required write contract. */
   source?: {

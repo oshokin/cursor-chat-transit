@@ -13,6 +13,7 @@ import type { BubbleRecord, PlanResource } from './types';
 
 /** Allowlisted Cursor plan basename: `{name}.plan.md`. */
 export const PLAN_FILENAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,180}\.plan\.md$/;
+
 /** Default Cursor plan directory on this machine (`~/.cursor/plans`). */
 export function defaultPlansDirectory(): string {
   return path.join(os.homedir(), '.cursor', 'plans');
@@ -27,25 +28,30 @@ export function isPlanFilename(name: string): boolean {
 export function planFilenameFromRef(value: string): string | null {
   if (typeof value !== 'string' || !value) return null;
   let filePath = value;
+
   if (/^file:/i.test(value)) {
     try {
       filePath = fileURLToPath(value);
     } catch {
       try {
         const raw = value.replace(/^file:\/\//i, '');
+
         filePath = decodeURIComponent(raw.split('?')[0] || '');
       } catch {
         return null;
       }
     }
   }
+
   const base = path.basename(filePath.replace(/\\/g, '/'));
   let name: string;
+
   try {
     name = decodeURIComponent(base);
   } catch {
     name = base;
   }
+
   return isPlanFilename(name) ? name : null;
 }
 
@@ -55,11 +61,14 @@ function planFilenameFromUriObject(
 ): string | null {
   for (const key of ['path', 'fsPath', 'external'] as const) {
     const value = rec[key];
+
     if (typeof value === 'string') {
       const name = planFilenameFromRef(value);
+
       if (name) return name;
     }
   }
+
   return null;
 }
 
@@ -80,28 +89,36 @@ export function planFilenamesFromChat(
 ): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
+
   /** Record a unique plan basename, ignoring empty or duplicate names. */
   const add = (name: string | null) => {
     if (!name || seen.has(name)) return;
     seen.add(name);
     names.push(name);
   };
+
   /** Walk JSON looking for plan URIs; skip user-facing `text` and `rawText`. */
   const visit = (value: unknown, depth: number) => {
     if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
+
     if (Array.isArray(value)) {
       for (const item of value) visit(item, depth + 1);
+
       return;
     }
+
     if (!value || typeof value !== 'object') return;
     const rec = value as Record<string, unknown>;
+
     if (typeof rec.planUri === 'string') add(planFilenameFromRef(rec.planUri));
     if (looksLikeUriObject(rec)) add(planFilenameFromUriObject(rec));
+
     for (const [key, nested] of Object.entries(rec)) {
       if (key === 'text' || key === 'rawText') continue;
       visit(nested, depth + 1);
     }
   };
+
   if (typeof bodyText === 'string' && bodyText) {
     try {
       visit(JSON.parse(bodyText), 0);
@@ -109,14 +126,17 @@ export function planFilenamesFromChat(
       /* composer inspect handles malformed bodies */
     }
   }
+
   for (const bubble of bubbles || []) {
     if (typeof bubble.value !== 'string') continue;
+
     try {
       visit(JSON.parse(bubble.value), 0);
     } catch {
       /* bubble inspect handles malformed payloads */
     }
   }
+
   return names;
 }
 
@@ -125,10 +145,13 @@ export function encodePlan(filename: string, bytes: Buffer): PlanResource {
   if (!isPlanFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
+
   if (!Buffer.isBuffer(bytes)) throw new TypeError('Expected Buffer');
+
   if (bytes.length > MAX_RESOURCE_BYTES) {
     fail('INVALID_RESOURCE', 'Plan exceeds size limit.');
   }
+
   return {
     filename,
     base64: bytes.toString('base64'),
@@ -142,16 +165,20 @@ export function decodePlan(value: PlanResource): Buffer {
   if (!isPlanFilename(value.filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
+
   if (
     typeof value.sha256 !== 'string' ||
     !/^[0-9a-f]{64}$/.test(value.sha256)
   ) {
     fail('INVALID_RESOURCE', 'Plan checksum is invalid.');
   }
+
   const bytes = decodeCanonicalBase64(value.base64, value.byteLength);
+
   if (sha256Hex(bytes) !== value.sha256) {
     fail('INVALID_RESOURCE', 'Plan checksum does not match.');
   }
+
   return bytes;
 }
 
@@ -160,10 +187,13 @@ export function planFilePath(plansDir: string, filename: string): string {
   if (!isPlanFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
+
   const dest = path.join(plansDir, filename);
+
   if (path.basename(dest) !== filename || !pathInside(plansDir, dest)) {
     fail('INVALID_RESOURCE', 'Plan path escapes the plans directory.');
   }
+
   return dest;
 }
 
@@ -173,17 +203,23 @@ export async function readPlanFile(
   filename: string,
 ): Promise<PlanResource | null> {
   const dest = planFilePath(plansDir, filename);
+
   try {
     const dirStat = await fs.promises.lstat(plansDir);
+
     if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
   } catch {
     return null;
   }
+
   if (!staysInRoot(plansDir, dest)) return null;
+
   try {
     const lst = await fs.promises.lstat(dest);
+
     if (!lst.isFile() || lst.isSymbolicLink()) return null;
     const bytes = await fs.promises.readFile(dest);
+
     return encodePlan(filename, bytes);
   } catch {
     return null;
@@ -197,12 +233,14 @@ export async function writePlanFile(
 ): Promise<string> {
   const bytes = decodePlan(resource);
   const dest = planFilePath(plansDir, resource.filename);
+
   await writeFileNoClobber(
     plansDir,
     dest,
     bytes,
     'A Cursor plan file already exists with different data.',
   );
+
   return dest;
 }
 
@@ -213,10 +251,13 @@ export async function verifyPlanFile(
 ): Promise<void> {
   const expected = decodePlan(resource);
   const found = await readPlanFile(plansDir, resource.filename);
+
   if (!found) {
     fail('PARTIAL', 'Imported plan is missing from the plans directory.');
   }
+
   const actual = decodePlan(found);
+
   if (!actual.equals(expected)) {
     fail('PARTIAL', 'Imported plan bytes do not match the export.');
   }
@@ -230,6 +271,7 @@ export function fileUriForPlan(absPath: string): string {
 /** Point a URI-shaped object at the destination plan path. */
 function applyPlanUri(rec: Record<string, unknown>, absPath: string): void {
   const uri = new URL(fileUriForPlan(absPath));
+
   rec.path = decodeURIComponent(uri.pathname);
   rec.authority = uri.host;
   rec.query = '';
@@ -246,28 +288,36 @@ export function rewritePlanReferences(
   depth = 0,
 ): unknown {
   if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
+
   if (Array.isArray(value)) {
     return value.map((item) =>
       rewritePlanReferences(item, destByFilename, depth + 1),
     );
   }
+
   if (!value || typeof value !== 'object') return value;
   const rec = { ...(value as Record<string, unknown>) };
+
   if (typeof rec.planUri === 'string') {
     const name = planFilenameFromRef(rec.planUri);
     const dest = name ? destByFilename.get(name) : undefined;
+
     if (dest) rec.planUri = fileUriForPlan(dest);
   }
+
   if (looksLikeUriObject(rec)) {
     const name = planFilenameFromUriObject(rec);
     const dest = name ? destByFilename.get(name) : undefined;
+
     if (dest) applyPlanUri(rec, dest);
   }
+
   for (const [key, nested] of Object.entries(rec)) {
     if (key === 'text' || key === 'rawText') continue;
     if (key === 'planUri') continue;
     rec[key] = rewritePlanReferences(nested, destByFilename, depth + 1);
   }
+
   return rec;
 }
 
@@ -278,15 +328,19 @@ export function rewriteChatPlanUris(
   destByFilename: Map<string, string>,
 ): void {
   if (!destByFilename.size) return;
+
   for (const [id, body] of Object.entries(composers)) {
     const parsed: unknown = JSON.parse(body);
+
     composers[id] = JSON.stringify(
       rewritePlanReferences(parsed, destByFilename),
     );
   }
+
   for (const list of Object.values(bubbles)) {
     for (const bubble of list || []) {
       const parsed: unknown = JSON.parse(bubble.value);
+
       bubble.value = JSON.stringify(
         rewritePlanReferences(parsed, destByFilename),
       );

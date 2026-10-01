@@ -18,7 +18,9 @@ function userValue(key: string): unknown {
 /** Absolute user-setting path, or empty when unset. */
 function localPath(key: string): string {
   const raw = userValue(key);
+
   if (raw === undefined || raw === '') return '';
+
   if (
     typeof raw !== 'string' ||
     !path.isAbsolute(raw) ||
@@ -28,6 +30,7 @@ function localPath(key: string): string {
       `cursorChatTransit.${key}: enter an absolute path on this computer.`,
     );
   }
+
   return raw;
 }
 
@@ -47,7 +50,9 @@ function seconds(
   max: number,
 ): number {
   const raw = userValue(key);
+
   if (raw === undefined) return fallback;
+
   if (
     typeof raw !== 'number' ||
     !Number.isInteger(raw) ||
@@ -58,6 +63,7 @@ function seconds(
       `cursorChatTransit.${key}: enter a whole number from ${min} to ${max}.`,
     );
   }
+
   return raw;
 }
 
@@ -82,12 +88,14 @@ export function requireLocalFile(
   if (!uri || uri.scheme !== 'file') {
     throw new Error(`${label}: choose a file on this computer.`);
   }
+
   return uri.fsPath;
 }
 
 /** Options for discovering the local Cursor user-data directory. */
 export function storageOptions(): { configuredUserDataDir?: string } {
   const { userDataDir } = config();
+
   return { configuredUserDataDir: userDataDir || undefined };
 }
 
@@ -97,7 +105,9 @@ function existingDirectory(
   key: string,
 ): string | undefined {
   const last = context.globalState.get<string>(key);
+
   if (!last) return undefined;
+
   try {
     return fs.statSync(last).isDirectory() ? last : undefined;
   } catch {
@@ -134,10 +144,23 @@ export async function rememberImportDir(
   await context.globalState.update(LAST_IMPORT_DIR, path.dirname(uri.fsPath));
 }
 
+/** Operation-log threshold. Unknown values stay at `info`. */
+export type OperationLogLevel = 'info' | 'warn' | 'error';
+
+/** User/application log level. A workspace value cannot hide import failures. */
+export function operationLogLevel(): OperationLogLevel {
+  const raw = userValue('logLevel');
+
+  if (raw === 'info' || raw === 'warn' || raw === 'error') return raw;
+
+  return 'info';
+}
+
 /** User/application setting only; workspace cannot silently enable recovery. */
 export function importAllowPartial(): boolean {
   const inspect = vscode.workspace
     .getConfiguration('cursorChatTransit')
     .inspect<boolean>('import.allowPartial');
+
   return inspect?.globalValue === true;
 }

@@ -37,7 +37,9 @@ export async function runSqlite({
   if (!executable || !database || !initFile || !output) {
     throw new TypeError('Missing transport option');
   }
+
   if (signal?.aborted) throw signal.reason || new Error('Cancelled');
+
   const child = spawn(
     executable,
     [
@@ -50,23 +52,28 @@ export async function runSqlite({
     ],
     { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
   );
+
   const streamsAbort = new AbortController();
   let spawnError: Error | undefined;
   let stoppingReason: unknown;
   let stderr = Buffer.alloc(0);
   let escalation: NodeJS.Timeout | undefined;
+
   child.on('error', (error) => {
     spawnError = error;
   });
+
   child.stderr.on('data', (chunk: Buffer) => {
     stderr = Buffer.concat([stderr, chunk]).subarray(-32768);
   });
+
   const closed = new Promise<{
     /** Exit code, or null when the process was killed by a signal. */
     code: number | null;
     /** Terminating signal, or null on a normal exit. */
     sig: NodeJS.Signals | null;
   }>((resolve) => child.once('close', (code, sig) => resolve({ code, sig })));
+
   /** Abort pipelines and escalate from SIGTERM to SIGKILL. */
   const stop = (reason: unknown) => {
     if (stoppingReason) return;
@@ -76,42 +83,57 @@ export async function runSqlite({
     escalation = setTimeout(() => child.kill('SIGKILL'), 2000);
     escalation.unref();
   };
+
   /** Stop the child when the caller aborts this SQLite invocation. */
   const abort = () => stop(signal?.reason || new Error('Cancelled'));
+
   signal?.addEventListener('abort', abort, { once: true });
   if (signal?.aborted) abort();
+
   const timer = setTimeout(
     () => stop(new Error('SQLite operation timed out')),
     timeoutMs,
   );
+
   timer.unref();
+
   const source =
     typeof input === 'string' ? Readable.from([input]) : (input as Readable);
+
   if (!child.stdin || !child.stdout) {
     child.kill();
+
     throw new Error('SQLite stdio missing');
   }
+
   const pumping = Promise.all([
     pipeline(source, child.stdin, { signal: streamsAbort.signal }),
     pipeline(child.stdout, output, { signal: streamsAbort.signal }),
   ]);
+
   const handled = pumping.catch((error: unknown) => {
     stop(error);
+
     throw error;
   });
+
   try {
     const [streams, exit] = await Promise.allSettled([handled, closed]);
+
     if (spawnError) throw spawnError;
     if (stoppingReason) throw stoppingReason;
     if (streams.status === 'rejected') throw streams.reason;
     if (exit.status !== 'fulfilled') throw exit.reason;
     const { code, sig } = exit.value;
+
     if (code !== 0 || sig) {
       const error = new SqliteError(
         `SQLite failed (exit=${code}, signal=${sig || 'none'})`,
       );
+
       error.code = code ?? undefined;
       error.stderr = stderr.toString('utf8');
+
       throw error;
     }
   } finally {

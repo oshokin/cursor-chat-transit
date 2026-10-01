@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
   blobKeysFromComposerBody,
+  decodeSqliteBytes,
   imageUuidsFromBubbles,
+  resolveBlobGraph,
 } from './dependencies';
+import { canvasFilenamesFromChat } from './canvases';
 import { planFilenamesFromChat } from './plans';
+import { SnapshotHasher } from './snapshot-hash';
 import type { BubbleRecord, ComposerHeader, ExportResources } from './types';
 
 /** One bubble's identity and JSON body, used when hashing a snapshot. */
@@ -27,8 +31,8 @@ export interface SnapshotInput {
   /** Reachable kv, image, and plan bytes. */
   dependencies: Array<{
     /** Resource class. */
-    kind: 'kv' | 'image' | 'plan';
-    /** Key, image UUID, or plan basename. */
+    kind: 'kv' | 'image' | 'plan' | 'canvas';
+    /** Key, image UUID, plan basename, or canvas basename. */
     id: string;
     /** SQLite storage class when this is a kv value. */
     storageClass?: 'text' | 'blob';
@@ -47,19 +51,24 @@ export interface SnapshotInput {
 export function canonicalJson(value: unknown, depth = 0): string {
   if (depth > 128) throw new Error('Snapshot nesting limit');
   if (value === null) return 'null';
+
   if (typeof value === 'string' || typeof value === 'boolean') {
     return JSON.stringify(value);
   }
+
   if (typeof value === 'number' && Number.isFinite(value)) {
     return JSON.stringify(value);
   }
+
   if (Array.isArray(value)) {
     return (
       '[' + value.map((item) => canonicalJson(item, depth + 1)).join(',') + ']'
     );
   }
+
   if (value && typeof value === 'object') {
     const rec = value as Record<string, unknown>;
+
     return (
       '{' +
       Object.keys(rec)
@@ -73,6 +82,7 @@ export function canonicalJson(value: unknown, depth = 0): string {
       '}'
     );
   }
+
   throw new Error('Expected finite JSON data');
 }
 
@@ -81,14 +91,33 @@ export function sha256Text(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-/** SHA-256 of the canonical snapshot JSON. */
-function hash(value: unknown): string {
-  return sha256Text(canonicalJson(value));
-}
-
 /** Lexicographic order for stable fingerprint assembly. */
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Separate the conversation array from the rest of a composer body. */
+export function splitConversation(body: Record<string, unknown>): {
+  /** Composer fields without the extracted conversation array. */
+  fields: Record<string, unknown>;
+  /** Whether the array was missing, empty, or populated. */
+  state: 'absent' | 'empty' | 'present';
+  /** Conversation elements in source order. */
+  items: unknown[];
+} {
+  const fields = { ...body };
+  const headers = fields.fullConversationHeadersOnly;
+
+  delete fields.fullConversationHeadersOnly;
+
+  if (headers === undefined) {
+    return { fields, state: 'absent', items: [] };
+  }
+
+  if (!Array.isArray(headers)) throw new Error('Expected conversation array');
+  if (!headers.length) return { fields, state: 'empty', items: [] };
+
+  return { fields, state: 'present', items: headers };
 }
 
 /** Reject duplicate bubble ids or dependency identities in one snapshot. */
@@ -98,23 +127,42 @@ function unique(values: string[]): void {
   }
 }
 
-/** Stable hash of one chat snapshot; workspace rebinding is excluded. */
+/**
+ * Stable hash of one chat snapshot.
+ * Workspace rebinding is excluded. Only `fullConversationHeadersOnly[*].grouping.textPreview`
+ * is excluded. The stored chat is not modified.
+ */
 export function snapshotFingerprint(input: SnapshotInput): string {
   unique(input.bubbles.map((b) => b.bubbleId));
   unique(input.dependencies.map((d) => JSON.stringify([d.kind, d.id])));
-  const header = { ...input.header };
-  delete header.workspaceIdentifier;
-  return hash({
-    algorithm: 'cct-snapshot-v1',
-    sourceComposerId: input.sourceComposerId,
-    header,
-    body: input.body,
-    bubbles: [...input.bubbles].sort((a, b) => compare(a.bubbleId, b.bubbleId)),
-    dependencies: [...input.dependencies].sort((a, b) =>
-      compare(JSON.stringify([a.kind, a.id]), JSON.stringify([b.kind, b.id])),
-    ),
-    quality: input.quality,
-  });
+  const split = splitConversation(input.body);
+  const hasher = new SnapshotHasher();
+
+  hasher.source(input.sourceComposerId);
+  hasher.header(input.header);
+  hasher.composer(split.fields);
+  hasher.conversationState(split.state);
+
+  for (const item of split.items) hasher.conversationItem(item);
+
+  const bubbles = [...input.bubbles].sort((a, b) =>
+    compare(a.bubbleId, b.bubbleId),
+  );
+
+  for (const bubble of bubbles) {
+    hasher.bubbleDigest(
+      SnapshotHasher.bubbleComponent(bubble.bubbleId, bubble.payload),
+    );
+  }
+
+  const dependencies = [...input.dependencies].sort((a, b) =>
+    compare(JSON.stringify([a.kind, a.id]), JSON.stringify([b.kind, b.id])),
+  );
+
+  for (const dependency of dependencies) hasher.dependency(dependency);
+  hasher.quality(input.quality);
+
+  return hasher.digest();
 }
 
 /** Build a fingerprint input from one already-validated export chat. */
@@ -131,6 +179,7 @@ export function snapshotInputFromChat(opts: {
   quality: 'complete' | 'history-only';
 }): SnapshotInput {
   const bodyParsed: unknown = JSON.parse(opts.bodyText);
+
   if (
     !bodyParsed ||
     typeof bodyParsed !== 'object' ||
@@ -138,26 +187,60 @@ export function snapshotInputFromChat(opts: {
   ) {
     throw new Error('Expected composer object');
   }
+
   const bubbles: SnapshotInput['bubbles'] = [];
+
   for (const row of opts.bubbles || []) {
     const parsed: unknown = JSON.parse(row.value);
+
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('Expected bubble object');
     }
+
     bubbles.push({
       bubbleId: row.bubbleId,
       payload: parsed as Record<string, unknown>,
     });
   }
+
   const kvByKey = new Map(opts.resources.kv.map((row) => [row.key, row]));
-  const imagesById = new Map(
-    opts.resources.attachments.map((row) => [row.id.toLowerCase(), row]),
-  );
+
+  const imagesByUuid = new Map<string, typeof opts.resources.attachments>();
+
+  for (const row of opts.resources.attachments) {
+    const id = row.id.toLowerCase();
+    const list = imagesByUuid.get(id) || [];
+
+    list.push(row);
+    imagesByUuid.set(id, list);
+  }
+
   const dependencies: SnapshotInput['dependencies'] = [];
   const blobs = blobKeysFromComposerBody(opts.bodyText);
+
   if (blobs.status === 'ok') {
-    for (const key of blobs.keys) {
+    const stored = new Map<string, Buffer>();
+
+    for (const row of opts.resources.kv) {
+      if (!row.key.startsWith('agentKv:blob:')) continue;
+
+      stored.set(
+        row.key.slice('agentKv:blob:'.length),
+        decodeSqliteBytes(row.value),
+      );
+    }
+
+    const closed = resolveBlobGraph(
+      (bodyParsed as Record<string, unknown>).conversationState,
+      stored,
+    );
+
+    const ids =
+      closed.status === 'ok' ? [...closed.keys, ...closed.missing] : blobs.keys;
+
+    for (const key of ids) {
       const resource = kvByKey.get(key);
+
       dependencies.push(
         resource
           ? {
@@ -171,25 +254,33 @@ export function snapshotInputFromChat(opts: {
       );
     }
   }
+
   for (const uuid of imageUuidsFromBubbles(opts.bubbles)) {
-    const resource = imagesById.get(uuid.toLowerCase());
-    dependencies.push(
-      resource
-        ? {
-            kind: 'image',
-            id: uuid,
-            sha256: resource.sha256,
-            byteLength: resource.byteLength,
-            extension: resource.extension,
-          }
-        : { kind: 'image', id: uuid, sha256: null },
-    );
+    const rows = imagesByUuid.get(uuid.toLowerCase()) || [];
+
+    if (!rows.length) {
+      dependencies.push({ kind: 'image', id: uuid, sha256: null });
+      continue;
+    }
+
+    for (const resource of rows) {
+      dependencies.push({
+        kind: 'image',
+        id: resource.filename || uuid,
+        sha256: resource.sha256,
+        byteLength: resource.byteLength,
+        extension: resource.extension,
+      });
+    }
   }
+
   const plansByName = new Map(
     (opts.resources.plans || []).map((row) => [row.filename, row]),
   );
+
   for (const name of planFilenamesFromChat(opts.bodyText, opts.bubbles)) {
     const resource = plansByName.get(name);
+
     dependencies.push(
       resource
         ? {
@@ -201,6 +292,26 @@ export function snapshotInputFromChat(opts: {
         : { kind: 'plan', id: name, sha256: null },
     );
   }
+
+  const canvasesByName = new Map(
+    (opts.resources.canvases || []).map((row) => [row.filename, row]),
+  );
+
+  for (const name of canvasFilenamesFromChat(opts.bodyText, opts.bubbles)) {
+    const resource = canvasesByName.get(name);
+
+    dependencies.push(
+      resource
+        ? {
+            kind: 'canvas',
+            id: name,
+            sha256: resource.sha256,
+            byteLength: resource.byteLength,
+          }
+        : { kind: 'canvas', id: name, sha256: null },
+    );
+  }
+
   return {
     sourceComposerId: opts.header.composerId,
     header: { ...opts.header },
@@ -279,39 +390,73 @@ export interface TargetFacts {
   globalHeader: PresenceFlag;
   /** Whether the global `composerHeaders` table has a row for this id. */
   globalHeadersTable: PresenceFlag;
+  /**
+   * Whether that global row proves membership in this workspace.
+   * `conflict` means the stored workspace ids disagree or cannot be read.
+   */
+  globalWorkspaceBinding: 'present' | 'absent' | 'conflict';
   /** Whether a stored header for this id is marked archived. */
   archived: PresenceFlag;
+  /** Whether the composer body parses as a JSON object. */
+  bodyShape: 'absent' | 'valid' | 'invalid';
+  /** Whether every bubble id named by the body is still stored. */
+  references: 'satisfied' | 'missing';
+  /** Whether list JSON and archive flags have a supported shape. */
+  metadata: 'ok' | 'invalid';
 }
 
 /**
  * Classify a verified target from observed rows.
  *
- * `available` requires the body and a workspace list or workspace header-table
- * binding. A leftover global header alone is not a live copy. Leftover body or
- * bubbles without those workspace bindings are `detached`, so a later manual
- * import may create a new independent copy. A workspace binding without a body
- * remains `inconsistent` and stays blocked. An archived header that still has
- * a body is treated as available so a hidden chat is not duplicated; an
- * archived header whose conversation rows are gone is detached and may be
- * restored.
+ * `available` requires a well-formed body, every referenced bubble, and a
+ * workspace list, a workspace header-table row, a global header row that
+ * matches this workspace, or an archived header. A global row for another
+ * workspace, or a legacy header with no workspace claim, is not membership.
+ * A contradictory workspace claim is `inconsistent` and blocks the import.
+ * Leftover intact rows without a membership proof are `detached`, so a later
+ * manual import may create a new independent copy. A damaged body, a missing
+ * referenced bubble, or unreadable list JSON stays blocked. An archived header
+ * whose conversation rows are gone is detached and may be restored. An empty
+ * conversation is intact: a chat is not required to contain a bubble.
  */
 export function classifyTargetObservation(
   facts: TargetFacts,
 ): TargetProbeState {
+  if (
+    facts.metadata === 'invalid' ||
+    facts.bodyShape === 'invalid' ||
+    facts.references === 'missing' ||
+    facts.globalWorkspaceBinding === 'conflict'
+  ) {
+    return 'inconsistent';
+  }
+
+  const intact = facts.bodyShape === 'valid';
+
   const bound =
-    facts.workspaceList === 'present' || facts.workspaceHeaders === 'present';
-  if (bound && facts.body === 'present') return 'available';
-  if (bound) return 'inconsistent';
+    facts.workspaceList === 'present' ||
+    facts.workspaceHeaders === 'present' ||
+    facts.globalWorkspaceBinding === 'present';
+
+  if (bound && intact) return 'available';
+
+  if (
+    facts.workspaceList === 'present' ||
+    facts.workspaceHeaders === 'present'
+  ) {
+    return 'inconsistent';
+  }
+
   const leftover =
     facts.body === 'present' ||
     facts.bubbles > 0 ||
     facts.workspaceSelected === 'present' ||
     facts.globalHeader === 'present' ||
     facts.globalHeadersTable === 'present';
+
   if (!leftover) return 'deleted';
-  if (facts.archived === 'present' && facts.body === 'present') {
-    return 'available';
-  }
+  if (facts.archived === 'present' && intact) return 'available';
+
   return 'detached';
 }
 
@@ -321,6 +466,7 @@ export function formatTargetFacts(
   facts: TargetFacts,
 ): string {
   const verdict = classifyTargetObservation(facts);
+
   return [
     `target=${targetComposerId}`,
     `body=${facts.body}`,
@@ -330,7 +476,11 @@ export function formatTargetFacts(
     `workspaceHeaders=${facts.workspaceHeaders}`,
     `globalHeader=${facts.globalHeader}`,
     `globalHeadersTable=${facts.globalHeadersTable}`,
+    `globalWorkspaceBinding=${facts.globalWorkspaceBinding}`,
     `archived=${facts.archived}`,
+    `bodyShape=${facts.bodyShape}`,
+    `references=${facts.references}`,
+    `metadata=${facts.metadata}`,
     `verdict=${verdict}`,
   ].join(' ');
 }
@@ -352,30 +502,40 @@ export async function decideImport(
   const targetReceipts = receipts.filter(
     (r) => r.targetKey === input.targetKey,
   );
+
   if (targetReceipts.some((r) => r.state === 'pending')) {
     return { action: 'blocked', reason: 'pending-import' };
   }
+
   const sourceReceipts = targetReceipts.filter(
     (r) => r.sourceComposerId === input.sourceComposerId,
   );
+
   const same = sourceReceipts.filter(
     (r) => r.snapshotHash === input.snapshotHash,
   );
+
   let availableId: string | undefined;
   let sawInconsistent = false;
+
   for (const receipt of same) {
     const state = await probe(receipt.targetComposerId);
+
     if (state === 'available' && availableId === undefined) {
       availableId = receipt.targetComposerId;
     }
+
     if (state === 'inconsistent') sawInconsistent = true;
   }
+
   if (availableId) {
     return { action: 'skip', targetComposerId: availableId };
   }
+
   if (sawInconsistent) {
     return { action: 'blocked', reason: 'inconsistent-target' };
   }
+
   return {
     action: 'create',
     reason: same.length

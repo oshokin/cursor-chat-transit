@@ -6,16 +6,21 @@ import { spawnSync } from 'node:child_process';
 function findSqlite(): string | null {
   const names =
     process.platform === 'win32' ? ['sqlite3.exe', 'sqlite3'] : ['sqlite3'];
+
   const sep = process.platform === 'win32' ? ';' : ':';
+
   for (const dir of (process.env.PATH || '').split(sep)) {
     for (const name of names) {
       const candidate = path.join(dir, name);
+
       if (fs.existsSync(candidate)) return candidate;
     }
   }
+
   for (const candidate of extraCandidates()) {
     if (fs.existsSync(candidate)) return candidate;
   }
+
   return null;
 }
 
@@ -29,6 +34,7 @@ function extraCandidates(): string[] {
       '/usr/local/bin/sqlite3',
     ];
   }
+
   if (process.platform === 'win32') {
     return [
       'C:\\ProgramData\\chocolatey\\bin\\sqlite3.exe',
@@ -36,6 +42,7 @@ function extraCandidates(): string[] {
       'C:\\sqlite3\\sqlite3.exe',
     ];
   }
+
   return ['/usr/bin/sqlite3', '/usr/local/bin/sqlite3'];
 }
 
@@ -46,23 +53,30 @@ function installSqlite(): void {
       stdio: 'inherit',
       shell: false,
     });
+
     if (result.status !== 0) throw new Error('Failed to install sqlite3');
+
     return;
   }
+
   if (process.platform === 'darwin') {
     const result = spawnSync('brew', ['install', 'sqlite'], {
       stdio: 'inherit',
       shell: false,
     });
+
     if (result.status !== 0)
       throw new Error('Failed to install sqlite3 with Homebrew');
+
     return;
   }
+
   if (process.platform === 'win32') {
     const result = spawnSync('choco', ['install', 'sqlite', '-y'], {
       stdio: 'inherit',
       shell: false,
     });
+
     if (result.status !== 0)
       throw new Error('Failed to install sqlite3 with Chocolatey');
   }
@@ -70,18 +84,23 @@ function installSqlite(): void {
 
 /** sqlite3 path found on PATH or after install. */
 let exe = findSqlite();
+
 if (!exe) {
   installSqlite();
   exe = findSqlite();
 }
+
 if (!exe) throw new Error('sqlite3 CLI is required for CI integration tests');
 /** `sqlite3 --version` probe used to prove the binary runs. */
 const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', shell: false });
+
 if (ver.status !== 0) throw new Error('sqlite3 --version failed');
 process.stdout.write(ver.stdout);
+
 if (process.env.GITHUB_ENV) {
   fs.appendFileSync(process.env.GITHUB_ENV, `SQLITE3_PATH=${exe}\n`);
 }
+
 if (process.env.GITHUB_PATH) {
   fs.appendFileSync(process.env.GITHUB_PATH, `${path.dirname(exe)}\n`);
 }

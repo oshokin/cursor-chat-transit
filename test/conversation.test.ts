@@ -55,6 +55,7 @@ function payload() {
 test('every ordered conversation header resolves after clone', async () => {
   const { cloned } = await cloneExportObjectForCopy(payload());
   const id = cloned.allComposers[0].composerId;
+
   const body = JSON.parse(cloned.composers[id]) as {
     fullConversationHeadersOnly: Array<{
       bubbleId: string;
@@ -66,26 +67,33 @@ test('every ordered conversation header resolves after clone', async () => {
     text: string;
     name: string;
   };
+
   const ids = new Set(cloned.bubbles?.[id].map((b) => b.bubbleId));
+
   assert.equal(
     body.fullConversationHeadersOnly.filter((h) => !ids.has(h.bubbleId)).length,
     0,
   );
+
   assert.equal(body.fullConversationHeadersOnly.length, 2);
+
   assert.equal(
     body.fullConversationHeadersOnly[0].bubbleId,
     cloned.bubbles?.[id][0].bubbleId,
   );
+
   assert.equal(body.fullConversationHeadersOnly[0].type, 1);
   assert.equal(body.fullConversationHeadersOnly[0].createdAt, 7);
   assert.equal(body.text, B);
   assert.equal(body.name, 'Fixture');
   assert.equal(body.fullConversationHeadersOnly[0].serverBubbleId, B);
   assert.equal(body.fullConversationHeadersOnly[0].grouping?.textPreview, B);
+
   const first = JSON.parse(cloned.bubbles?.[id][0].value || '{}') as {
     text: string;
     serverBubbleId: string;
   };
+
   assert.equal(first.text, `Keep ${B}`);
   assert.equal(first.serverBubbleId, B);
 });
@@ -93,22 +101,27 @@ test('every ordered conversation header resolves after clone', async () => {
 test('firstEditBubbleId uses the same per-composer map', async () => {
   const { cloned } = await cloneExportObjectForCopy(payload());
   const id = cloned.allComposers[0].composerId;
+
   const body = JSON.parse(cloned.composers[id]) as {
     originalFileStates: Record<
       string,
       { firstEditBubbleId: string; extra: boolean }
     >;
   };
+
   assert.equal(
     body.originalFileStates['file:///fixture.ts'].firstEditBubbleId,
     cloned.bubbles?.[id][1].bubbleId,
   );
+
   assert.equal(body.originalFileStates['file:///fixture.ts'].extra, true);
 });
 
 test('dangling ordered header is rejected before import', async () => {
   const input = payload();
+
   input.bubbles[A].pop();
+
   await assert.rejects(
     () => cloneExportObjectForCopy(input),
     /reference|missing.*message|missing.*bubble|incomplete/i,
@@ -117,7 +130,9 @@ test('dangling ordered header is rejected before import', async () => {
 
 test('mismatched wrapper key is rejected before import', async () => {
   const input = payload();
+
   input.bubbles[A][0].key = `bubbleId:${A}:${C}`;
+
   await assert.rejects(
     () => cloneExportObjectForCopy(input),
     /key|mismatch|invalid/i,
@@ -160,25 +175,31 @@ test('the same old bubbleId in two chats stays scoped after clone', async () => 
       ],
     },
   };
+
   const { cloned } = await cloneExportObjectForCopy(second);
   const idA = cloned.allComposers[0].composerId;
   const idD = cloned.allComposers[1].composerId;
+
   const headerA = (
     JSON.parse(cloned.composers[idA]) as {
       fullConversationHeadersOnly: Array<{ bubbleId: string }>;
     }
   ).fullConversationHeadersOnly[0].bubbleId;
+
   const headerD = (
     JSON.parse(cloned.composers[idD]) as {
       fullConversationHeadersOnly: Array<{ bubbleId: string }>;
     }
   ).fullConversationHeadersOnly[0].bubbleId;
+
   assert.notEqual(headerA, headerD);
   assert.equal(headerA, cloned.bubbles?.[idA][0].bubbleId);
   assert.equal(headerD, cloned.bubbles?.[idD][0].bubbleId);
+
   assert.equal(
     JSON.parse(cloned.bubbles?.[idA][0].value || '{}').text,
     'alpha',
   );
+
   assert.equal(JSON.parse(cloned.bubbles?.[idD][0].value || '{}').text, 'beta');
 });

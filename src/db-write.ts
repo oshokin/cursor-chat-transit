@@ -1,3 +1,4 @@
+import { traceIO } from './transfer-events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { finiteInt, sqlText } from './core';
@@ -22,24 +23,34 @@ export async function createVerifiedBackup(opts: {
   busyTimeoutMs?: number;
 }): Promise<string> {
   const { executable, database, destDir, initFile, signal } = opts;
+
   await fs.promises.mkdir(destDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+
   const dest = path.join(
     destDir,
     `${path.basename(database, '.vscdb')}.backup-${stamp}.vscdb`,
   );
-  await backupDatabase({
-    executable,
-    database,
-    dest,
-    initFile,
-    signal,
-    timeoutMs: opts.timeoutMs,
-    busyTimeoutMs: opts.busyTimeoutMs,
-  });
+
+  await traceIO(
+    'Back up database',
+    { source: database, destination: dest },
+    () =>
+      backupDatabase({
+        executable,
+        database,
+        dest,
+        initFile,
+        signal,
+        timeoutMs: opts.timeoutMs,
+        busyTimeoutMs: opts.busyTimeoutMs,
+      }),
+  );
+
   if (!fs.existsSync(dest) || fs.statSync(dest).size === 0) {
     throw new Error(`Backup was not created: ${dest}`);
   }
+
   return dest;
 }
 
@@ -48,11 +59,14 @@ export function kvInsertSql(
   pairs: Array<{ key: string; value: string }>,
 ): string {
   let sql = '';
+
   for (const { key, value } of pairs) {
     const v =
       typeof value === 'string' ? sqlText(value) : sqlText(String(value));
+
     sql += `INSERT INTO cursorDiskKV (key, value) SELECT ${sqlText(key)}, ${v} WHERE NOT EXISTS (SELECT 1 FROM cursorDiskKV WHERE key = ${sqlText(key)});\n`;
   }
+
   return sql;
 }
 
@@ -63,6 +77,7 @@ export function sqliteResourceLiteral(
 ): string {
   if (!Buffer.isBuffer(bytes)) throw new TypeError('Expected Buffer');
   const literal = `X'${bytes.toString('hex')}'`;
+
   return kind === 'blob' ? literal : `CAST(${literal} AS TEXT)`;
 }
 
@@ -72,14 +87,17 @@ export function kvInsertTypedSql(
 ): string {
   let sql =
     'CREATE TEMP TABLE IF NOT EXISTS cct_resource_guard (ok INTEGER CONSTRAINT cct_resource_conflict CHECK(ok = 1));\n';
+
   for (const row of rows) {
     const keySql = sqlText(row.key);
     const valueSql = sqliteResourceLiteral(row.bytes, row.storageClass);
     const expectedHex = row.bytes.toString('hex').toUpperCase();
     const expectedType = row.storageClass;
+
     sql += `INSERT INTO cursorDiskKV (key, value) SELECT ${keySql}, ${valueSql} WHERE NOT EXISTS (SELECT 1 FROM cursorDiskKV WHERE key = ${keySql});\n`;
     sql += `INSERT INTO temp.cct_resource_guard(ok) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM cursorDiskKV WHERE key = ${keySql} AND typeof(value) = '${expectedType}' AND upper(hex(CAST(value AS BLOB))) = '${expectedHex}');\n`;
   }
+
   return sql;
 }
 
@@ -96,12 +114,15 @@ export function itemCasReplaceSql(
 ): string {
   const next = sqlText(JSON.stringify(value));
   const keySql = sqlText(key);
+
   // With sqlite3 -bail, a failed guard terminates before COMMIT. Closing
   // the connection then rolls back the entire open transaction.
   const guard =
     'CREATE TEMP TABLE IF NOT EXISTS cct_cas_guard (ok INTEGER CONSTRAINT cct_cas_conflict CHECK(ok = 1));';
+
   const check =
     'INSERT INTO temp.cct_cas_guard(ok) SELECT 0 WHERE changes() != 1;';
+
   if (expectedRaw === null) {
     return [
       guard,
@@ -109,9 +130,11 @@ export function itemCasReplaceSql(
       check,
     ].join('\n');
   }
+
   const expectedHex = Buffer.from(expectedRaw, 'utf8')
     .toString('hex')
     .toUpperCase();
+
   return [
     guard,
     `UPDATE ItemTable SET value = ${next} WHERE key = ${keySql} AND upper(hex(value)) = '${expectedHex}';`,
@@ -125,6 +148,7 @@ export function isCasConflict(err: unknown): boolean {
     err instanceof Error
       ? `${err.message} ${'stderr' in err ? String((err as { stderr?: string }).stderr || '') : ''}`
       : String(err);
+
   return text.includes('cas-conflict') || text.includes('cct_cas_conflict');
 }
 
@@ -134,6 +158,7 @@ export function isResourceConflict(err: unknown): boolean {
     err instanceof Error
       ? `${err.message} ${'stderr' in err ? String((err as { stderr?: string }).stderr || '') : ''}`
       : String(err);
+
   return (
     text.includes('resource-conflict') || text.includes('cct_resource_conflict')
   );
@@ -161,6 +186,7 @@ export function headerUpsertSql(
   /** True when this composerHeaders table actually has `name`. */
   const has = (name: string) => columns.includes(name);
   let sql = '';
+
   for (const c of composers) {
     if (!c || !c.composerId) continue;
     const created = finiteInt(c.createdAt, Date.now());
@@ -168,6 +194,7 @@ export function headerUpsertSql(
     const checkpoint = finiteInt(c.conversationCheckpointLastUpdatedAt, null);
     const cols = ['composerId', 'value'];
     const vals = [sqlText(c.composerId), sqlText(JSON.stringify(c))];
+
     maybeCol(
       cols,
       vals,
@@ -175,7 +202,9 @@ export function headerUpsertSql(
       has('workspaceId'),
       sqlText(workspaceId),
     );
+
     maybeCol(cols, vals, 'createdAt', has('createdAt'), String(created));
+
     maybeCol(
       cols,
       vals,
@@ -183,6 +212,7 @@ export function headerUpsertSql(
       has('lastUpdatedAt'),
       String(updated),
     );
+
     maybeCol(
       cols,
       vals,
@@ -190,6 +220,7 @@ export function headerUpsertSql(
       has('isArchived'),
       c.isArchived ? '1' : '0',
     );
+
     maybeCol(
       cols,
       vals,
@@ -197,7 +228,9 @@ export function headerUpsertSql(
       has('isSubagent'),
       c.isBestOfNSubcomposer ? '1' : '0',
     );
+
     maybeCol(cols, vals, 'recency', has('recency'), String(updated));
+
     maybeCol(
       cols,
       vals,
@@ -205,11 +238,14 @@ export function headerUpsertSql(
       has('checkpointAt'),
       checkpoint === null ? 'NULL' : String(checkpoint),
     );
+
     sql += `INSERT INTO composerHeaders (${cols.join(',')}) VALUES (${vals.join(',')})\n`;
+
     sql += `ON CONFLICT(composerId) DO UPDATE SET ${cols
       .filter((n) => n !== 'composerId')
       .map((n) => `${n}=excluded.${n}`)
       .join(',')};\n`;
   }
+
   return sql;
 }

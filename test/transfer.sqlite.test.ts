@@ -34,6 +34,7 @@ const identity: WorkspaceIdentity = {
     fragment: '',
   },
 };
+
 /** Composer header bound to `identity`. */
 const header = {
   composerId: A,
@@ -86,11 +87,14 @@ async function fixture(
   opts: { globalExtra?: string; workspaceSchema?: string } = {},
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-transfer-'));
+
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
   const ctx: TransferContext = {
     executable: executable as string,
     initFile: await sql.ensureInitFile(dir),
   };
+
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
     storageId: 'fixture',
@@ -100,8 +104,10 @@ async function fixture(
     mtime: 0,
     key: 'fixture',
   };
+
   const gl = { ...ctx, database: workspace.globalDbPath };
   const ws = { ...ctx, database: workspace.workspaceDbPath };
+
   await sql.execSqlScript({
     ...gl,
     sql: `PRAGMA journal_mode=WAL;
@@ -110,6 +116,7 @@ CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB);
 INSERT INTO ItemTable VALUES('composer.composerHeaders','{"allComposers":[]}');
 ${opts.globalExtra || ''}`,
   });
+
   await sql.execSqlScript({
     ...ws,
     sql: `PRAGMA journal_mode=WAL; ${
@@ -117,6 +124,7 @@ ${opts.globalExtra || ''}`,
       'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);'
     }`,
   });
+
   return { dir, ctx, workspace, gl, ws };
 }
 
@@ -125,13 +133,16 @@ test(
   { skip },
   async (t) => {
     const { dir, gl } = await fixture(t);
+
     const dest =
       process.platform === 'win32'
         ? path.join(dir, 'backup-dir', 'new.vscdb')
         : path.join(dir, String.raw`backup\new.vscdb`);
+
     if (process.platform === 'win32') {
       await fs.mkdir(path.dirname(dest), { recursive: true });
     }
+
     await sql.backupDatabase({ ...gl, dest });
     assert.ok((await fs.stat(dest)).size > 0);
   },
@@ -143,8 +154,10 @@ test(
   async (t) => {
     const { dir, gl } = await fixture(t);
     const destDir = path.join(dir, "O'Brien");
+
     await fs.mkdir(destDir);
     const dest = path.join(destDir, 'backup.vscdb');
+
     await sql.backupDatabase({ ...gl, dest });
     assert.ok((await fs.stat(dest)).size > 0);
   },
@@ -158,11 +171,14 @@ test(
       workspaceSchema:
         'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB,requiredExtra TEXT NOT NULL);',
     });
+
     await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
+
     const count = await sql.execSql({
       ...gl,
       sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
     });
+
     assert.equal(count.trim(), '0');
   },
 );
@@ -173,6 +189,7 @@ test(
   async (t) => {
     const { ctx, workspace } = await fixture(t);
     const obj = payload();
+
     obj.bubbles[A][0].value = '{"broken"';
     await assert.rejects(transfer.importFromObject(ctx, obj, workspace));
   },
@@ -183,16 +200,20 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, ws } = await fixture(t);
+
     await sql.execSqlScript({
       ...ws,
       sql: db.itemReplaceSql('composer.composerData', {
         selectedComposerIds: [],
       }),
     });
+
     const original = db.readItemTextImpl;
     let injected = false;
+
     db.testHooks.readItemText = async (conn, key) => {
       const old = await original(conn, key);
+
       if (
         !injected &&
         conn.database === ws.database &&
@@ -200,21 +221,26 @@ test(
       ) {
         injected = true;
         const parsed = old ? JSON.parse(old) : {};
+
         await sql.execSqlScript({
           ...ws,
           sql: db.itemReplaceSql(key, { ...parsed, concurrentMarker: true }),
         });
       }
+
       return old;
     };
+
     try {
       await transfer.importFromObject(ctx, payload(), workspace);
     } finally {
       delete db.testHooks.readItemText;
     }
+
     const stored = JSON.parse(
       (await original(ws, 'composer.composerData')) || '{}',
     ) as { concurrentMarker?: boolean };
+
     assert.equal(stored.concurrentMarker, true);
   },
 );
@@ -224,31 +250,40 @@ test(
   { skip },
   async (t) => {
     const { dir, ctx, workspace, gl, ws } = await fixture(t);
+
     await sql.execSqlScript({
       ...gl,
       sql: db.kvInsertSql([
         { key: `composerData:${A}`, value: JSON.stringify({ composerId: A }) },
       ]),
     });
+
     await sql.execSqlScript({
       ...ws,
       sql: db.itemReplaceSql('composer.composerData', {
         allComposers: [header],
       }),
     });
+
     const original = db.readKvTextImpl;
     let injected = false;
+
     db.testHooks.readKvText = async (conn, key) => {
       const body = await original(conn, key);
+
       if (body !== null && !injected && key.startsWith('composerData:')) {
         injected = true;
         await sql.execSqlScript({ ...gl, sql: 'DELETE FROM cursorDiskKV;' });
+
         return null;
       }
+
       return body;
     };
+
     let result:
       { skipped: true; reason: string } | { complete: boolean } | undefined;
+
     try {
       result = await transfer.exportToFile(
         ctx,
@@ -260,6 +295,7 @@ test(
     } finally {
       delete db.testHooks.readKvText;
     }
+
     assert.equal(result && 'complete' in result && result.complete, false);
   },
 );
@@ -270,15 +306,18 @@ test(
   async (t) => {
     const { ctx, workspace, gl, ws } = await fixture(t);
     const result = await transfer.importFromObject(ctx, payload(), workspace);
+
     assert.equal(result.imported, 1);
     const glInfo = await db.inspectDatabase(gl);
     const wsInfo = await db.inspectDatabase(ws);
+
     const headers = await db.resolveComposers(ws, gl, {
       storageId: workspace.storageId,
       identity,
       layoutWs: wsInfo.layout,
       layoutGl: glInfo.layout,
     });
+
     assert.equal(headers.length, 1);
   },
 );
@@ -291,11 +330,14 @@ test(
       globalExtra:
         'CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY,workspaceId TEXT,value BLOB,mustFill TEXT NOT NULL);',
     });
+
     await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
+
     const count = await sql.execSql({
       ...gl,
       sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
     });
+
     assert.equal(count.trim(), '0');
   },
 );
@@ -307,6 +349,7 @@ test(
     const { ctx, workspace } = await fixture(t, {
       workspaceSchema: 'CREATE TABLE UnknownWorkspace(foo TEXT);',
     });
+
     await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
   },
 );
@@ -316,6 +359,7 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await fixture(t);
+
     const obj = {
       formatVersion: 2,
       allComposers: [{ composerId: A, name: 'Fixture' }],
@@ -344,9 +388,11 @@ test(
         ],
       },
     };
+
     const result = await transfer.importFromObject(ctx, obj, workspace);
     const newId = result.composerIds[0];
     const conn = { ...gl, readOnly: true };
+
     const body = JSON.parse(
       (await db.readKvText(conn, `composerData:${newId}`)) || '{}',
     ) as {
@@ -356,28 +402,34 @@ test(
         serverBubbleId: string;
       }>;
     };
+
     const ids = await db.listBubbleIds(conn, newId);
+
     assert.equal(
       body.fullConversationHeadersOnly.filter((h) => !ids.has(h.bubbleId))
         .length,
       0,
     );
+
     assert.equal(body.fullConversationHeadersOnly[0].serverBubbleId, X);
     assert.equal(body.name, 'Fixture');
   },
 );
 
 test(
-  'exhausted global CAS rolls back composer writes on every attempt',
+  'exhausted global CAS keeps a partially staged chat unpublished',
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await fixture(t);
     const original = db.readItemTextImpl;
     let injected = 0;
+
     db.testHooks.readItemText = async (conn, key) => {
       const raw = await original(conn, key);
+
       if (conn.database === gl.database && key === 'composer.composerHeaders') {
         injected++;
+
         await sql.execSqlScript({
           ...gl,
           sql: db.itemReplaceSql(key, {
@@ -386,22 +438,36 @@ test(
           }),
         });
       }
+
       return raw;
     };
+
     try {
       await assert.rejects(
         transfer.importFromObject(ctx, payload(), workspace),
-        db.isCasConflict,
+        (error: unknown) =>
+          Boolean(
+            error &&
+            typeof error === 'object' &&
+            'code' in error &&
+            error.code === 'PARTIAL',
+          ),
       );
     } finally {
       delete db.testHooks.readItemText;
     }
+
     assert.equal(injected, 5);
+
     const count = await sql.execSql({
       ...gl,
       sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
     });
+
     assert.equal(count.trim(), '0');
+    const retry = await transfer.importFromObject(ctx, payload(), workspace);
+
+    assert.equal(retry.imported, 1);
   },
 );
 
@@ -412,10 +478,13 @@ test(
     const { ctx, workspace } = await fixture(t);
     const brokenId = '22222222-2222-4222-8222-222222222222';
     const obj = payload([A, brokenId]);
+
     obj.bubbles[brokenId]![0]!.value = 'null';
+
     const result = await transfer.importFromObject(ctx, obj, workspace, {
       allowPartial: true,
     });
+
     assert.equal(result.imported, 1);
     assert.equal(result.skipped, 1);
     assert.equal(result.skippedChats[0]?.composerId, brokenId);

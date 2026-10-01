@@ -29,6 +29,7 @@ const skip = executable ? false : 'sqlite3 CLI is required for recovery tests';
 
 /** SHA-256 of bytes that are deliberately absent from storage. */
 const digest = createHash('sha256').update('missing').digest('hex');
+
 /** conversationState that names the missing blob. */
 const state =
   '~' +
@@ -40,11 +41,14 @@ const state =
 /** Throwaway destination databases for recovery imports. */
 async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-recovery-'));
+
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
   const ctx: TransferContext = {
     executable: executable as string,
     initFile: await sql.ensureInitFile(dir),
   };
+
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
     storageId: 'target',
@@ -57,8 +61,10 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
     globalDbPath: path.join(dir, 'global.vscdb'),
     workspaceDbPath: path.join(dir, 'workspace.vscdb'),
   };
+
   const gl = { ...ctx, database: workspace.globalDbPath };
   const ws = { ...ctx, database: workspace.workspaceDbPath };
+
   await sql.execSqlScript({
     ...gl,
     sql: `PRAGMA journal_mode=WAL;
@@ -66,10 +72,12 @@ CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);
 CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB);
 INSERT INTO ItemTable VALUES('composer.composerHeaders','{"allComposers":[]}');`,
   });
+
   await sql.execSqlScript({
     ...ws,
     sql: 'PRAGMA journal_mode=WAL; CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
   });
+
   return { ctx, workspace, gl };
 }
 
@@ -131,15 +139,18 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await setup(t);
+
     await assert.rejects(
       () => transfer.importFromObject(ctx, mixedExport(), workspace),
       (err: unknown) =>
         err instanceof TransferError && err.code === 'MISSING_DEPENDENCY',
     );
+
     const count = await sql.execSql({
       ...gl,
       sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
     });
+
     assert.equal(count.trim(), '0');
   },
 );
@@ -149,23 +160,28 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await setup(t);
+
     const result = await transfer.importFromObject(
       ctx,
       mixedExport(),
       workspace,
       { allowPartial: true },
     );
+
     assert.equal(result.complete, 1);
     assert.equal(result.historyOnly, 1);
     assert.equal(result.skipped, 0);
     assert.equal(result.imported, 2);
     const names = [];
+
     for (const id of result.composerIds) {
       const body = JSON.parse(
         (await db.readKvText(gl, `composerData:${id}`)) || '{}',
       ) as { name?: string };
+
       names.push(body.name);
     }
+
     assert.deepEqual(names.sort(), ['Complete', 'History only']);
   },
 );
@@ -175,6 +191,7 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await setup(t);
+
     await assert.rejects(
       () =>
         transfer.importFromObject(
@@ -192,10 +209,12 @@ test(
       (err: unknown) =>
         err instanceof TransferError && err.code === 'NOTHING_TO_IMPORT',
     );
+
     const count = await sql.execSql({
       ...gl,
       sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
     });
+
     assert.equal(count.trim(), '0');
   },
 );
@@ -206,6 +225,7 @@ test(
   async (t) => {
     const { ctx, workspace } = await setup(t);
     const obj = mixedExport();
+
     obj.resources = {
       kv: [
         {
@@ -221,6 +241,7 @@ test(
       attachments: [],
       plans: [],
     };
+
     await assert.rejects(
       () =>
         transfer.importFromObject(ctx, obj, workspace, { allowPartial: true }),

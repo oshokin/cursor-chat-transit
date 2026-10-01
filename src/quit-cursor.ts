@@ -7,6 +7,7 @@ const QUIT_COMMAND = 'workbench.action.quit';
 export async function canQuitCursor(): Promise<boolean> {
   if (vscode.env.uiKind !== vscode.UIKind.Desktop) return false;
   if (!/\bcursor\b/i.test(vscode.env.appName)) return false;
+
   return (await vscode.commands.getCommands(true)).includes(QUIT_COMMAND);
 }
 
@@ -30,29 +31,39 @@ export function createQuitCursorAction(
 ): () => Promise<void> {
   /** Prevent overlapping requests while capability lookup or native quit is pending. */
   let requestingQuit = false;
+
   return async () => {
     if (requestingQuit || !importNeedsRestart()) return;
+
     if (isBusy()) {
       await vscode.window.showInformationMessage(
         'Wait for the current transfer to finish before quitting Cursor.',
       );
+
       return;
     }
+
     requestingQuit = true;
+
     try {
       if (!(await canQuitCursor())) {
         await vscode.window.showInformationMessage(
           'Quit Cursor from its application menu, then reopen it manually.',
         );
+
         return;
       }
+
       if (!importNeedsRestart()) return;
+
       if (isBusy()) {
         await vscode.window.showInformationMessage(
           'Wait for the current transfer to finish before quitting Cursor.',
         );
+
         return;
       }
+
       log.info('Quit Cursor requested by the user.');
       await vscode.commands.executeCommand(QUIT_COMMAND);
     } catch (error) {
@@ -61,6 +72,7 @@ export function createQuitCursorAction(
           error instanceof Error ? error.message : String(error)
         }`,
       );
+
       await vscode.window.showErrorMessage(
         'Unable to quit Cursor. Use the application menu to quit it manually.',
       );

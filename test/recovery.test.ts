@@ -4,6 +4,7 @@ import { planRecovery } from '../src/recovery';
 
 /** Chat that can be imported complete. */
 const complete = { status: 'complete' as const, composerId: 'a' };
+
 /** Chat that is missing blobs and images but still has history. */
 const partial = {
   status: 'missing-dependencies' as const,
@@ -11,7 +12,9 @@ const partial = {
   missingBlobs: 2,
   missingImages: 1,
   missingPlans: 0,
+  missingCanvases: 0,
 };
+
 /** Chat that cannot be recovered even with allowPartial. */
 const bad = {
   status: 'unusable-chat' as const,

@@ -36,7 +36,8 @@
     "resources/**",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "vendor/**"
   ],
   "contributes": {
     "configuration": {
@@ -81,6 +82,17 @@
           "maximum": 30,
           "scope": "machine",
           "description": "How long SQLite waits for a database lock before failing. Applies to reads, writes and backups. Increase only for brief database contention."
+        },
+        "cursorChatTransit.logLevel": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "error"
+          ],
+          "default": "info",
+          "scope": "application",
+          "markdownDescription": "Minimum level written to the operation log. `info` shows progress, warnings, and errors. `warn` shows warnings and errors. `error` shows failures only. Each line is marked INFO, WARN, or ERROR."
         }
       }
     },
@@ -140,11 +152,6 @@
         "command": "cursorChatTransit.showOutput",
         "title": "Open Operation Log",
         "category": "Cursor Chat Transit"
-      },
-      {
-        "command": "cursorChatTransit.showDiagnosticOutput",
-        "title": "Open Diagnostic Log",
-        "category": "Cursor Chat Transit"
       }
     ]
   },
@@ -162,6 +169,7 @@
     "test:unit": "node --import tsx scripts/test-core.ts --unit test",
     "test:sqlite": "node --import tsx scripts/test-core.ts --sqlite test",
     "test:host": "node --import tsx scripts/test-host.ts",
+    "test:perf": "node --import tsx scripts/perf-bundle.ts",
     "check-package": "node --import tsx scripts/check-package.ts",
     "ensure-ci-sqlite": "node --import tsx scripts/ensure-ci-sqlite.ts",
     "check": "npm run compile && npm run typecheck && npm run lint && npm run format:check && npm test",
@@ -172,8 +180,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^24.5.2",
     "@types/vscode": "1.85.0",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.6",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "eslint": "^10.11.0",
@@ -182,7 +193,8 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.71.0",
-    "yauzl": "3.4.0"
+    "yauzl": "3.4.0",
+    "yazl": "2.5.1"
   },
   "overrides": {
     "qs": "6.16.0"

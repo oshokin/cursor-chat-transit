@@ -27,6 +27,7 @@ const B = '22222222-2222-4222-8222-222222222222';
 const bubble = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
 const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable
   ? false
@@ -68,11 +69,14 @@ async function fixture(
   opts?: { headers?: boolean },
 ) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-title-'));
+
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
   const ctx: TransferContext = {
     executable: executable as string,
     initFile: await sql.ensureInitFile(dir),
   };
+
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
     storageId: 'fixture',
@@ -82,8 +86,10 @@ async function fixture(
     mtime: 0,
     key: 'fixture',
   };
+
   const gl = { ...ctx, database: workspace.globalDbPath };
   const ws = { ...ctx, database: workspace.workspaceDbPath };
+
   await sql.execSqlScript({
     ...gl,
     sql: `PRAGMA journal_mode=WAL;
@@ -91,15 +97,18 @@ CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);
 CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB);
 INSERT INTO ItemTable VALUES('composer.composerHeaders','{"allComposers":[]}');`,
   });
+
   const headerTable = opts?.headers
     ? `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY,workspaceId TEXT,value BLOB);`
     : '';
+
   await sql.execSqlScript({
     ...ws,
     sql: `PRAGMA journal_mode=WAL;
 CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);
 ${headerTable}`,
   });
+
   return { dir, ctx, workspace, gl, ws };
 }
 
@@ -128,10 +137,13 @@ test(
   { skip },
   async (t) => {
     const title = 'Починить SSH ✨';
+
     const { dir, ctx, workspace, gl, ws } = await fixture(t, {
       headers: true,
     });
+
     await seedChat(gl, { composerId: A, name: title });
+
     await sql.execSqlScript({
       ...ws,
       sql: `${db.itemReplaceSql('composer.composerData', {
@@ -143,9 +155,12 @@ INSERT INTO composerHeaders(composerId,workspaceId,value) VALUES(
   ${sqlText(JSON.stringify({ composerId: A, lastUpdatedAt: 9 }))}
 );`,
     });
+
     const dest = path.join(dir, 'export.json');
+
     await transfer.exportToFile(ctx, workspace, dest);
     const exported = assertExportShape(await readJsonFile(dest));
+
     assert.equal(exported.allComposers[0].name, title);
     assert.equal(exported.allComposers[0].lastUpdatedAt, 9);
     assert.equal(exported.allComposers[0].createdAt, undefined);
@@ -159,7 +174,9 @@ test(
   async (t) => {
     const title = '  Починить SSH ✨  ';
     const src = await fixture(t);
+
     await seedChat(src.gl, { composerId: A, name: title, createdAt: 7 });
+
     await sql.execSqlScript({
       ...src.ws,
       sql: db.itemReplaceSql('composer.composerData', {
@@ -173,19 +190,25 @@ test(
         ],
       }),
     });
+
     const destPath = path.join(src.dir, 'unicode.json');
+
     await transfer.exportToFile(src.ctx, src.workspace, destPath);
     const exported = assertExportShape(await readJsonFile(destPath));
+
     assert.equal(exported.allComposers[0].name, title);
 
     const dest = await fixture(t);
+
     const result = await transfer.importFromObject(
       dest.ctx,
       exported,
       dest.workspace,
     );
+
     assert.equal(result.imported, 1);
     const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
+
     assert.equal(listed.allComposers.length, 1);
     assert.notEqual(listed.allComposers[0].composerId, A);
     assert.equal(listed.allComposers[0].name, title);
@@ -201,20 +224,27 @@ test(
   async (t) => {
     const title = '1790418430150';
     const src = await fixture(t);
+
     await seedChat(src.gl, { composerId: A, name: title });
+
     await sql.execSqlScript({
       ...src.ws,
       sql: db.itemReplaceSql('composer.composerData', {
         allComposers: [{ composerId: A, name: title }],
       }),
     });
+
     const destPath = path.join(src.dir, 'numeric.json');
+
     await transfer.exportToFile(src.ctx, src.workspace, destPath);
     const exported = assertExportShape(await readJsonFile(destPath));
+
     assert.equal(exported.allComposers[0].name, title);
     const dest = await fixture(t);
+
     await transfer.importFromObject(dest.ctx, exported, dest.workspace);
     const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
+
     assert.equal(listed.allComposers[0].name, title);
     assert.doesNotMatch(String(listed.allComposers[0].name), /2026/);
   },
@@ -226,8 +256,10 @@ test(
   async (t) => {
     const title = 'Same title';
     const { dir, ctx, workspace, gl, ws } = await fixture(t);
+
     await seedChat(gl, { composerId: A, name: title });
     await seedChat(gl, { composerId: B, name: title });
+
     await sql.execSqlScript({
       ...ws,
       sql: db.itemReplaceSql('composer.composerData', {
@@ -237,17 +269,22 @@ test(
         ],
       }),
     });
+
     const dest = path.join(dir, 'one.json');
+
     await transfer.exportToFile(ctx, workspace, dest, [B]);
     const exported = assertExportShape(await readJsonFile(dest));
+
     assert.equal(exported.allComposers.length, 1);
     assert.equal(exported.allComposers[0].composerId, B);
     assert.equal(exported.allComposers[0].name, title);
+
     const filename = suggestExportFilename({
       workspaceName: 'synthetic',
       selection: selectionForFilename('selected', exported.allComposers),
       now: new Date('2026-09-27T13:42:45.123Z'),
     });
+
     assert.match(filename, /Same-title/);
     assert.doesNotMatch(filename, /2-chats/);
   },

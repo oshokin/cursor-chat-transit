@@ -31,16 +31,20 @@ test('chat order follows last activity, then creation, then ID; never input/SQL 
     { composerId: 'tie-b', createdAt: 200 },
     { composerId: 'tie-a', createdAt: 200 },
   ];
+
   const before = structuredClone(headers);
   const expected = ['continued', 'new', 'tie-a', 'tie-b', 'old', 'unknown'];
+
   assert.deepEqual(
     recentChats(headers).map((h) => h.composerId),
     expected,
   );
+
   assert.deepEqual(
     recentChats([...headers].reverse()).map((h) => h.composerId),
     expected,
   );
+
   assert.deepEqual(headers, before);
 });
 
@@ -58,6 +62,7 @@ test('invalid times fall back to creation; IDs and checkpoint timestamps are not
   ]) {
     assert.equal(validTimestamp(value), 0);
   }
+
   assert.equal(
     chatActivity({
       composerId: '1790668800000',
@@ -66,6 +71,7 @@ test('invalid times fall back to creation; IDs and checkpoint timestamps are not
     }),
     100,
   );
+
   assert.equal(
     chatActivity({
       composerId: '1790668800000',
@@ -86,10 +92,12 @@ test('chat picker keeps real names and archived/untitled chats, displays dates w
     },
     { composerId: 'unnamed' },
   ]);
+
   assert.deepEqual(
     items.map((item) => item.id),
     ['new', 'old', 'unnamed'],
   );
+
   assert.equal(items[0].label, '  Real name  ');
   assert.match(items[0].description, /^Updated /);
   assert.equal(items[2].description, 'Date unavailable');
@@ -102,6 +110,7 @@ test('otherwise identical chat rows are disambiguated even when ID prefixes coll
     { composerId: '12345678-a' },
     { composerId: '12345678-b' },
   ]);
+
   assert.notEqual(rows[0].description, rows[1].description);
   assert.match(rows[0].description, /12345678-a/);
 });
@@ -118,8 +127,10 @@ test('workspace order is current, local, SSH, containers, WSL, remote, unidentif
     entry('other', 'custom', 'host', 999),
     { ...entry('unknown', 'file', '', 9999), identity: undefined },
   ];
+
   const before = structuredClone(entries);
   const rows = workspacePickItems(entries, entries[5].identity);
+
   assert.deepEqual(
     rows.map((row) => row.entry.storageId),
     [
@@ -134,6 +145,7 @@ test('workspace order is current, local, SSH, containers, WSL, remote, unidentif
       'unknown',
     ],
   );
+
   assert.deepEqual(entries, before);
 });
 
@@ -145,6 +157,7 @@ test('container rows preserve distinct storage and encoded authority classificat
     ],
     undefined,
   );
+
   assert.equal(rows.length, 2);
   assert.equal(rows[0].description, 'Container');
   assert.notEqual(rows[0].detail, rows[1].detail);

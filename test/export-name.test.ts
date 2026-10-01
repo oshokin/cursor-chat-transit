@@ -18,7 +18,7 @@ test('all chats uses workspace name and an explicit Cursor chat suffix', () => {
       selection: { kind: 'all', count: 6 },
       now,
     }),
-    'dispersed-object-store--all-chats--20260927T134245123Z.cursor-chat.json',
+    'dispersed-object-store--all-chats--20260927T134245123Z.cursor-chat.zip',
   );
 });
 
@@ -33,7 +33,7 @@ test('one selected chat uses its readable Unicode title', () => {
       },
       now,
     }),
-    'hydra--Исправление-таймаутов--20260927T134245123Z.cursor-chat.json',
+    'hydra--Исправление-таймаутов--20260927T134245123Z.cursor-chat.zip',
   );
 });
 
@@ -54,6 +54,7 @@ test('Windows forbidden characters and path traversal cannot create a path', () 
     selection: { kind: 'selected', count: 1, chatTitle: '../../title' },
     now,
   });
+
   assert.equal(path.posix.basename(name), name);
   assert.equal(path.win32.basename(name), name);
   // eslint-disable-next-line no-control-regex -- forbidden filename bytes
@@ -64,6 +65,7 @@ test('reserved device names, trailing dots, and empty titles are handled', () =>
   for (const name of ['CON', 'nul', 'COM1', 'LPT²', 'AUX.txt']) {
     assert.match(cleanFilenamePart(name, 'chat'), /^_/);
   }
+
   assert.equal(cleanFilenamePart('title.  ', 'chat'), 'title');
   assert.equal(cleanFilenamePart('... / \\', 'chat'), 'chat');
 });
@@ -76,13 +78,16 @@ test('NFC normalization preserves non-Latin names', () => {
 test('long names respect byte limits and retain a differentiating hash', () => {
   const a = cleanFilenamePart('😀'.repeat(300) + 'a', 'chat');
   const b = cleanFilenamePart('😀'.repeat(300) + 'b', 'chat');
+
   assert.ok(Buffer.byteLength(a) <= 72);
   assert.notEqual(a, b);
+
   const name = suggestExportFilename({
     workspaceName: 'Ж'.repeat(400),
     selection: { kind: 'selected', count: 1, chatTitle: '😀'.repeat(400) },
     now,
   });
+
   assert.ok(Buffer.byteLength(name) <= 200);
   assert.ok(name.length <= 200);
 });
@@ -95,6 +100,7 @@ test('zero selection and invalid dates do not produce a misleading export name',
       now,
     }),
   );
+
   assert.throws(() =>
     suggestExportFilename({
       workspaceName: 'x',
@@ -110,8 +116,9 @@ test('bidi controls cannot visually hide the suffix', () => {
     selection: { kind: 'all', count: 1 },
     now,
   });
+
   assert.doesNotMatch(name, /[\u202a-\u202e\u2066-\u2069]/u);
-  assert.ok(name.endsWith('.cursor-chat.json'));
+  assert.ok(name.endsWith('.cursor-chat.zip'));
 });
 
 test('workspace identity uses URI leaf and strips .code-workspace', () => {
@@ -119,6 +126,7 @@ test('workspace identity uses URI leaf and strips .code-workspace', () => {
     workspaceNameFromIdentity('workspace', '/tmp/team.code-workspace'),
     'team',
   );
+
   assert.equal(
     workspaceNameFromIdentity('folder', '/tmp/my project'),
     'my project',
@@ -130,7 +138,9 @@ test('one selected chat passes its real title into the filename helper', () => {
     { name: 'Починить SSH' },
     { name: 'Other' },
   ]);
+
   assert.deepEqual(selection, { kind: 'selected', count: 2 });
+
   assert.deepEqual(
     selectionForFilename('selected', [{ name: 'Починить SSH' }]),
     {
@@ -139,26 +149,31 @@ test('one selected chat passes its real title into the filename helper', () => {
       chatTitle: 'Починить SSH',
     },
   );
+
   const name = suggestExportFilename({
     workspaceName: 'real-project',
     selection: selectionForFilename('selected', [{ name: 'Починить SSH' }]),
     now,
   });
+
   assert.match(name, /Починить-SSH/);
 });
 
 test('a missing chat title does not become Untitled chat or a timestamp', () => {
   const selection = selectionForFilename('selected', [{}]);
+
   assert.deepEqual(selection, {
     kind: 'selected',
     count: 1,
     chatTitle: 'chat',
   });
+
   const name = suggestExportFilename({
     workspaceName: 'ws',
     selection,
     now,
   });
+
   assert.doesNotMatch(name, /Untitled/);
   assert.doesNotMatch(name, /1790418430150/);
   assert.match(name, /--chat--/);

@@ -7,12 +7,15 @@ import { runTests } from '@vscode/test-electron';
 /** Compile the extension, sidebar client and host test, then run the VS Code smoke. */
 async function main(): Promise<void> {
   const root = path.resolve(__dirname, '..');
+
   const compile = spawnSync(
     process.execPath,
     [path.join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json'],
     { cwd: root, stdio: 'inherit', shell: false },
   );
+
   if (compile.status !== 0) process.exit(compile.status ?? 1);
+
   const host = spawnSync(
     process.execPath,
     [
@@ -22,7 +25,9 @@ async function main(): Promise<void> {
     ],
     { cwd: root, stdio: 'inherit', shell: false },
   );
+
   if (host.status !== 0) process.exit(host.status ?? 1);
+
   const webview = spawnSync(
     process.execPath,
     [
@@ -32,8 +37,10 @@ async function main(): Promise<void> {
     ],
     { cwd: root, stdio: 'inherit', shell: false },
   );
+
   if (webview.status !== 0) process.exit(webview.status ?? 1);
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cct-host-'));
+
   try {
     await runTests({
       extensionDevelopmentPath: root,

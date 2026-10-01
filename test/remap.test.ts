@@ -7,6 +7,7 @@ test('remap keeps UUID text, timestamps and unknown fields; rewrites references'
   const oldC = '11111111-1111-4111-8111-111111111111';
   const oldB1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const oldB2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
   const obj = {
     allComposers: [
       {
@@ -52,30 +53,39 @@ test('remap keeps UUID text, timestamps and unknown fields; rewrites references'
       ],
     },
   };
+
   const { cloned } = await cloneExportObjectForCopy(obj);
   const newC = cloned.allComposers[0].composerId;
+
   assert.notEqual(newC, oldC);
   assert.equal(cloned.allComposers[0].createdAt, 7);
   assert.equal(cloned.allComposers[0].lastUpdatedAt, 9);
   assert.equal(cloned.allComposers[0].mystery, true);
+
   const body = JSON.parse(cloned.composers[newC]) as {
     composerId: string;
     text: string;
     fullConversationHeadersByBubbleId: Record<string, unknown>;
   };
+
   assert.equal(body.composerId, newC);
   assert.match(body.text, new RegExp(oldC));
+
   assert.equal(
     Object.keys(body.fullConversationHeadersByBubbleId).includes(oldB1),
     false,
   );
+
   const newBubbles = cloned.bubbles?.[newC] || [];
+
   const b1 = JSON.parse(newBubbles[0].value) as {
     text: string;
     nextBubbleId: string;
     bubbleId: string;
   };
+
   const b2 = JSON.parse(newBubbles[1].value) as { bubbleId: string };
+
   assert.equal(b1.text, `do not rewrite ${oldC}`);
   assert.equal(b1.nextBubbleId, b2.bubbleId);
   assert.notEqual(b1.bubbleId, oldB1);
@@ -111,6 +121,7 @@ test('missing composer body is incomplete, not fabricated', async () => {
     composers: {},
     bubbles: {},
   };
+
   await assert.rejects(
     () => cloneExportObjectForCopy(obj),
     /Incomplete export/,
@@ -162,10 +173,13 @@ function linkedPayload(ids = [A]) {
 test('remap updates nested bubbleId values as well as object keys', async () => {
   const { cloned, composerMap, bubbleMap } =
     await cloneExportObjectForCopy(linkedPayload());
+
   const c = composerMap.get(A);
   const b = bubbleMap.get(`${A}\0${X}`);
+
   assert.ok(c);
   assert.ok(b);
+
   assert.equal(
     JSON.parse(cloned.composers[c]).fullConversationHeadersByBubbleId[b]
       .bubbleId,
@@ -177,22 +191,30 @@ test('duplicate bubble IDs in different composers remain scoped', async () => {
   const { cloned, composerMap, bubbleMap } = await cloneExportObjectForCopy(
     linkedPayload([A, B]),
   );
+
   const firstId = composerMap.get(A);
+
   assert.ok(firstId);
+
   const first = JSON.parse(cloned.bubbles?.[firstId]?.[0].value || '{}') as {
     nextBubbleId: string;
   };
+
   assert.equal(first.nextBubbleId, bubbleMap.get(`${A}\0${Y}`));
 });
 
 test('previousBubbleId references the copied bubble', async () => {
   const { cloned, composerMap, bubbleMap } =
     await cloneExportObjectForCopy(linkedPayload());
+
   const cid = composerMap.get(A);
+
   assert.ok(cid);
+
   const second = JSON.parse(cloned.bubbles?.[cid]?.[1].value || '{}') as {
     previousBubbleId: string;
   };
+
   assert.equal(second.previousBubbleId, bubbleMap.get(`${A}\0${X}`));
 });
 

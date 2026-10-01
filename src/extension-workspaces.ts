@@ -21,14 +21,18 @@ export async function prepareSqlite(context: vscode.ExtensionContext): Promise<{
 }> {
   const { sqlitePath } = config();
   const executable = findSqliteExecutable(sqlitePath || undefined);
+
   if (!executable) {
     throw new Error(
       'sqlite3 CLI not found. Install sqlite3 locally and/or set cursorChatTransit.sqlitePath.',
     );
   }
+
   const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
+
   await fs.promises.mkdir(tmp, { recursive: true });
   const initFile = await ensureInitFile(tmp);
+
   return { executable, initFile };
 }
 
@@ -39,6 +43,7 @@ export function listHostEntries(): {
   identity: WorkspaceIdentity | undefined;
 } {
   const userDir = paths.preferStorageRoot(storageOptions());
+
   return {
     userDir,
     entries: paths.listWorkspaceEntries(userDir),
@@ -57,6 +62,7 @@ export async function hostState(context: vscode.ExtensionContext): Promise<{
   identity: WorkspaceIdentity | undefined;
 }> {
   const sqlite = await prepareSqlite(context);
+
   return { sqlite, ...listHostEntries() };
 }
 
@@ -71,17 +77,21 @@ export async function pickWorkspace(
       'No Cursor workspaceStorage databases found in the selected local user-data directory.',
     );
   }
+
   const pick = await vscode.window.showQuickPick(
     workspacePickItems(entries, current).flatMap((item, index, items) => {
       const previous = items[index - 1];
+
       const group = item.isCurrent
         ? 'Current workspace'
         : workspacePresentation(item.entry).group;
+
       const previousGroup =
         previous &&
         (previous.isCurrent
           ? 'Current workspace'
           : workspacePresentation(previous.entry).group);
+
       return group === previousGroup
         ? [item]
         : [
@@ -99,6 +109,7 @@ export async function pickWorkspace(
       matchOnDetail: true,
     },
   );
+
   return pick && 'entry' in pick
     ? (pick as { entry: WorkspaceEntry }).entry
     : undefined;

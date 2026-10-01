@@ -8,7 +8,7 @@ export type SidebarAction =
   | 'export'
   | 'import'
   | 'diagnostics'
-  | 'diagnosticLogs'
+  | 'recoverLock'
   | 'logs'
   | 'cancel'
   | 'quitCursor';
@@ -45,6 +45,14 @@ export interface SidebarState {
   statusItems?: string[];
   /** Determinate percent when known; omit for indeterminate. */
   progress?: number;
+  /** Offer removal of a verified dead owner lock. */
+  canRecoverLock?: boolean;
+  /** Phase and timing details, scoped to the current measurable stage. */
+  stageLabel?: string;
+  /** Chat or file name currently being worked on. */
+  currentItem?: string;
+  /** Elapsed time and ETA for the current stage. */
+  timingLabel?: string;
   /** Whether this desktop Cursor host can run the native quit command. */
   canQuitCursor?: boolean;
   /** True only when the last completed import wrote chats that Cursor must reload. */
@@ -57,7 +65,7 @@ const ACTIONS = new Set<SidebarAction>([
   'export',
   'import',
   'diagnostics',
-  'diagnosticLogs',
+  'recoverLock',
   'logs',
   'cancel',
   'quitCursor',
@@ -79,39 +87,44 @@ export class TransferSidebar implements vscode.WebviewViewProvider {
   /** Supply local assets and a strict command allowlist to the webview. */
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
     this.view = view;
+
     const resources = vscode.Uri.joinPath(
       this.context.extensionUri,
       'resources',
     );
+
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [resources],
     };
+
     const nonce = randomBytes(18).toString('base64');
-    const [template, brandIcon] = await Promise.all([
-      readFile(vscode.Uri.joinPath(resources, 'sidebar.html').fsPath, 'utf8'),
-      readFile(
-        vscode.Uri.joinPath(resources, 'icons', 'activity-bar.svg').fsPath,
-        'utf8',
-      ),
-    ]);
+
+    const template = await readFile(
+      vscode.Uri.joinPath(resources, 'sidebar.html').fsPath,
+      'utf8',
+    );
+
     this.context.subscriptions.push(
       view.webview.onDidReceiveMessage((message: unknown) => {
         if (!message || typeof message !== 'object') return;
         const type = (message as { type?: unknown }).type;
+
         if (type === 'ready') {
           this.refresh();
+
           return;
         }
+
         if (typeof type !== 'string' || !ACTIONS.has(type as SidebarAction)) {
           return;
         }
+
         void this.run(type as SidebarAction).catch(this.onError);
       }),
     );
+
     view.webview.html = template
-      // Trusted packaged asset; never interpolate an export or workspace value here.
-      .replaceAll('%%BRAND_ICON%%', brandIcon)
       .replaceAll('%%CSP_SOURCE%%', view.webview.cspSource)
       .replaceAll('%%NONCE%%', nonce)
       .replaceAll(
@@ -126,6 +139,7 @@ export class TransferSidebar implements vscode.WebviewViewProvider {
           .asWebviewUri(vscode.Uri.joinPath(resources, 'sidebar-client.js'))
           .toString(),
       );
+
     this.context.subscriptions.push(
       view.onDidChangeVisibility(() => {
         if (view.visible) this.refresh();

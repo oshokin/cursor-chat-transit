@@ -1,3 +1,4 @@
+import { canvasFilenamesFromChat, readCanvasFile } from './canvases';
 import {
   blobKeysFromComposerBody,
   imageUuidsFromBubbles,
@@ -33,6 +34,8 @@ export type ChatInspection =
       missingImages: number;
       /** Missing plan files. */
       missingPlans: number;
+      /** Missing canvas files. */
+      missingCanvases: number;
     }
   | {
       /** The chat cannot be imported even with partial recovery. */
@@ -59,10 +62,13 @@ export function planRecovery(
   allowPartial: boolean,
 ): RecoveryPlan {
   const plan: RecoveryPlan = { complete: [], historyOnly: [], skipped: [] };
+
   if (!allowPartial && chats.some((chat) => chat.status !== 'complete')) {
     const err = new Error('INCOMPLETE_IMPORT');
+
     throw err;
   }
+
   for (const chat of chats) {
     if (chat.status === 'complete') plan.complete.push(chat.composerId);
     else if (chat.status === 'missing-dependencies')
@@ -70,9 +76,11 @@ export function planRecovery(
     else
       plan.skipped.push({ composerId: chat.composerId, reason: chat.reason });
   }
+
   if (plan.complete.length + plan.historyOnly.length === 0) {
     throw new Error('NOTHING_TO_IMPORT');
   }
+
   return plan;
 }
 
@@ -90,8 +98,12 @@ export async function inspectComposer(opts: {
   attachmentIds: Set<string>;
   /** Plan basenames present in the export envelope. */
   planFiles: Set<string>;
+  /** Canvas basenames present in the export envelope. */
+  canvasFiles: Set<string>;
   /** Local plans directory used to confirm plan files. */
   plansDir?: string;
+  /** Canvas directory used to confirm canvas files. */
+  canvasesDir?: string | null;
   /** Open destination global database, used to reuse identical kv rows. */
   conn: SqliteConn;
   /** Destination workspace used to resolve attachment files. */
@@ -100,6 +112,7 @@ export async function inspectComposer(opts: {
   signal?: AbortSignal;
 }): Promise<ChatInspection> {
   const { composerId } = opts;
+
   if (typeof opts.body !== 'string' || !opts.body) {
     return {
       status: 'unusable-chat',
@@ -107,9 +120,12 @@ export async function inspectComposer(opts: {
       reason: 'missing composer body',
     };
   }
+
   let body: Record<string, unknown>;
+
   try {
     const parsed: unknown = JSON.parse(opts.body);
+
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {
         status: 'unusable-chat',
@@ -117,6 +133,7 @@ export async function inspectComposer(opts: {
         reason: 'unsupported payload',
       };
     }
+
     body = parsed as Record<string, unknown>;
   } catch {
     return {
@@ -125,7 +142,9 @@ export async function inspectComposer(opts: {
       reason: 'malformed composer body',
     };
   }
+
   const list = opts.bubbles;
+
   if (list !== undefined && !Array.isArray(list)) {
     return {
       status: 'unusable-chat',
@@ -133,7 +152,9 @@ export async function inspectComposer(opts: {
       reason: 'malformed bubble list',
     };
   }
+
   const available = new Set<string>();
+
   for (const row of list || []) {
     if (
       !row ||
@@ -150,7 +171,9 @@ export async function inspectComposer(opts: {
         reason: 'invalid bubble record',
       };
     }
+
     let parsed: unknown;
+
     try {
       parsed = JSON.parse(row.value);
     } catch {
@@ -160,6 +183,7 @@ export async function inspectComposer(opts: {
         reason: 'malformed bubble',
       };
     }
+
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {
         status: 'unusable-chat',
@@ -167,7 +191,9 @@ export async function inspectComposer(opts: {
         reason: 'unsupported bubble payload',
       };
     }
+
     const bubble = parsed as Record<string, unknown>;
+
     if (
       (bubble.bubbleId !== undefined && bubble.bubbleId !== row.bubbleId) ||
       (bubble.composerId !== undefined && bubble.composerId !== composerId)
@@ -178,9 +204,12 @@ export async function inspectComposer(opts: {
         reason: 'bubble body ID mismatch',
       };
     }
+
     available.add(row.bubbleId);
   }
+
   const headers = body.fullConversationHeadersOnly;
+
   if (headers !== undefined) {
     if (!Array.isArray(headers)) {
       return {
@@ -189,6 +218,7 @@ export async function inspectComposer(opts: {
         reason: 'incomplete message records',
       };
     }
+
     for (const header of headers) {
       if (!header || typeof header !== 'object' || Array.isArray(header)) {
         return {
@@ -197,7 +227,9 @@ export async function inspectComposer(opts: {
           reason: 'incomplete message records',
         };
       }
+
       const bubbleId = (header as { bubbleId?: unknown }).bubbleId;
+
       if (typeof bubbleId !== 'string' || !available.has(bubbleId)) {
         return {
           status: 'unusable-chat',
@@ -207,7 +239,9 @@ export async function inspectComposer(opts: {
       }
     }
   }
+
   const blobs = blobKeysFromComposerBody(opts.body);
+
   if (blobs.status === 'unsupported') {
     return {
       status: 'unusable-chat',
@@ -215,7 +249,9 @@ export async function inspectComposer(opts: {
       reason: 'unsupported conversation state',
     };
   }
+
   let images: string[];
+
   try {
     images = imageUuidsFromBubbles(list);
   } catch {
@@ -225,21 +261,27 @@ export async function inspectComposer(opts: {
       reason: 'invalid attachment id',
     };
   }
+
   let missingBlobs = 0;
+
   for (const key of blobs.keys) {
     opts.signal?.throwIfAborted();
     if (opts.resourceKeys.has(key)) continue;
     if (await db.kvExists(opts.conn, key)) continue;
     missingBlobs += 1;
   }
+
   let missingImages = 0;
+
   for (const uuid of images) {
     opts.signal?.throwIfAborted();
     if (opts.attachmentIds.has(uuid.toLowerCase())) continue;
     if (await resolveAttachmentPath(opts.workspace, uuid)) continue;
     missingImages += 1;
   }
+
   let missingPlans = 0;
+
   if (opts.plansDir) {
     for (const name of planFilenamesFromChat(opts.body, list)) {
       opts.signal?.throwIfAborted();
@@ -253,15 +295,34 @@ export async function inspectComposer(opts: {
       missingPlans += 1;
     }
   }
-  if (missingBlobs || missingImages || missingPlans) {
+
+  let missingCanvases = 0;
+
+  if (opts.canvasesDir) {
+    for (const name of canvasFilenamesFromChat(opts.body, list)) {
+      opts.signal?.throwIfAborted();
+      if (opts.canvasFiles.has(name)) continue;
+      if (await readCanvasFile(opts.canvasesDir, name)) continue;
+      missingCanvases += 1;
+    }
+  } else {
+    for (const name of canvasFilenamesFromChat(opts.body, list)) {
+      if (opts.canvasFiles.has(name)) continue;
+      missingCanvases += 1;
+    }
+  }
+
+  if (missingBlobs || missingImages || missingPlans || missingCanvases) {
     return {
       status: 'missing-dependencies',
       composerId,
       missingBlobs,
       missingImages,
       missingPlans,
+      missingCanvases,
     };
   }
+
   return { status: 'complete', composerId };
 }
 
@@ -279,21 +340,32 @@ export async function inspectExportChats(opts: {
   signal?: AbortSignal;
   /** Local plans directory used to confirm plan files. */
   plansDir?: string;
+  /** Canvas directory used to confirm canvas files. */
+  canvasesDir?: string | null;
   /** Coarse progress while chats are inspected. */
   onProgress?: (processed: number, total: number) => void;
 }): Promise<ChatInspection[]> {
   const resourceKeys = new Set(opts.resources.kv.map((row) => row.key));
+
   const attachmentIds = new Set(
     opts.resources.attachments.map((row) => row.id.toLowerCase()),
   );
+
   const planFiles = new Set(
     (opts.resources.plans || []).map((row) => row.filename),
   );
+
+  const canvasFiles = new Set(
+    (opts.resources.canvases || []).map((row) => row.filename),
+  );
+
   const out: ChatInspection[] = [];
   const total = opts.exportObj.allComposers.length;
   let processed = 0;
+
   for (const header of opts.exportObj.allComposers) {
     const id = header.composerId;
+
     out.push(
       await inspectComposer({
         composerId: id,
@@ -302,15 +374,19 @@ export async function inspectExportChats(opts: {
         resourceKeys,
         attachmentIds,
         planFiles,
+        canvasFiles,
         plansDir: opts.plansDir,
+        canvasesDir: opts.canvasesDir,
         conn: opts.conn,
         workspace: opts.workspace,
         signal: opts.signal,
       }),
     );
+
     processed += 1;
     opts.onProgress?.(processed, total);
   }
+
   return out;
 }
 
@@ -321,17 +397,23 @@ export function filterExportForPlan(
   resources: ExportResources,
 ): ExportObject {
   const keep = new Set([...plan.complete, ...plan.historyOnly]);
+
   const allComposers = exportObj.allComposers.filter((header) =>
     keep.has(header.composerId),
   );
+
   const composers: Record<string, string> = {};
   const bubbles: Record<string, BubbleRecord[]> = {};
+
   for (const id of keep) {
     const body = exportObj.composers[id];
+
     if (body !== undefined) composers[id] = body;
     const list = exportObj.bubbles?.[id];
+
     if (list) bubbles[id] = list;
   }
+
   return {
     ...exportObj,
     allComposers,

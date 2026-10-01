@@ -5,6 +5,7 @@ dist
 out
 .tools
 .dev
+.vscode
 .vscode-test
 coverage
 *.vscdb

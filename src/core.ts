@@ -32,6 +32,7 @@ export function selectChats(
   if (!Array.isArray(selectedIds))
     throw new TypeError('selectedIds must be an array');
   const selected = new Set(selectedIds);
+
   return chats.filter((chat) => selected.has(chat.composerId));
 }
 
@@ -39,9 +40,11 @@ export function selectChats(
 export function workspaceKey(kind: WorkspaceKind, uri: UriParts): string {
   if (!['folder', 'workspace'].includes(kind))
     throw new TypeError('Invalid workspace kind');
+
   if (!uri || typeof uri.scheme !== 'string' || typeof uri.path !== 'string') {
     throw new TypeError('Pass a parsed URI, not fsPath');
   }
+
   return JSON.stringify([
     kind,
     uri.scheme,
@@ -68,6 +71,7 @@ export function uriFromString(value: string): UriParts {
   if (typeof value !== 'string' || !value)
     throw new TypeError('Expected URI string');
   const u = new URL(value);
+
   return {
     scheme: u.protocol.replace(/:$/, ''),
     authority: percentDecodeOnce(u.host || ''),
@@ -82,13 +86,17 @@ export function identityFromWorkspaceJson(meta: unknown): WorkspaceIdentity {
   if (!meta || typeof meta !== 'object') {
     throw new Error('Workspace metadata has neither folder nor workspace URI');
   }
+
   const rec = meta as Record<string, unknown>;
+
   if (typeof rec.workspace === 'string') {
     return { kind: 'workspace', uri: uriFromString(rec.workspace) };
   }
+
   if (typeof rec.folder === 'string') {
     return { kind: 'folder', uri: uriFromString(rec.folder) };
   }
+
   throw new Error('Workspace metadata has neither folder nor workspace URI');
 }
 
@@ -118,10 +126,13 @@ export function currentIdentity(
   if (workspaceFile) {
     return { kind: 'workspace', uri: uriPartsFrom(workspaceFile) };
   }
+
   const folders = workspaceFolders || [];
+
   if (folders.length === 1) {
     return { kind: 'folder', uri: uriPartsFrom(folders[0].uri) };
   }
+
   return undefined;
 }
 
@@ -139,13 +150,16 @@ export function bubbleRange(composerId: string): {
       'Unsupported composer ID: validate other observed formats separately',
     );
   }
+
   const lower = `bubbleId:${composerId}:`;
+
   return { lower, upper: `bubbleId:${composerId};` };
 }
 
 /** Encode a UTF-8 string as a SQLite text literal without quoting. */
 export function sqlText(value: string): string {
   if (typeof value !== 'string') throw new TypeError('Expected a string');
+
   return `CAST(X'${Buffer.from(value, 'utf8').toString('hex')}' AS TEXT)`;
 }
 
@@ -156,19 +170,24 @@ export function rewriteExactPaths(
   idMap: Map<string, string>,
 ): unknown {
   const copy = JSON.parse(JSON.stringify(value)) as Json;
+
   for (const pointer of pointers) {
     if (!pointer.startsWith('/'))
       throw new TypeError('Expected a JSON Pointer');
+
     const parts = pointer
       .slice(1)
       .split('/')
       .map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+
     if (
       parts.some((p) => ['__proto__', 'prototype', 'constructor'].includes(p))
     ) {
       throw new TypeError('Forbidden property');
     }
+
     let parent: unknown = copy;
+
     for (const part of parts.slice(0, -1)) {
       if (
         parent === null ||
@@ -178,9 +197,12 @@ export function rewriteExactPaths(
         parent = undefined;
         break;
       }
+
       parent = (parent as Record<string, unknown>)[part];
     }
+
     const last = parts.at(-1);
+
     if (
       last &&
       parent !== null &&
@@ -189,12 +211,15 @@ export function rewriteExactPaths(
     ) {
       const rec = parent as Record<string, unknown>;
       const old = rec[last];
+
       if (typeof old === 'string') {
         const mapped = idMap.get(old);
+
         if (mapped !== undefined) rec[last] = mapped;
       }
     }
   }
+
   return copy;
 }
 
@@ -205,10 +230,13 @@ export function rewriteObjectKeys(
 ): unknown {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
   const out: Record<string, unknown> = {};
+
   for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
     const next = idMap.get(key) ?? key;
+
     out[next] = val;
   }
+
   return out;
 }
 
@@ -219,6 +247,8 @@ export function finiteInt(
 ): number | null {
   if (value === null || value === undefined || value === '') return fallback;
   const n = Number(value);
+
   if (!Number.isFinite(n)) return fallback;
+
   return Math.trunc(n);
 }

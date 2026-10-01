@@ -1,7 +1,9 @@
+import { traceIO } from './transfer-events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as db from './db';
+import { canvasesDirectoryForWorkspace } from './canvases';
 import { defaultPlansDirectory } from './plans';
 import { backupDatabase } from './sqlite';
 import type {
@@ -16,6 +18,7 @@ import type {
 export function chatLogLabel(header: ComposerHeader): string {
   const raw = typeof header.name === 'string' ? header.name.trim() : '';
   const name = raw ? JSON.stringify(raw.slice(0, 120)) : '(untitled)';
+
   return `id=${header.composerId} name=${name}`;
 }
 
@@ -25,7 +28,7 @@ export function chatIssue(
   reason: ExportChatIssue['reason'],
   extra?: Pick<
     ExportChatIssue,
-    'missingBlobs' | 'missingImages' | 'missingPlans'
+    'missingBlobs' | 'missingImages' | 'missingPlans' | 'missingCanvases'
   >,
 ): ExportChatIssue {
   const issue: ExportChatIssue = {
@@ -33,15 +36,30 @@ export function chatIssue(
     reason,
     ...extra,
   };
+
   if (typeof header.name === 'string' && header.name.trim()) {
     issue.name = header.name;
   }
+
   return issue;
 }
 
 /** Plans directory for this transfer, or `~/.cursor/plans`. */
 export function plansDirOf(ctx: TransferContext): string {
   return ctx.plansDir || defaultPlansDirectory();
+}
+
+/**
+ * Canvas directory for this transfer.
+ * An explicit context path wins; otherwise the workspace project slug is used.
+ */
+export function canvasesDirOf(
+  ctx: TransferContext,
+  workspace: WorkspaceEntry,
+): string | null {
+  if (ctx.canvasesDir) return ctx.canvasesDir;
+
+  return canvasesDirectoryForWorkspace(workspace);
 }
 
 /** Bind a TransferContext to one database file. */
@@ -75,6 +93,7 @@ export async function inspectPair(
   const connGl = connOf(ctx, workspace.globalDbPath, true);
   const wsInfo = await db.inspectDatabase(connWs);
   const glInfo = await db.inspectDatabase(connGl);
+
   return { connWs, connGl, wsInfo, glInfo };
 }
 
@@ -93,17 +112,27 @@ export async function withGlobalSnapshot<T>(
   const dir = await fs.promises.mkdtemp(
     path.join(os.tmpdir(), 'cct-export-snap-'),
   );
+
   const dest = path.join(dir, 'global-snapshot.vscdb');
+
   try {
-    await backupDatabase({
-      executable: ctx.executable,
-      database: workspace.globalDbPath,
-      dest,
-      initFile: ctx.initFile,
-      signal: ctx.signal,
-      timeoutMs: ctx.timeoutMs,
-      busyTimeoutMs: ctx.busyTimeoutMs,
-    });
+    ctx.onPhase?.('backup');
+
+    await traceIO(
+      'Create read snapshot',
+      { source: workspace.globalDbPath, destination: dest },
+      () =>
+        backupDatabase({
+          executable: ctx.executable,
+          database: workspace.globalDbPath,
+          dest,
+          initFile: ctx.initFile,
+          signal: ctx.signal,
+          timeoutMs: ctx.timeoutMs,
+          busyTimeoutMs: ctx.busyTimeoutMs,
+        }),
+    );
+
     return await fn(connOf(ctx, dest, true));
   } finally {
     await fs.promises.rm(dir, { recursive: true, force: true });

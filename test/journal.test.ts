@@ -43,11 +43,14 @@ test('completion preserves receipts and quality without mutating the pending jou
       ],
     },
   };
+
   const before = structuredClone(journal);
   const completed = completePendingImport(journal, 'now');
+
   assert.deepEqual(journal, before);
   assert.equal(completed.pending, undefined);
   assert.equal(completed.targetKey, 'workspace');
+
   assert.deepEqual(completed.receipts, [
     journal.receipts[0],
     {
@@ -74,9 +77,12 @@ test('completion cannot fabricate a receipt without a pending import', () => {
 
 test('corrupt journal fails closed before any caller can write chats', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-journal-'));
+
   try {
     const targetKey = '{"target":"a"}';
+
     await fs.writeFile(journalPathFor(dir, targetKey), '{broken');
+
     await assert.rejects(
       () => loadJournal(dir, targetKey),
       (err: unknown) =>
@@ -89,19 +95,25 @@ test('corrupt journal fails closed before any caller can write chats', async () 
 
 test('atomic journal replace keeps a readable file', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-journal-'));
+
   try {
     const file = path.join(dir, 'j.json');
+
     await writeJsonAtomic(file, { version: 1, ok: true });
+
     assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), {
       version: 1,
       ok: true,
     });
+
     await saveJournal(dir, {
       version: 1,
       targetKey: 't',
       receipts: [],
     });
+
     const loaded = await loadJournal(dir, 't');
+
     assert.equal(loaded.version, 1);
     assert.equal(loaded.receipts.length, 0);
   } finally {
@@ -111,6 +123,7 @@ test('atomic journal replace keeps a readable file', async () => {
 
 test('legacy pending without expectedResources still loads', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-journal-'));
+
   try {
     await saveJournal(dir, {
       version: 1,
@@ -132,7 +145,9 @@ test('legacy pending without expectedResources still loads', async () => {
         ],
       },
     });
+
     const loaded = await loadJournal(dir, 't');
+
     assert.equal(loaded.pending?.chats[0]?.expectedResources, undefined);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

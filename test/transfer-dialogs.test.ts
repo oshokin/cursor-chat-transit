@@ -12,6 +12,7 @@ import { TransferError } from '../src/types';
 const workspace = { storageId: 'fixture', storageRoot: '/fixture' };
 /** Realistic headers for the all-chats and selected-chat flows. */
 const chats = [{ composerId: 'one', name: 'First chat' }];
+
 /** Dialog responses and transfer calls observed at the I/O boundaries. */
 const host = {
   /** Dialog stage to cancel, or empty to proceed. */
@@ -39,6 +40,7 @@ const host = {
   /** Optional hook invoked while the export mode picker is open. */
   onMode: undefined as (() => Promise<void>) | undefined,
 };
+
 /** Assert the UI while a real command is awaiting a simulated native dialog. */
 function waiting(stage: string, title: string): void {
   host.events.push(stage);
@@ -49,44 +51,62 @@ function waiting(stage: string, title: string): void {
   assert.equal(state.runtime.uiState.progress, undefined);
   assert.equal(host.exports + host.imports, 0);
 }
+
 /** Minimal VS Code surface used by the actual import and export commands. */
 const fakeVscode = {
   Uri: { file: (fsPath: string) => ({ scheme: 'file', fsPath }) },
   ProgressLocation: { Notification: 15 },
   workspace: { getConfiguration: () => ({ inspect: () => undefined }) },
   window: {
+    /** Choose a mode or a chat selection, or cancel at that step. */
     async showQuickPick(_items: unknown, options: { canPickMany?: boolean }) {
       if (options.canPickMany) {
         waiting('chats', 'Select chats to export');
         if (host.cancel === 'chats') return undefined;
+
         return host.cancel === 'empty' ? [] : [{ id: 'one' }];
       }
+
       waiting('mode', 'Choose chats to export');
       await host.onMode?.();
       if (host.cancel === 'mode') return undefined;
+
       return { value: host.selected ? 'select' : 'all' };
     },
+    /** Return a temporary save path unless the test cancels the dialog. */
     async showSaveDialog() {
       waiting('save', 'Choose where to save');
+
       return host.cancel === 'save'
         ? undefined
         : fakeVscode.Uri.file(path.join(os.tmpdir(), 'fixture.json'));
     },
+    /** Return a temporary export path unless the test cancels the dialog. */
     async showOpenDialog() {
       waiting('open', 'Choose an export file');
+
       return host.cancel === 'open'
         ? undefined
         : [fakeVscode.Uri.file(path.join(os.tmpdir(), 'fixture.json'))];
     },
+    /** Run the progress callback with an inert reporter and token. */
     async withProgress(
       _options: unknown,
       run: (...args: unknown[]) => unknown,
     ) {
       assert.equal(state.runtime.uiState.status, 'running');
       host.events.push('progress');
+
       return run(
-        { report() {} },
-        { isCancellationRequested: false, onCancellationRequested() {} },
+        {
+          /** Ignore a progress increment. */
+          report() {},
+        },
+        {
+          isCancellationRequested: false,
+          /** Ignore a cancellation subscription. */
+          onCancellationRequested() {},
+        },
       );
     },
     showInformationMessage: async () => undefined,
@@ -94,35 +114,46 @@ const fakeVscode = {
     showErrorMessage: async () => undefined,
   },
 };
+
 /** Host discovery and workspace selection stand in for external storage. */
 const workspaces = {
+  /** Return the fixture workspace without scanning disk. */
   async hostState() {
     return { sqlite: {}, userDir: '/fixture', entries: [workspace] };
   },
+  /** Return the fixture workspace unless the test cancels the picker. */
   async pickWorkspace() {
     waiting('workspace', 'Choose a workspace');
+
     return host.cancel === 'workspace' ? undefined : workspace;
   },
 };
+
 /** Real command orchestration with transfer I/O replaced by observable stubs. */
 const transfer = {
+  /** Return the fixture chat list and assert that listing is running. */
   async listWorkspaceChats() {
     assert.equal(state.runtime.uiState.status, 'running');
     assert.equal(state.runtime.uiState.statusTitle, 'Loading chat list…');
     host.events.push('list');
+
     return { allComposers: chats };
   },
+  /** Count an export and optionally throw the requested failure. */
   async exportToFile() {
     assert.equal(state.runtime.uiState.statusTitle, 'Exporting…');
     assert.equal(state.runtime.uiState.statusDetail, 'Reading selected chats.');
     host.exports += 1;
     failIfRequested();
+
     return { exported: 1, selected: 1, complete: host.exportComplete };
   },
+  /** Count an import and optionally throw the requested failure. */
   async importFromObject() {
     assert.equal(state.runtime.uiState.statusTitle, 'Importing…');
     host.imports += 1;
     failIfRequested();
+
     return {
       imported: host.imported,
       alreadyImported: host.imported === 0 && host.skipped === 0 ? 1 : 0,
@@ -135,50 +166,91 @@ const transfer = {
     };
   },
 };
+
 /** Inject an expected transfer failure without opening a real database. */
 function failIfRequested(): void {
   if (!host.failureCode) return;
   const error = new TransferError('Fixture transfer failure');
+
   error.code = host.failureCode;
+
   throw error;
 }
+
 /** The log still runs normally; only its output sink is inert. */
 const operations = {
+  /** Ignore an informational line. */
   info() {},
+  /** Ignore a warning line. */
   warn() {},
+  /** Ignore an error line. */
   error() {},
+  /** Ignore an appended line. */
   appendLine() {},
+  /** Ignore a request to reveal the channel. */
   show() {},
+  /** Ignore disposal of the stub channel. */
   dispose() {},
 };
+
 /** Node loader interception matches the project's existing fake-vscode tests. */
 const loader = Module as unknown as {
-  _load(id: string, parent: { filename?: string }, isMain: boolean): unknown;
+  /** Node's internal module loader, replaced for the duration of the test. */
+  _load(
+    id: string,
+    parent: {
+      /** Path of the module that issued the load, when Node provides it. */
+      filename?: string;
+    },
+    isMain: boolean,
+  ): unknown;
 };
+
 /** Saved loader restored immediately after loading the subject modules. */
 const original = loader._load;
+
 loader._load = function (id, parent, isMain) {
   if (id === 'vscode') return fakeVscode;
+
   if (parent?.filename?.includes('extension-')) {
     if (id === './extension-workspaces') return workspaces;
     if (id === './transfer') return transfer;
+
+    if (id === './export-transfer') {
+      return { listWorkspaceChats: transfer.listWorkspaceChats };
+    }
+
     if (id === './file-dialogs')
       return {
-        JSON_FILTER: { JSON: ['json'] },
+        JSON_FILTER: { 'Cursor chat export': ['zip'] },
+        ZIP_FILTER: { 'Cursor chat export': ['zip'] },
         importDialogOptions: () => ({}),
-        readExportUri: async () => {
+        localBundlePath: async () => {
           host.events.push('read');
           assert.equal(state.runtime.uiState.status, 'running');
+
           assert.equal(
             state.runtime.uiState.statusDetail,
             'Reading export file…',
           );
-          return {};
+
+          return '/tmp/fixture.cursor-chat.zip';
+        },
+      };
+
+    if (id === './transfer-process')
+      return {
+        async runTransfer(job: { kind: string }) {
+          if (job.kind === 'export') return transfer.exportToFile();
+
+          return transfer.importFromObject();
         },
       };
   }
+
   return original.call(this, id, parent, isMain);
 };
+
 /** Actual state and command implementations loaded against the I/O stubs. */
 let state: typeof import('../src/extension-state');
 /** Export command under test, loaded against the I/O stubs. */
@@ -187,6 +259,7 @@ let doExport: typeof import('../src/extension-export').doExport;
 let doImport: typeof import('../src/extension-import').doImport;
 /** Actual error presenter used by the registered commands. */
 let showFail: typeof import('../src/extension-errors').showFail;
+
 try {
   state = require('../src/extension-state');
   ({ doExport } = require('../src/extension-export'));
@@ -211,10 +284,13 @@ beforeEach(() => {
     imports: 0,
     onMode: undefined,
   });
+
   state.runtime.busy = false;
   state.runtime.uiState = state.idleState();
   state.runtime.sourceWorkspace = workspace as never;
+
   state.runtime.sidebar = {
+    /** Record each sidebar refresh. */
     refresh() {
       host.states.push({ ...state.runtime.uiState });
     },
@@ -224,16 +300,24 @@ beforeEach(() => {
 /** Exercise the real lock lifecycle around a command and remove its temporary files. */
 async function run(kind: 'export' | 'import'): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transit-dialogs-'));
+
   const context = {
     globalStorageUri: { fsPath: dir },
-    globalState: { get() {}, async update() {} },
+    globalState: {
+      /** Return no stored global state. */
+      get() {},
+      /** Ignore a global-state write. */
+      async update() {},
+    },
   } as unknown as vscode.ExtensionContext;
+
   try {
     await state
       .withLock(context, () =>
         (kind === 'export' ? doExport : doImport)({ context, operations }),
       )
       .catch((error: unknown) => showFail(kind, error, operations));
+
     assert.equal(state.runtime.busy, false);
     assert.equal(state.runtime.uiState.busy, false);
     assert.equal(state.runtime.uiState.canCancel, false);
@@ -248,6 +332,7 @@ test('export waits at each dialog and only reads selected chats after Save', asy
   host.selected = true;
   state.runtime.sourceWorkspace = undefined;
   await run('export');
+
   assert.deepEqual(host.events, [
     'workspace',
     'list',
@@ -256,6 +341,7 @@ test('export waits at each dialog and only reads selected chats after Save', asy
     'save',
     'progress',
   ]);
+
   assert.equal(host.exports, 1);
   assert.equal(state.runtime.uiState.status, 'completed');
 });
@@ -263,17 +349,22 @@ test('export waits at each dialog and only reads selected chats after Save', asy
 test('an unresolved chat picker keeps the lock without claiming export progress', async () => {
   let release!: () => void;
   let entered!: () => void;
+
   const reached = new Promise<void>((resolve) => {
     entered = resolve;
   });
+
   const hold = new Promise<void>((resolve) => {
     release = resolve;
   });
+
   host.onMode = async () => {
     entered();
     await hold;
   };
+
   const pending = run('export');
+
   try {
     await reached;
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -282,6 +373,7 @@ test('an unresolved chat picker keeps the lock without claiming export progress'
   } finally {
     release();
   }
+
   await pending;
   assert.equal(host.exports, 1);
 });
@@ -295,6 +387,7 @@ for (const stage of ['workspace', 'mode', 'chats', 'empty', 'save']) {
     assert.equal(host.exports, 0);
     assert.equal(host.events.includes('progress'), false);
     assert.equal(state.runtime.uiState.status, 'cancelled');
+
     assert.equal(
       host.states.some((s) => /Reading selected chats/.test(s.statusDetail)),
       false,
@@ -345,6 +438,7 @@ for (const outcome of ['completed', 'incomplete', 'failed', 'cancelled']) {
     await run('export');
     assert.equal(state.runtime.uiState.status, outcome);
     assert.equal(state.runtime.uiState.importNeedsRestart, false);
+
     assert.equal(
       host.states.every((s) => s.importNeedsRestart === false),
       true,
@@ -357,10 +451,12 @@ for (const code of ['RESOURCE_CONFLICT', 'PARTIAL']) {
     state.runtime.uiState.importNeedsRestart = true;
     host.failureCode = code;
     await run('import');
+
     assert.equal(
       state.runtime.uiState.status,
       code === 'PARTIAL' ? 'partial' : 'failed',
     );
+
     assert.equal(state.runtime.uiState.importNeedsRestart, false);
   });
 }

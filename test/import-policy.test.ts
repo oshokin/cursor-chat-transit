@@ -35,6 +35,7 @@ const request = {
   sourceComposerId: 'source',
   snapshotHash: 'hash',
 };
+
 /** Verified receipt that matches `request`. */
 const receipt: Receipt = {
   ...request,
@@ -50,12 +51,14 @@ test('object key order does not matter; array order does', () => {
 test('row enumeration order does not change snapshot', () => {
   const a = fixture();
   const b = fixture();
+
   b.bubbles.reverse();
   assert.equal(snapshotFingerprint(a), snapshotFingerprint(b));
 });
 
 test('title, message text and ordered conversation change snapshot', () => {
   const a = fixture();
+
   for (const mutate of [
     (b: SnapshotInput) => {
       b.header.name = 'Renamed';
@@ -68,14 +71,50 @@ test('title, message text and ordered conversation change snapshot', () => {
     },
   ]) {
     const b = fixture();
+
     mutate(b);
     assert.notEqual(snapshotFingerprint(a), snapshotFingerprint(b));
   }
 });
 
+test('textPreview inside a message payload changes the snapshot', () => {
+  const left = fixture();
+  const right = fixture();
+
+  left.bubbles[0]!.payload = {
+    toolResult: { grouping: { textPreview: 'actual-data-A' } },
+  };
+
+  right.bubbles[0]!.payload = {
+    toolResult: { grouping: { textPreview: 'actual-data-B' } },
+  };
+
+  assert.notEqual(snapshotFingerprint(left), snapshotFingerprint(right));
+});
+
+test('grouping.textPreview alone does not change the snapshot', () => {
+  const withPreview = fixture();
+  const withoutPreview = fixture();
+
+  const headers = withPreview.body.fullConversationHeadersOnly as Array<
+    Record<string, unknown>
+  >;
+
+  headers[0] = {
+    bubbleId: 'a',
+    grouping: { textPreview: 'stale preview' },
+  };
+
+  assert.equal(
+    snapshotFingerprint(withPreview),
+    snapshotFingerprint(withoutPreview),
+  );
+});
+
 test('workspace rebinding alone does not change source snapshot', () => {
   const a = fixture();
   const b = fixture();
+
   b.header.workspaceIdentifier = { id: 'other' };
   assert.equal(snapshotFingerprint(a), snapshotFingerprint(b));
 });
@@ -83,8 +122,10 @@ test('workspace rebinding alone does not change source snapshot', () => {
 test('missing dependency becoming available changes snapshot', () => {
   const a = fixture();
   const b = fixture();
+
   a.quality = 'history-only';
   a.dependencies = [{ kind: 'kv', id: 'blob', sha256: null }];
+
   b.dependencies = [
     {
       kind: 'kv',
@@ -94,6 +135,7 @@ test('missing dependency becoming available changes snapshot', () => {
       byteLength: 1,
     },
   ];
+
   assert.notEqual(snapshotFingerprint(a), snapshotFingerprint(b));
 });
 
@@ -126,10 +168,12 @@ test('deleted copy may be restored, inconsistent copy is blocked', async () => {
       reason: 'deleted-copy',
     },
   );
+
   assert.deepEqual(
     await decideImport(request, [receipt], async () => 'inconsistent'),
     { action: 'blocked', reason: 'inconsistent-target' },
   );
+
   assert.deepEqual(
     await decideImport(request, [receipt], async () => 'detached'),
     { action: 'create', reason: 'deleted-copy' },
@@ -139,8 +183,10 @@ test('deleted copy may be restored, inconsistent copy is blocked', async () => {
 test('an available copy wins over a stale inconsistent mapping of the same snapshot', async () => {
   const stale: Receipt = { ...receipt, targetComposerId: 'stale' };
   const live: Receipt = { ...receipt, targetComposerId: 'live' };
+
   const probe = async (id: string) =>
     id === 'live' ? ('available' as const) : ('inconsistent' as const);
+
   for (const receipts of [
     [stale, live],
     [live, stale],
@@ -161,22 +207,36 @@ test('classifyTargetObservation treats leftover rows without a workspace list as
     workspaceSelected: 'absent' as const,
     globalHeader: 'present' as const,
     globalHeadersTable: 'absent' as const,
+    globalWorkspaceBinding: 'absent' as const,
     archived: 'absent' as const,
+    bodyShape: 'valid' as const,
+    references: 'satisfied' as const,
+    metadata: 'ok' as const,
   };
+
   assert.equal(classifyTargetObservation(facts), 'detached');
-  assert.equal(
-    classifyTargetObservation({ ...facts, body: 'absent', bubbles: 0 }),
-    'detached',
-  );
+
   assert.equal(
     classifyTargetObservation({
       ...facts,
       body: 'absent',
+      bodyShape: 'absent',
+      bubbles: 0,
+    }),
+    'detached',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      body: 'absent',
+      bodyShape: 'absent',
       bubbles: 0,
       globalHeader: 'absent',
     }),
     'deleted',
   );
+
   assert.equal(
     classifyTargetObservation({
       ...facts,
@@ -184,14 +244,17 @@ test('classifyTargetObservation treats leftover rows without a workspace list as
     }),
     'available',
   );
+
   assert.equal(
     classifyTargetObservation({
       ...facts,
       body: 'absent',
+      bodyShape: 'absent',
       workspaceList: 'present',
     }),
     'inconsistent',
   );
+
   assert.equal(
     classifyTargetObservation({
       ...facts,
@@ -199,16 +262,59 @@ test('classifyTargetObservation treats leftover rows without a workspace list as
     }),
     'available',
   );
+
   assert.equal(
     classifyTargetObservation({
       ...facts,
       body: 'absent',
+      bodyShape: 'absent',
       bubbles: 0,
       globalHeader: 'absent',
       globalHeadersTable: 'present',
       archived: 'present',
     }),
     'detached',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      globalHeader: 'absent',
+      globalWorkspaceBinding: 'present',
+    }),
+    'available',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      globalWorkspaceBinding: 'conflict',
+    }),
+    'inconsistent',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      bodyShape: 'invalid',
+    }),
+    'inconsistent',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      references: 'missing',
+    }),
+    'inconsistent',
+  );
+
+  assert.equal(
+    classifyTargetObservation({
+      ...facts,
+      metadata: 'invalid',
+    }),
+    'inconsistent',
   );
 });
 
@@ -236,17 +342,21 @@ test('unfinished target operation blocks a new mapping', async () => {
 
 test('duplicate record identities are rejected', () => {
   const a = fixture();
+
   a.bubbles.push(a.bubbles[0]!);
   assert.throws(() => snapshotFingerprint(a), /Duplicate/);
 });
 
 test('reachable plan files are part of the snapshot fingerprint', () => {
   const name = 'hello_world_9740ba02.plan.md';
+
   const bodyText = JSON.stringify({
     composerId: 'source',
     planUri: `file:///tmp/${name}`,
   });
+
   const header = { composerId: 'source' };
+
   const first = snapshotInputFromChat({
     header,
     bodyText,
@@ -258,6 +368,7 @@ test('reachable plan files are part of the snapshot fingerprint', () => {
     },
     quality: 'complete',
   });
+
   const second = snapshotInputFromChat({
     header,
     bodyText,
@@ -269,6 +380,7 @@ test('reachable plan files are part of the snapshot fingerprint', () => {
     },
     quality: 'complete',
   });
+
   const missing = snapshotInputFromChat({
     header,
     bodyText,
@@ -276,6 +388,7 @@ test('reachable plan files are part of the snapshot fingerprint', () => {
     resources: { kv: [], attachments: [], plans: [] },
     quality: 'history-only',
   });
+
   assert.ok(first.dependencies.some((row) => row.kind === 'plan'));
   assert.notEqual(snapshotFingerprint(first), snapshotFingerprint(second));
   assert.notEqual(snapshotFingerprint(first), snapshotFingerprint(missing));

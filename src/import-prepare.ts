@@ -1,5 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import {
+  attachmentDirectory,
+  attachmentFilename,
+  rewriteChatImagePaths,
+} from './attachments';
+import {
+  canvasFilePath,
+  canvasFilenamesFromChat,
+  readCanvasFile,
+  rewriteChatCanvasUris,
+} from './canvases';
 import { cloneExportObjectForCopy } from './chat-copy';
 import * as db from './db';
 import { missingDependencyMessage, planImportResources } from './dependencies';
@@ -13,7 +24,7 @@ import {
   rewriteChatPlanUris,
 } from './plans';
 import { filterExportForPlan } from './recovery';
-import { plansDirOf } from './transfer-context';
+import { canvasesDirOf, plansDirOf } from './transfer-context';
 import type {
   BubbleRecord,
   ExportObject,
@@ -40,6 +51,7 @@ export async function prepareImport(opts: {
 }) {
   const { ctx, workspace, exportObj, resources, connGl } = opts;
   const { recovery, toCreate, quality, snapshotBySource } = opts.selection;
+
   const filtered = filterExportForPlan(
     exportObj,
     {
@@ -49,11 +61,14 @@ export async function prepareImport(opts: {
     },
     resources,
   );
+
   ctx.onPhase?.('prepare');
+
   const { cloned, composerMap, bubbleMap } = await cloneExportObjectForCopy(
     filtered,
     { signal: ctx.signal },
   );
+
   ctx.onPhase?.('prepare', {
     chats: cloned.allComposers.length,
     bubbles: Object.values(cloned.bubbles || {}).reduce(
@@ -61,19 +76,25 @@ export async function prepareImport(opts: {
       0,
     ),
   });
+
   const historyOnlyNew = new Set(
     recovery.historyOnly
       .map((id) => composerMap.get(id))
       .filter((id): id is string => Boolean(id)),
   );
+
   const requiredComposers: Record<string, string> = {};
   const requiredBubbles: Record<string, BubbleRecord[]> = {};
+
   for (const [id, body] of Object.entries(cloned.composers)) {
     if (historyOnlyNew.has(id)) continue;
     requiredComposers[id] = body;
     requiredBubbles[id] = cloned.bubbles?.[id] || [];
   }
+
   const plansDir = plansDirOf(ctx);
+  const canvasesDir = canvasesDirOf(ctx, workspace);
+
   const plan = await planImportResources({
     conn: connGl,
     composers: cloned.composers,
@@ -84,29 +105,41 @@ export async function prepareImport(opts: {
     requiredComposers,
     requiredBubbles,
     plansDir,
+    canvasesDir,
   });
+
   if (plan.assessment.status === 'unsupported') {
     const err = new TransferError(
       'This chat uses an unsupported conversation state format.',
     );
+
     err.code = 'UNSUPPORTED_STATE';
+
     throw err;
   }
+
   if (plan.assessment.status !== 'complete') {
     const err = new TransferError(missingDependencyMessage(plan.assessment));
+
     err.code = 'MISSING_DEPENDENCY';
+
     err.missing = [
       ...plan.assessment.missingKeys,
       ...plan.assessment.missingAttachments,
       ...plan.assessment.missingPlans,
+      ...plan.assessment.missingCanvases,
     ];
+
     throw err;
   }
+
   const backupDir = path.join(
     path.dirname(workspace.globalDbPath),
     'cursor-chat-transit-backups',
   );
+
   ctx.onPhase?.('backup');
+
   const glBackup = await db.createVerifiedBackup({
     executable: ctx.executable,
     database: workspace.globalDbPath,
@@ -116,6 +149,7 @@ export async function prepareImport(opts: {
     timeoutMs: ctx.timeoutMs,
     busyTimeoutMs: ctx.busyTimeoutMs,
   });
+
   const wsBackup = await db.createVerifiedBackup({
     executable: ctx.executable,
     database: workspace.workspaceDbPath,
@@ -125,19 +159,70 @@ export async function prepareImport(opts: {
     timeoutMs: ctx.timeoutMs,
     busyTimeoutMs: ctx.busyTimeoutMs,
   });
+
   const destByFilename = new Map<string, string>();
+
   const suppliedPlans = new Set(
     plan.plans.map((resource) => resource.filename),
   );
+
   for (const [id, body] of Object.entries(cloned.composers)) {
     for (const name of planFilenamesFromChat(body, cloned.bubbles?.[id])) {
       if (destByFilename.has(name)) continue;
+
       if (suppliedPlans.has(name) || (await readPlanFile(plansDir, name))) {
         destByFilename.set(name, planFilePath(plansDir, name));
       }
     }
   }
+
   rewriteChatPlanUris(cloned.composers, cloned.bubbles || {}, destByFilename);
+
+  const destCanvasByFilename = new Map<string, string>();
+
+  if (canvasesDir) {
+    const suppliedCanvases = new Set(
+      plan.canvases.map((resource) => resource.filename),
+    );
+
+    for (const [id, body] of Object.entries(cloned.composers)) {
+      for (const name of canvasFilenamesFromChat(body, cloned.bubbles?.[id])) {
+        if (destCanvasByFilename.has(name)) continue;
+
+        if (
+          suppliedCanvases.has(name) ||
+          (await readCanvasFile(canvasesDir, name))
+        ) {
+          destCanvasByFilename.set(name, canvasFilePath(canvasesDir, name));
+        }
+      }
+    }
+  }
+
+  rewriteChatCanvasUris(
+    cloned.composers,
+    cloned.bubbles || {},
+    destCanvasByFilename,
+  );
+
+  const destImageByBasename = new Map<string, string>();
+  const imagesDir = attachmentDirectory(workspace);
+
+  for (const resource of cloned.resources?.attachments || []) {
+    const dest = path.join(imagesDir, attachmentFilename(resource));
+
+    destImageByBasename.set(attachmentFilename(resource), dest);
+
+    for (const alias of resource.aliases || []) {
+      destImageByBasename.set(alias, dest);
+    }
+  }
+
+  rewriteChatImagePaths(
+    cloned.composers,
+    cloned.bubbles || {},
+    destImageByBasename,
+  );
 
   const pending: PendingImport = {
     operationId: randomUUID(),
@@ -158,6 +243,7 @@ export async function prepareImport(opts: {
     requiredComposers,
     requiredBubbles,
     plansDir,
+    canvasesDir,
     plan,
     glBackup,
     wsBackup,

@@ -35,7 +35,9 @@ export function recentChats(headers: ComposerHeader[]): ComposerHeader[] {
 /** Absolute local dates remain unambiguous across midnight and long sessions. */
 export function chatActivityLabel(header: ComposerHeader): string {
   const timestamp = chatActivity(header);
+
   if (!timestamp) return 'Date unavailable';
+
   const date = new Intl.DateTimeFormat(undefined, {
     year: 'numeric',
     month: 'short',
@@ -43,5 +45,6 @@ export function chatActivityLabel(header: ComposerHeader): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(timestamp);
+
   return `${validTimestamp(header.lastUpdatedAt) ? 'Updated' : 'Created'} ${date}`;
 }

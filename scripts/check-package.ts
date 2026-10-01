@@ -38,18 +38,24 @@ function inventory(file: string): Promise<string[]> {
     yauzl.open(file, { lazyEntries: true }, (error, zip) => {
       if (error || !zip) {
         reject(error || new Error('Unable to open VSIX'));
+
         return;
       }
+
       const names: string[] = [];
+
       zip.on('error', (error) => {
         zip.close();
         reject(error);
       });
+
       zip.on('end', () => resolve(names));
+
       zip.on('entry', (entry: ZipEntry) => {
         names.push(entry.fileName);
         zip.readEntry();
       });
+
       zip.readEntry();
     });
   });
@@ -59,24 +65,30 @@ function inventory(file: string): Promise<string[]> {
 async function main(): Promise<void> {
   const root = path.resolve(__dirname, '..');
   const vsix = path.join(root, 'dist', 'cursor-chat-transit.vsix');
+
   if (!fs.existsSync(vsix)) throw new Error('VSIX not found');
   const names = new Set(await inventory(vsix));
   const foldedNames = new Set([...names].map((name) => name.toLowerCase()));
+
   for (const name of names) {
     const parts = name.split('/');
+
     if (
       parts.some((part) =>
-        ['.git', 'tmp', 'test', '.dev', 'src', 'node_modules'].includes(part),
+        ['.git', 'tmp', 'test', '.dev', 'src'].includes(part),
       ) ||
+      parts.includes('node_modules') ||
       /state\.vscdb(?:-|$)|\.cursor-chat\.json$/.test(name)
     ) {
       throw new Error(`VSIX contains forbidden path: ${name}`);
     }
   }
+
   const modules = fs
     .readdirSync(path.join(root, 'src'))
     .filter((name) => name.endsWith('.ts'))
     .map((name) => `out/${name.replace(/\.ts$/, '.js')}`);
+
   for (const required of [
     ...modules,
     'package.json',
@@ -87,17 +99,26 @@ async function main(): Promise<void> {
     'resources/sidebar.html',
     'resources/sidebar.css',
     'resources/sidebar-client.js',
+    'vendor/yazl/index.js',
+    'vendor/yauzl/index.js',
+    'vendor/yauzl/fd-slicer.js',
+    'vendor/buffer-crc32/index.js',
+    'vendor/pend/index.js',
   ]) {
     if (!foldedNames.has(`extension/${required}`.toLowerCase()))
       throw new Error(`VSIX missing ${required}`);
   }
+
   console.log('modules', modules.length);
+
   console.log(
     'sha256',
     crypto.createHash('sha256').update(fs.readFileSync(vsix)).digest('hex'),
   );
+
   console.log('size', fs.statSync(vsix).size);
 }
+
 main().catch((error: unknown) => {
   console.error(error);
   process.exitCode = 1;

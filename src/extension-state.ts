@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { acquireLock, type LockHandle } from './lock';
 import { startOperationLog } from './operation-log';
-import { phaseMessage, phaseProgress, type TransferKind } from './operation-ui';
+import { ProgressModel } from './progress-model';
+import { phaseMessage, type TransferKind } from './operation-ui';
 import { TransferSidebar, type SidebarState } from './sidebar-provider';
 import type {
   TransferPhase,
@@ -16,6 +17,7 @@ export const runtime: {
   busy: boolean;
   /** AbortController for the in-flight operation. */
   activeAbort?: AbortController;
+  progressTimer?: ReturnType<typeof setInterval>;
   /** Workspace selected as the transfer source or target. */
   sourceWorkspace?: WorkspaceEntry;
   /** Registered sidebar view, if the webview has loaded. */
@@ -47,10 +49,12 @@ export function idleState(): SidebarState {
 /** Combine progress cancellation with the sidebar Cancel action. */
 export function linkedSignal(token: vscode.CancellationToken): AbortSignal {
   const ac = new AbortController();
+
   runtime.activeAbort = ac;
   if (token.isCancellationRequested) ac.abort();
   token.onCancellationRequested(() => ac.abort());
   setUi({ canCancel: true });
+
   return ac.signal;
 }
 
@@ -60,19 +64,21 @@ export function attachPhaseProgress(
   log: ReturnType<typeof startOperationLog>,
   kind: TransferKind,
 ): (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void {
-  let lastPct = 0;
-  let lastPaint = 0;
+  const model = new ProgressModel(kind);
+
+  if (runtime.progressTimer) clearInterval(runtime.progressTimer);
+
+  runtime.progressTimer = setInterval(() => {
+    if (runtime.busy) setUi(model.snapshot());
+  }, 1000);
+
   return (phase, metrics = {}) => {
     log.phase(phase, metrics);
+    model.update(phase, metrics);
     const message = phaseMessage(phase, metrics);
-    const pct = Math.max(lastPct, phaseProgress(kind, phase, metrics));
-    const increment = pct - lastPct;
-    lastPct = pct;
-    vscodeProgress.report(increment > 0 ? { message, increment } : { message });
-    const now = Date.now();
-    if (now - lastPaint < 80 && pct < 100 && increment === 0) return;
-    lastPaint = now;
-    setUi({ statusDetail: message, progress: pct });
+
+    vscodeProgress.report({ message });
+    setUi({ statusDetail: message, ...model.snapshot() });
   };
 }
 
@@ -85,6 +91,7 @@ export function setUi(patch: Partial<SidebarState>): void {
 /** Apply a selected source workspace to the sidebar card. */
 export function setSource(entry: WorkspaceEntry | undefined): void {
   runtime.sourceWorkspace = entry;
+
   if (!entry) {
     setUi({
       workspaceLocation: '',
@@ -92,9 +99,12 @@ export function setSource(entry: WorkspaceEntry | undefined): void {
       workspaceDetail: 'Export from or import into this workspace.',
       sourceAvailable: false,
     });
+
     return;
   }
+
   const label = workspacePresentation(entry);
+
   setUi({
     workspaceName: label.name,
     workspaceDetail: label.path,
@@ -110,27 +120,45 @@ export async function withLock<T>(
 ): Promise<T | undefined> {
   if (runtime.busy) {
     vscode.window.showWarningMessage('Cursor Chat Transit is already running.');
+
     return;
   }
+
   runtime.busy = true;
+
   setUi({
     busy: true,
     canCancel: false,
     status: 'running',
     importNeedsRestart: false,
+    stageLabel: '',
+    currentItem: '',
+    timingLabel: '',
+    canRecoverLock: false,
     statusTitle: 'Preparing transfer…',
     statusDetail: 'Checking transfer availability.',
     statusItems: [],
     progress: undefined,
   });
+
   let lock: LockHandle | undefined;
+
   try {
     lock = await acquireLock(context.globalStorageUri.fsPath, 'transfer');
+
     return await fn();
   } finally {
     if (lock) await lock.release();
+    clearInterval(runtime.progressTimer);
+    runtime.progressTimer = undefined;
     runtime.busy = false;
     runtime.activeAbort = undefined;
-    setUi({ busy: false, canCancel: false, progress: undefined });
+
+    setUi({
+      busy: false,
+      canCancel: false,
+      progress: undefined,
+      timingLabel: runtime.uiState.timingLabel?.split(' · ')[0] || '',
+    });
   }
 }

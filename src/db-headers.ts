@@ -22,15 +22,19 @@ export function headerWorkspaceKey(
   ident: NonNullable<ComposerHeader['workspaceIdentifier']>,
 ): string | null {
   const raw = ident.uri as unknown;
+
   if (typeof raw === 'string') {
     try {
       const uri = uriFromString(raw);
+
       return workspaceKey(headerKindFromUri(uri.path), uri);
     } catch {
       return null;
     }
   }
+
   if (!raw || typeof raw !== 'object') return null;
+
   const uri = raw as {
     /** URI scheme such as `file` or `vscode-remote`. */
     scheme?: unknown;
@@ -43,8 +47,10 @@ export function headerWorkspaceKey(
     /** Optional fragment. */
     fragment?: unknown;
   };
+
   if (typeof uri.scheme !== 'string' || typeof uri.path !== 'string')
     return null;
+
   try {
     return workspaceKey(headerKindFromUri(uri.path), {
       scheme: uri.scheme,
@@ -65,11 +71,53 @@ export function matchesWorkspace(
   identity: WorkspaceIdentity | undefined,
 ): boolean {
   const ident = header.workspaceIdentifier || {};
+
   if (storageId && ident.id && ident.id === storageId) return true;
   if (!identity) return false;
   const headerKey = headerWorkspaceKey(ident);
+
   if (!headerKey) return false;
+
   return headerKey === workspaceKey(identity.kind, identity.uri);
+}
+
+/**
+ * How one header relates to the destination workspace.
+ * `match` is the same test export uses. `other` is a different workspace.
+ * `unbound` has no workspace claim. `conflict` is an unusable or contradictory claim.
+ */
+export type WorkspaceBinding = 'match' | 'other' | 'unbound' | 'conflict';
+
+/** Classify a header against one destination. A legacy row with no claim stays unbound. */
+export function workspaceBinding(
+  header: ComposerHeader,
+  storageId: string | undefined,
+  identity: WorkspaceIdentity | undefined,
+): WorkspaceBinding {
+  const ident = header.workspaceIdentifier || {};
+  const id = typeof ident.id === 'string' ? ident.id : '';
+  const rawUri = ident.uri as unknown;
+
+  const uriPresent =
+    rawUri !== undefined &&
+    rawUri !== null &&
+    !(typeof rawUri === 'string' && rawUri === '');
+
+  const uriKey = uriPresent ? headerWorkspaceKey(ident) : null;
+  const idMatch = !!(storageId && id && id === storageId);
+
+  if (uriPresent && !uriKey && !idMatch) return 'conflict';
+
+  if (idMatch && uriPresent && identity) {
+    const expected = workspaceKey(identity.kind, identity.uri);
+
+    if (!uriKey || uriKey !== expected) return 'conflict';
+  }
+
+  if (matchesWorkspace(header, storageId, identity)) return 'match';
+  if (!id && !uriPresent) return 'unbound';
+
+  return 'other';
 }
 
 /** Where a merged header originated; table rows outrank blobs and workspace lists. */
@@ -85,36 +133,45 @@ export function mergeHeaders(
   }>,
 ): ComposerHeader[] {
   const byId = new Map<string, { record: ComposerHeader; rank: number }>();
+
   const rank: Record<HeaderMergeSource, number> = {
     table: 3,
     blob: 2,
     workspace: 1,
     selected: 0,
   };
+
   for (const { records, source } of sources) {
     const r = rank[source] ?? 0;
+
     for (const rec of records || []) {
       if (!rec || !rec.composerId || rec.composerId === 'empty-state-draft')
         continue;
       const prev = byId.get(rec.composerId);
+
       if (!prev || r > prev.rank)
         byId.set(rec.composerId, { record: rec, rank: r });
     }
   }
+
   // A sparse higher-priority header must not erase a known name.
   // Preserve explicit empty names; only recover an absent name.
   const names = new Map<string, { name: string; rank: number }>();
+
   for (const { records, source } of sources) {
     for (const rec of records || []) {
       if (!rec || typeof rec.name !== 'string' || !rec.name.trim()) continue;
       const prev = names.get(rec.composerId);
+
       if (!prev || rank[source] > prev.rank) {
         names.set(rec.composerId, { name: rec.name, rank: rank[source] });
       }
     }
   }
+
   return [...byId.values()].map(({ record }) => {
     const fallback = names.get(record.composerId);
+
     return record.name === undefined && fallback
       ? { ...record, name: fallback.name }
       : record;
@@ -139,13 +196,16 @@ export async function resolveComposers(
   },
 ): Promise<ComposerHeader[]> {
   const { storageId, identity, layoutWs, layoutGl } = opts;
+
   const sources: Array<{
     records: ComposerHeader[];
     source: HeaderMergeSource;
   }> = [];
+
   if (layoutWs.itemTable) {
     const data = await readItemJson(connWs, 'composer.composerData');
     const all = data?.allComposers;
+
     if (Array.isArray(all)) {
       sources.push({
         source: 'workspace',
@@ -155,6 +215,7 @@ export async function resolveComposers(
       });
     }
   }
+
   if (layoutWs.composerHeaders) {
     sources.push({
       source: 'table',
@@ -165,20 +226,24 @@ export async function resolveComposers(
       ),
     });
   }
+
   if (layoutGl.composerHeaders) {
     const all = await readComposerHeadersTable(
       connGl,
       layoutGl.headerColumns,
       opts.includeColumnDates,
     );
+
     sources.push({
       source: 'table',
       records: all.filter((h) => matchesWorkspace(h, storageId, identity)),
     });
   }
+
   if (layoutGl.itemTable) {
     const blob = await readItemJson(connGl, 'composer.composerHeaders');
     const all = blob?.allComposers;
+
     if (Array.isArray(all)) {
       sources.push({
         source: 'blob',
@@ -189,5 +254,6 @@ export async function resolveComposers(
       });
     }
   }
+
   return mergeHeaders(sources);
 }

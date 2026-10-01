@@ -7,3 +7,4 @@ export {
   listWorkspaceChats,
 } from './export-transfer';
 export { importFromObject } from './import-transfer';
+export { importFromBundle } from './import-bundle';

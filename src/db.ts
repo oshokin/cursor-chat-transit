@@ -2,6 +2,7 @@
 export {
   HeaderMergeSource,
   matchesWorkspace,
+  workspaceBinding,
   mergeHeaders,
   resolveComposers,
 } from './db-headers';
@@ -17,9 +18,13 @@ export {
   readItemJson,
   readItemText,
   readItemTextImpl,
+  readItemTextState,
   readKvBytes,
+  readKvBlobs,
   readKvText,
   readKvTextImpl,
+  composerHeaderArchiveColumn,
+  composerHeaderWorkspaceColumn,
   reads,
   testHooks,
 } from './db-read';

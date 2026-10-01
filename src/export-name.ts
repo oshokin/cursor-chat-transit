@@ -36,7 +36,7 @@ export interface ExportNameInput {
 }
 
 /** Filename suffix written next to the suggested export stem. */
-const SUFFIX = '.cursor-chat.json';
+const SUFFIX = '.cursor-chat.zip';
 /** Windows device names that must not become a filename leaf. */
 const RESERVED = /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu;
 
@@ -44,12 +44,15 @@ const RESERVED = /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu;
 function truncateUtf8(value: string, maxBytes: number): string {
   let result = '';
   let bytes = 0;
+
   for (const character of value) {
     const size = Buffer.byteLength(character, 'utf8');
+
     if (bytes + size > maxBytes) break;
     result += character;
     bytes += size;
   }
+
   return result;
 }
 
@@ -62,6 +65,7 @@ export function cleanFilenamePart(
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 16) {
     throw new RangeError('Invalid filename budget');
   }
+
   let cleaned = value
     .normalize('NFC')
     .replace(
@@ -73,15 +77,19 @@ export function cleanFilenamePart(
     .replace(/\s+/gu, '-')
     .replace(/-+/gu, '-')
     .replace(/^[.\s-]+|[.\s-]+$/gu, '');
+
   if (!cleaned) cleaned = fallback;
   if (RESERVED.test(cleaned)) cleaned = `_${cleaned}`;
+
   if (Buffer.byteLength(cleaned, 'utf8') > maxBytes) {
     const digest = createHash('sha256')
       .update(cleaned)
       .digest('hex')
       .slice(0, 8);
+
     cleaned = `${truncateUtf8(cleaned, maxBytes - 9).replace(/[.\s-]+$/gu, '')}-${digest}`;
   }
+
   return cleaned;
 }
 
@@ -92,6 +100,7 @@ export function workspaceNameFromIdentity(
 ): string {
   const leaf = (uriPath || '').split('/').filter(Boolean).at(-1);
   const name = leaf || 'workspace';
+
   return kind === 'workspace' ? name.replace(/\.code-workspace$/i, '') : name;
 }
 
@@ -103,7 +112,9 @@ export function selectionForFilename(
   if (!Number.isSafeInteger(chats.length) || chats.length < 1) {
     throw new RangeError('An export must contain at least one selected chat');
   }
+
   if (mode === 'all') return { kind: 'all', count: chats.length };
+
   if (chats.length === 1) {
     return {
       kind: 'selected',
@@ -111,24 +122,31 @@ export function selectionForFilename(
       chatTitle: chats[0].name || 'chat',
     };
   }
+
   return { kind: 'selected', count: chats.length };
 }
 
 /** Suggest an editable export name from the actual selection, using UTC. */
 export function suggestExportFilename(input: ExportNameInput): string {
   const { selection } = input;
+
   if (!Number.isSafeInteger(selection.count) || selection.count < 1) {
     throw new RangeError('An export must contain at least one selected chat');
   }
+
   const date = input.now ?? new Date();
+
   if (!Number.isFinite(date.getTime())) throw new RangeError('Invalid date');
   const workspace = cleanFilenamePart(input.workspaceName, 'workspace');
+
   const scope =
     selection.kind === 'all'
       ? 'all-chats'
       : selection.count === 1
         ? cleanFilenamePart(selection.chatTitle ?? '', 'chat')
         : `${selection.count}-chats`;
+
   const stamp = date.toISOString().replace(/[-:.]/g, '');
+
   return `${workspace}--${scope}--${stamp}${SUFFIX}`;
 }

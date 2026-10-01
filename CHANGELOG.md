@@ -2,27 +2,21 @@
 
 ## 1.0.0
 
-First release of Cursor Chat Transit (`oshokin.cursor-chat-transit`).
-
-- Export and import Cursor chats between workspaces and devices, including conversation records, plan files, attachments, and referenced blobs.
-- Repeat import skips an identical previously imported snapshot and adds a separate copy when the source changed; it does not overwrite an existing chat.
-- Restore a deleted imported chat as a new independent copy when a verified receipt still points at leftover SQLite rows without a workspace list binding; keep those leftover rows and still refuse unfinished pending imports.
-- Show **Quit Cursor** only after a completed import adds chats, including usable chats recovered from an incomplete export; it uses Cursor's normal quit command, with confirmation and unsaved-work prompts handled by Cursor.
-- Remove the extension's redundant quit confirmation. Keep the native quit flow and protect against duplicate requests and state changes during command lookup.
-- List chats by recent activity and group workspaces by location, with the current workspace first.
-- Rename settings, commands and views to `cursorChatTransit.*`; previous keys and custom keybindings must be updated manually.
-- Add local plans-directory and bounded SQLite timeout settings; apply lock waits to writes and backups as well as reads.
-- Fail closed on leftover transfer locks; make lock release idempotent so an old handle cannot delete a new owner's file.
-- Distinguish leftover locks from a live operation and put recovery steps in the operation log.
-- Show the sidebar progress bar only while a transfer is running; native pickers wait without a progress bar or a premature “reading” message.
-- Remove a stray `>` between the operation-log and cancel controls.
-- Retain the original MIT copyright notice alongside the notice for subsequent work on Cursor Chat Transit; clarify provenance in the architecture document.
-- Draft GitHub Release from a `v*` tag after the same CI gates; no Marketplace publish.
-- Pin `@types/vscode` to 1.85.0 to match `engines.vscode`.
-- `task setup` installs the Node.js version from `.nvmrc` when npm is missing. Linux/macOS use a POSIX script; Windows 10/11 use PowerShell 5.1.
-- Drop the synthetic F5 chat databases and editor launchers. Debug with an empty isolated host; dogfood by installing the VSIX into Cursor.
-- Route F5 compile/watch through the same Node wrapper as Task, so the desktop GUI PATH is not required.
-- Keep npm stdout out of the Windows wrapper's exit code; smoke `dev-node` on the CI OS matrix.
-- Add Task recipes; improve file URI metadata and portable VSIX verification.
-- Remove the mandatory file-length lint limit; retain advisory function-complexity review.
-- Drop unused Task recipes `review`, `test:watch`, and `test:host`; the npm scripts remain.
+- Export and import Cursor chats between workspaces and devices as a version-4 ZIP archive: a manifest, bounded NDJSON parts, and original resource bytes. Included when available: conversation records, message bodies, referenced blobs, image attachments, plan files, and canvases.
+- Stream NDJSON records and resource installation so a transfer does not keep every message body in memory or write one temporary file per message.
+- Prepare import rows in a private temporary database; copy them into Cursor in bounded transactions (at most 128 rows / 8 MiB, with a single permitted value up to 32 MiB) and publish chat headers last. On retry, recover verified unpublished message batches whose hashes and current bytes still match; leave modified rows for inspection.
+- Release owned SQLite children on cancellation, timeout and Extension Host disconnect; serialize importers that share a global database.
+- Fail closed on leftover transfer locks. Lock release is idempotent so an old handle cannot delete a new owner's file. **Clear stale lock** removes only a verified dead owner after PID and token checks; live or changed locks stay in place.
+- Record import receipts and pending hashes in a private journal. Repeat import skips an identical previously imported snapshot and writes a separate copy when the source changed; it does not overwrite an existing chat. A change to `grouping.textPreview` alone is not a new version. An intact chat that still belongs to the workspace through the global header table is not copied again, whether or not it is archived.
+- Restore a deleted imported chat as a new independent copy when a verified receipt still points at leftover SQLite rows without a workspace list binding; keep those leftover rows and refuse unfinished pending imports. Damaged list JSON, an empty or NULL list, a list field that is not an array, a damaged body, or a missing referenced message blocks the import before any new copy is written. A missing optional field is allowed.
+- Optional recovery (`cursorChatTransit.import.allowPartial`) can keep readable history from incomplete exports; invalid JSON, unsafe paths and conflicts still fail closed.
+- Back up the global and workspace databases before writes; reuse existing resource files only when bytes match.
+- Show **Quit Cursor** only after a completed import adds chats, including usable chats recovered from an incomplete export. The action uses Cursor's normal quit command; Cursor owns confirmation and unsaved-work prompts. Overlapping quit requests and mid-lookup state changes are ignored.
+- List chats by recent activity and group workspaces by location (current workspace first, then this computer, SSH, containers, WSL and other remotes). File dialogs start locally; a remote ZIP can be imported through the editor's remote file provider. Export destinations are local files.
+- Settings, commands and views use `cursorChatTransit.*`. Machine settings cover the Cursor user-data directory, sqlite3 path, plans directory, and bounded SQLite operation/busy timeouts (timeouts apply to reads, writes and backups). Application settings cover partial recovery and operation log level.
+- Show the sidebar progress bar only while a transfer is running: stage order, current chat/file, elapsed time and measured remaining time for the current stage. Native pickers wait without a progress bar or a premature “reading” message.
+- Write timestamped operation logs with concrete paths, chat identity, byte sizes, durations and failure codes. Diagnostics is a native dialog with **Copy report** and **Close**.
+- Cover SQLite contention, interruption, lock recovery, archive format, logging and progress with regression tests, plus an opt-in performance benchmark.
+- Pin `@types/vscode` to 1.85.0 to match `engines.vscode`. `task setup` installs the Node.js version from `.nvmrc` when npm is missing (POSIX on Linux/macOS, PowerShell 5.1 on Windows 10/11). F5 compile/watch uses the same Node wrapper as Task. Debug uses an empty isolated host; storage checks use a VSIX installed into Cursor.
+- CI runs core tests on Linux, macOS and Windows and smokes `dev-node` on that matrix. A `v*` tag drafts a GitHub Release after the same gates; Marketplace publish is a separate maintainer action.
+- MIT license with the original copyright notice and the notice for subsequent work on Cursor Chat Transit.

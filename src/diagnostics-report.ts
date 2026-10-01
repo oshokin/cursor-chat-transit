@@ -54,24 +54,32 @@ export function diagnosticTitle(report: DiagnosticReport): string {
       ? 'Diagnostics: unable to complete checks'
       : 'Diagnostics: needs attention';
   }
+
   if (report.checks.some((check) => check.status !== 'ok')) {
     return 'Diagnostics: needs attention';
   }
+
   return 'Diagnostics: checks passed';
 }
 
 /** Collect independent checks even when SQLite or one storage root is unavailable. */
 export async function collectChecks(
-  probes: ReadonlyArray<{ label: string; run(): Promise<DiagnosticCheck> }>,
+  probes: ReadonlyArray<{
+    /** Name copied onto a failed check when the probe itself throws. */
+    label: string;
+    /** Run one independent diagnostic. */
+    run(): Promise<DiagnosticCheck>;
+  }>,
 ): Promise<DiagnosticCheck[]> {
   const results = await Promise.allSettled(probes.map((probe) => probe.run()));
+
   return results.map((result, index) =>
     result.status === 'fulfilled'
       ? result.value
       : {
           label: probes[index].label,
           status: 'error',
-          summary: 'Check failed; see diagnostic log.',
+          summary: 'Check could not be completed. Retry Diagnostics.',
         },
   );
 }

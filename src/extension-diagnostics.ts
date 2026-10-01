@@ -12,7 +12,6 @@ import {
 import { config, storageOptions } from './extension-settings';
 import { runtime } from './extension-state';
 import { resolveSelectedWorkspace } from './operation-ui';
-import { type TransitLog } from './output-ui';
 import * as paths from './paths';
 import { ensureInitFile, findSqliteExecutable, sqliteVersion } from './sqlite';
 
@@ -24,11 +23,14 @@ export function hostKindLabel(kind: vscode.ExtensionKind): string {
 /** Project kind without leaking a remote authority. */
 export function projectKindLabel(): string {
   const folders = vscode.workspace.workspaceFolders || [];
+
   if (folders.length > 1) return 'Multi-root';
   const remote = vscode.env.remoteName || '';
+
   if (remote === 'wsl') return 'WSL';
   if (remote.startsWith('ssh-remote') || remote === 'ssh') return 'SSH';
   if (remote) return 'Remote';
+
   return folders.length ? 'Local' : 'No folder';
 }
 
@@ -36,7 +38,9 @@ export function projectKindLabel(): string {
 export function redact(value: string): string {
   const home = os.homedir();
   let out = value;
+
   if (home) out = out.split(home).join('~');
+
   return out.replace(/ssh-remote\+[^\s/]+/gi, 'ssh-remote+[redacted]');
 }
 
@@ -48,12 +52,14 @@ export async function timedCheck(
 ): Promise<DiagnosticCheck> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
+
   try {
     return await run(ac.signal);
   } catch (err) {
     if (ac.signal.aborted) {
       return { label, status: 'error', summary: 'Check timed out.' };
     }
+
     return {
       label,
       status: 'error',
@@ -70,6 +76,7 @@ export async function collectDiagnosticReport(
 ): Promise<DiagnosticReport> {
   const { sqlitePath } = config();
   const executable = findSqliteExecutable(sqlitePath || undefined);
+
   const checks = await collectChecks([
     {
       label: 'SQLite CLI',
@@ -82,10 +89,13 @@ export async function collectDiagnosticReport(
               summary: 'sqlite3 was not found on this machine.',
             };
           }
+
           const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
+
           await fs.promises.mkdir(tmp, { recursive: true });
           const initFile = await ensureInitFile(tmp);
           const version = await sqliteVersion(executable, initFile, signal);
+
           return {
             label: 'SQLite CLI',
             status: 'ok',
@@ -101,6 +111,7 @@ export async function collectDiagnosticReport(
             const userDir = paths.preferStorageRoot(storageOptions());
             const entries = paths.listWorkspaceEntries(userDir);
             const paired = entries.length > 0;
+
             return {
               label: 'Storage',
               status: paired ? 'ok' : 'warning',
@@ -128,15 +139,19 @@ export async function collectDiagnosticReport(
               summary: 'Skipped because sqlite3 is unavailable.',
             };
           }
+
           const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
+
           await fs.promises.mkdir(tmp, { recursive: true });
           const initFile = await ensureInitFile(tmp);
           const userDir = paths.preferStorageRoot(storageOptions());
           const entries = paths.listWorkspaceEntries(userDir);
+
           const resolved = resolveSelectedWorkspace(
             runtime.sourceWorkspace,
             entries,
           );
+
           if (resolved.status !== 'ok') {
             return {
               label: 'Write contract',
@@ -145,7 +160,9 @@ export async function collectDiagnosticReport(
                 'Choose a workspace to check its write contract. This does not inspect every stored project.',
             };
           }
+
           const entry = resolved.workspace;
+
           const ws = await inspectDatabase({
             executable,
             database: entry.workspaceDbPath,
@@ -154,6 +171,7 @@ export async function collectDiagnosticReport(
             signal,
             timeoutMs: 8000,
           });
+
           const gl = await inspectDatabase({
             executable,
             database: entry.globalDbPath,
@@ -162,6 +180,7 @@ export async function collectDiagnosticReport(
             signal,
             timeoutMs: 8000,
           });
+
           if (!gl.layout.canWriteGlobal || !ws.layout.canWriteWorkspace) {
             return {
               label: 'Write contract',
@@ -173,6 +192,7 @@ export async function collectDiagnosticReport(
               ),
             };
           }
+
           return {
             label: 'Write contract',
             status: 'ok',
@@ -181,6 +201,7 @@ export async function collectDiagnosticReport(
         }),
     },
   ]);
+
   return {
     generatedAt: new Date().toISOString(),
     editorName: vscode.env.appName,
@@ -201,9 +222,8 @@ export async function collectDiagnosticReport(
 export async function doDiagnostics(opts: {
   /** Extension host context used to locate Cursor storage. */
   context: vscode.ExtensionContext;
-  /** Diagnostic log that receives the native diagnostics report. */
-  diagnostics: TransitLog;
 }): Promise<void> {
   const report = await collectDiagnosticReport(opts.context);
-  await showDiagnosticsDialog(report, opts.diagnostics);
+
+  await showDiagnosticsDialog(report);
 }

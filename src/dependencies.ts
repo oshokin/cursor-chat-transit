@@ -8,6 +8,7 @@ export {
   verifyAttachmentFile,
   writeAttachmentFile,
 } from './attachments';
+export { readBlobGraph, resolveBlobGraph } from './blob-graph';
 export {
   SUPPORTED_COMPOSER_VERSION,
   blobKeysFromComposerBody,

@@ -5,4 +5,5 @@ import path from 'node:path';
 const root = path.resolve(__dirname, '..');
 /** Destination directory for the packaged VSIX. */
 const dir = path.join(root, 'dist');
+
 fs.mkdirSync(dir, { recursive: true });
