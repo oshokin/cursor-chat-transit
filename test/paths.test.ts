@@ -53,29 +53,29 @@ test('default Cursor paths use the client OS and absolute XDG paths only', async
   );
 
   assert.equal(
-    getDefaultCursorUserDir('win32', 'C:\\Users\\oleg', {
+    getDefaultCursorUserDir('win32', 'C:\\Users\\Oleg Shokin', {
       APPDATA: 'D:\\Roaming',
     }),
     'D:\\Roaming\\Cursor',
   );
 
   assert.equal(
-    getDefaultCursorUserDir('win32', 'C:\\Users\\oleg', {}),
-    'C:\\Users\\oleg\\AppData\\Roaming\\Cursor',
+    getDefaultCursorUserDir('win32', 'C:\\Users\\Oleg Shokin', {}),
+    'C:\\Users\\Oleg Shokin\\AppData\\Roaming\\Cursor',
   );
 
   assert.equal(
-    getDefaultCursorUserDir('linux', '/home/oleg', {
+    getDefaultCursorUserDir('linux', '/home/oshokin', {
       XDG_CONFIG_HOME: '/data/config',
     }),
     '/data/config/Cursor',
   );
 
   assert.equal(
-    getDefaultCursorUserDir('linux', '/home/oleg', {
+    getDefaultCursorUserDir('linux', '/home/oshokin', {
       XDG_CONFIG_HOME: 'relative',
     }),
-    '/home/oleg/.config/Cursor',
+    '/home/oshokin/.config/Cursor',
   );
 });
 

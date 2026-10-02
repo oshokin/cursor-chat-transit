@@ -118,10 +118,14 @@ test('local and remote same path are different workspaces', () => {
   const remote = {
     scheme: 'vscode-remote',
     authority: 'ssh-remote+host-a',
-    path: '/home/oleg/project',
+    path: '/home/oshokin/project',
   };
 
-  const local = { scheme: 'file', authority: '', path: '/home/oleg/project' };
+  const local = {
+    scheme: 'file',
+    authority: '',
+    path: '/home/oshokin/project',
+  };
 
   assert.notEqual(
     workspaceKey('folder', remote),
@@ -131,12 +135,12 @@ test('local and remote same path are different workspaces', () => {
 
 test('workspace.json workspace field wins over folder', () => {
   const id = identityFromWorkspaceJson({
-    workspace: 'file:///home/oleg/project/team.code-workspace',
-    folder: 'file:///home/oleg/project',
+    workspace: 'file:///home/oshokin/project/team.code-workspace',
+    folder: 'file:///home/oshokin/project',
   });
 
   assert.equal(id.kind, 'workspace');
-  assert.equal(id.uri.path, '/home/oleg/project/team.code-workspace');
+  assert.equal(id.uri.path, '/home/oshokin/project/team.code-workspace');
 });
 
 test('header URI ending in .code-workspace matches workspace kind', () => {

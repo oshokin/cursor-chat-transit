@@ -19,7 +19,7 @@ const numericId = '1790418430150';
 /** URI parts for a workspace identity. */
 function uri(
   authority: string,
-  filePath = '/home/oleg/project',
+  filePath = '/home/oshokin/project',
   scheme = 'vscode-remote',
 ) {
   return { scheme, authority, path: filePath, query: '', fragment: '' };
@@ -133,7 +133,7 @@ test('unsupported workspace metadata uses an unidentified label', async (t) => {
 
 test('numeric storageId with valid identity keeps the project name', async (t) => {
   const dir = await userDirWithWorkspaces(t, [
-    { id: numericId, meta: { folder: 'file:///home/oleg/real-project' } },
+    { id: numericId, meta: { folder: 'file:///home/oshokin/real-project' } },
   ]);
 
   const listed = paths.listWorkspaceEntries(dir);
@@ -144,7 +144,7 @@ test('numeric storageId with valid identity keeps the project name', async (t) =
   assert.match(item.label, /real-project/);
   assert.doesNotMatch(item.label, new RegExp(numericId));
   assert.equal(item.description, 'This computer');
-  assert.equal(item.detail, '/home/oleg/real-project');
+  assert.equal(item.detail, '/home/oshokin/real-project');
 });
 
 test('export and import workspace pickers use different titles', () => {
@@ -204,7 +204,7 @@ test('same basename on different SSH authorities stay distinct pick rows', () =>
   assert.equal(items[0].description, 'SSH · host-a');
   assert.equal(items[1].description, 'SSH · host-b');
   assert.notEqual(items[0].description, items[1].description);
-  assert.equal(items[0].detail, '/home/oleg/project');
+  assert.equal(items[0].detail, '/home/oshokin/project');
 });
 
 test('workspace pick items are a projection and do not mutate entries', () => {

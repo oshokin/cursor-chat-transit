@@ -14,13 +14,18 @@ export function fileUriMetadata(
   const encodedPath = uri.path.split('/').map(encodeURIComponent).join('/');
   const external = `file://${uri.authority}${encodedPath}${uri.query ? `?${uri.query}` : ''}${uri.fragment ? `#${uri.fragment}` : ''}`;
 
-  const fsPath =
-    platform === 'win32'
-      ? (uri.authority
-          ? `//${uri.authority}${uri.path}`
-          : uri.path.replace(/^\/([A-Za-z]:)/, '$1')
-        ).replace(/\//g, '\\')
-      : (uri.authority ? `//${uri.authority}` : '') + uri.path;
+  return { external, fsPath: nativeFsPath(uri, platform) };
+}
 
-  return { external, fsPath };
+/** Drive letters and UNC shares use the platform separator. Other file paths stay URI paths. */
+function nativeFsPath(uri: UriParts, platform: NodeJS.Platform): string {
+  if (platform !== 'win32')
+    return (uri.authority ? `//${uri.authority}` : '') + uri.path;
+  if (uri.authority)
+    return `\\\\${uri.authority}${uri.path.replace(/\//g, '\\')}`;
+  const drive = /^\/([A-Za-z]:)(.*)$/.exec(uri.path);
+
+  if (!drive) return uri.path;
+
+  return `${drive[1]}${drive[2].replace(/\//g, '\\')}`;
 }
