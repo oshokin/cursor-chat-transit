@@ -1,3 +1,4 @@
+import { runStatistics, type StatisticsJob } from './statistics';
 import { observeTransfer } from './transfer-events';
 import type { TransferJob } from './transfer-process';
 import { exportToFile } from './export-transfer';
@@ -26,62 +27,71 @@ function sendUpdate(message: Record<string, unknown>): void {
   }
 }
 
-process.on('message', (message: { type?: string; job?: TransferJob }) => {
-  if (message.type === 'cancel') {
-    abort.abort();
+process.on(
+  'message',
+  (message: { type?: string; job?: TransferJob | StatisticsJob }) => {
+    if (message.type === 'cancel') {
+      abort.abort();
 
-    return;
-  }
+      return;
+    }
 
-  if (message.type !== 'start' || !message.job || started) return;
-  started = true;
+    if (message.type !== 'start' || !message.job || started) return;
+    started = true;
 
-  const job = message.job;
+    const job = message.job;
 
-  void observeTransfer(
-    {
-      event: (event) => {
-        sendUpdate({ type: 'event', event });
-      },
-      phase: (phase, metrics) => {
-        sendUpdate({ type: 'phase', phase, metrics });
-      },
-    },
-    () => run(job),
-  ).then(
-    (result) => {
-      if (process.connected)
-        process.send?.({ type: 'done', result }, () => process.exit(0));
-      else process.exit(0);
-    },
-    (err: unknown) => {
-      const error = err instanceof Error ? err : new Error(String(err));
-
-      if (!process.connected) {
-        process.exitCode = 1;
-
-        return;
-      }
-
-      process.send?.(
-        {
-          type: 'error',
-          message: error.message,
-          name: error.name,
-          code: 'code' in error ? String(error.code) : undefined,
-          detail:
-            'detail' in error && error.detail
-              ? String(error.detail)
-              : undefined,
+    void observeTransfer(
+      {
+        event: (event) => {
+          sendUpdate({ type: 'event', event });
         },
-        () => process.exit(1),
-      );
-    },
-  );
-});
+        phase: (phase, metrics) => {
+          sendUpdate({ type: 'phase', phase, metrics });
+        },
+      },
+      () => run(job),
+    ).then(
+      (result) => {
+        if (process.connected)
+          process.send?.({ type: 'done', result }, () => process.exit(0));
+        else process.exit(0);
+      },
+      (err: unknown) => {
+        const error = err instanceof Error ? err : new Error(String(err));
+
+        if (!process.connected) {
+          process.exitCode = 1;
+
+          return;
+        }
+
+        process.send?.(
+          {
+            type: 'error',
+            message: error.message,
+            name: error.name,
+            code: 'code' in error ? String(error.code) : undefined,
+            detail:
+              'detail' in error && error.detail
+                ? String(error.detail)
+                : undefined,
+          },
+          () => process.exit(1),
+        );
+      },
+    );
+  },
+);
 
 /** Run the export or import described by one worker job. */
-async function run(job: TransferJob): Promise<unknown> {
+async function run(job: TransferJob | StatisticsJob): Promise<unknown> {
+  if (job.kind === 'workspace-statistics' || job.kind === 'chat-statistics') {
+    return runStatistics(job, abort.signal, (statistics) =>
+      sendUpdate({ type: 'statistics', statistics }),
+    );
+  }
+
   const ctx: TransferContext = {
     executable: job.executable,
     initFile: job.initFile,

@@ -211,6 +211,15 @@ const original = loader._load;
 
 loader._load = function (id, parent, isMain) {
   if (id === 'vscode') return fakeVscode;
+  if (id === './extension-statistics')
+    return {
+      pickWithStatistics: async () => {
+        waiting('chats', 'Select chats to export');
+        if (host.cancel === 'chats') return undefined;
+
+        return host.cancel === 'empty' ? [] : [{ id: 'one' }];
+      },
+    };
 
   if (parent?.filename?.includes('extension-')) {
     if (id === './extension-workspaces') return workspaces;

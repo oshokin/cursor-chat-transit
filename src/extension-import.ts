@@ -94,7 +94,7 @@ export async function doImport(opts: {
         statusDetail: 'Select the workspace to import into.',
       });
 
-      workspace = await pickWorkspace(entries, identity, 'select');
+      workspace = await pickWorkspace(entries, identity, 'select', opts);
       if (workspace) setSource(workspace);
     }
 

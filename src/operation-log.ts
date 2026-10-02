@@ -5,7 +5,8 @@ import type { TransitLog } from './output-ui';
 import type { TransferPhase, TransferPhaseMetrics } from './types';
 
 /** Which transfer this log instance describes. */
-type OperationKind = 'export' | 'import';
+type OperationKind =
+  'export' | 'import' | 'workspace statistics' | 'chat statistics';
 
 /** Terminal outcome written once at finish. */
 type Result = 'completed' | 'incomplete' | 'cancelled' | 'failed' | 'partial';

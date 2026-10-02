@@ -159,8 +159,20 @@ export async function readItemTextImpl(
 export async function readItemJson(
   conn: SqliteConn,
   key: string,
+  strict = false,
 ): Promise<Record<string, unknown> | null> {
-  const raw = await readItemText(conn, key);
+  const state = strict ? await readItemTextState(conn, key) : undefined;
+
+  if (state && state.status !== 'text' && state.status !== 'absent')
+    throw Object.assign(new Error('Invalid chat header metadata.'), {
+      code: 'HEADER_METADATA_INVALID',
+    });
+
+  const raw = state
+    ? state.status === 'text'
+      ? state.text
+      : null
+    : await readItemText(conn, key);
 
   if (raw === null) return null;
   let parsed: unknown;
@@ -168,11 +180,22 @@ export async function readItemJson(
   try {
     parsed = JSON.parse(raw);
   } catch {
+    if (strict)
+      throw Object.assign(new Error('Invalid chat header JSON.'), {
+        code: 'HEADER_METADATA_INVALID',
+      });
+
     return null;
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (strict)
+      throw Object.assign(new Error('Invalid chat header metadata.'), {
+        code: 'HEADER_METADATA_INVALID',
+      });
+
     return null;
+  }
 
   return parsed as Record<string, unknown>;
 }
@@ -182,6 +205,7 @@ export async function readComposerHeadersTable(
   conn: SqliteConn,
   columns?: string[],
   includeColumnDates = false,
+  strict = false,
 ): Promise<ComposerHeader[]> {
   const hasWorkspaceId = !columns || columns.includes('workspaceId');
 
@@ -201,6 +225,10 @@ export async function readComposerHeadersTable(
     onRow: ([, wsBuf, valueBuf, createdBuf, updatedBuf]) => {
       const parsed = asComposerHeader(jsonFromBuf(valueBuf));
 
+      if (!parsed && strict)
+        throw Object.assign(new Error('Invalid chat header metadata.'), {
+          code: 'HEADER_METADATA_INVALID',
+        });
       if (!parsed || parsed.composerId === 'empty-state-draft') return;
 
       // Some versions keep dates in columns rather than inside the JSON value.

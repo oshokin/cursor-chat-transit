@@ -1,7 +1,7 @@
 #!/bin/sh
 # Locate or install the Node.js toolchain pinned in `.nvmrc`.
 # Task does not source ~/.bashrc, so nvm functions are invisible. Cursor's
-# helper node has no npm. Prefer Node 24 + npm on PATH, then .tools/node.
+# helper node has no npm. A different Node 24 already on PATH is not reused.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -35,18 +35,14 @@ wanted_version() {
   esac
 }
 
-# Accept a directory that contains Node matching the pinned major and npm beside it.
+# Accept a directory whose Node version is exactly the .nvmrc pin, with npm beside it.
 consider() {
   dir=$1
   [ -n "$dir" ] && [ -x "$dir/node" ] && [ -f "$dir/npm" ] || return 1
   node_ver=$("$dir/node" -p 'process.versions.node' 2>/dev/null) || return 1
-  case $node_ver in
-    "$MAJOR".*)
-      BIN_DIR=$dir
-      return 0
-      ;;
-  esac
-  return 1
+  [ "$node_ver" = "$VERSION" ] || return 1
+  BIN_DIR=$dir
+  return 0
 }
 
 # Search .tools, PATH, nvm, fnm, mise, volta, and asdf for a matching toolchain.
@@ -67,11 +63,6 @@ find_bin() {
   IFS=$old_ifs
   nvm_root=${NVM_DIR:-$HOME/.nvm}
   consider "$nvm_root/versions/node/v$VERSION/bin" && return 0
-  if [ -d "$nvm_root/versions/node" ]; then
-    for dir in "$nvm_root/versions/node"/v*/bin; do
-      consider "$dir" && return 0
-    done
-  fi
   consider "$HOME/.fnm/node-versions/v$VERSION/installation/bin" && return 0
   consider "$HOME/.local/share/fnm/node-versions/v$VERSION/installation/bin" && return 0
   consider "$HOME/.local/share/mise/installs/node/$VERSION/bin" && return 0

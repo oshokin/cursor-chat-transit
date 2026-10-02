@@ -1,6 +1,6 @@
 # Locate or install the Node.js toolchain pinned in .nvmrc.
 # Windows 10/11 (PowerShell 5.1). Cursor helper node has no npm.
-# Prefer Node 24 + npm on PATH, then .tools\node.
+# A different Node 24 already on PATH is not reused.
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'
@@ -54,19 +54,19 @@ function Get-NpmFile([string]$Dir) {
   return $null
 }
 
-# True when the directory has Node of the pinned major and npm beside it.
+# True when the directory has the exact .nvmrc Node version and npm beside it.
 function Test-Toolchain([string]$Dir) {
   if (-not $Dir) { return $false }
   $node = Get-NodeFile $Dir
   $npm = Get-NpmFile $Dir
   if (-not $node -or -not $npm) { return $false }
   try {
-    $nodeVer = & $node -p 'process.versions.node' 2>$null
+    $nodeVer = (& $node -p 'process.versions.node' 2>$null)
   } catch {
     return $false
   }
   if (-not $nodeVer) { return $false }
-  if (-not $nodeVer.StartsWith("$Major.")) { return $false }
+  if ($nodeVer.Trim() -ne $Version) { return $false }
   $script:BinDir = $Dir
   return $true
 }
@@ -84,10 +84,6 @@ function Find-Bin {
   $nvmHome = $env:NVM_HOME
   if (-not $nvmHome) { $nvmHome = Join-Path $env:APPDATA 'nvm' }
   [void]$candidates.Add((Join-Path $nvmHome "v$Version"))
-  if (Test-Path -LiteralPath $nvmHome) {
-    Get-ChildItem -LiteralPath $nvmHome -Directory -ErrorAction SilentlyContinue |
-      ForEach-Object { [void]$candidates.Add($_.FullName) }
-  }
   [void]$candidates.Add((Join-Path $env:ProgramFiles 'nodejs'))
   [void]$candidates.Add((Join-Path $env:USERPROFILE ".fnm\node-versions\v$Version\installation"))
   [void]$candidates.Add((Join-Path $env:LOCALAPPDATA "fnm\node-versions\v$Version\installation"))

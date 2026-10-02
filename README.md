@@ -2,288 +2,180 @@
 
 Move your Cursor chats between workspaces and devices.
 
-Export selected conversations or a workspace's chat history to a ZIP archive, then import it into another Cursor workspace. Supported exports include chat titles, messages, images, plan files, canvases, and the local data needed to continue compatible conversations.
+Export selected conversations or a workspace's chat history to a ZIP archive, then import it into another Cursor workspace. An export includes supported messages, images, plans, canvases, and local conversation state. Importing the same snapshot again keeps the existing copy; importing a changed snapshot creates a separate conversation.
 
-Choose a workspace once, then select **Export** or **Import**. Importing the same snapshot again does not create another copy; changed snapshots are added as separate conversations, preserving your existing chats.
+## Features
 
-## What you can do
+- Export selected chats or an entire workspace's chat history.
+- Find local, SSH, WSL, and container workspaces stored in your local Cursor profile.
+- Count titled and untitled chats in each workspace on demand.
+- Inspect user-message counts and detected chat formats before exporting.
+- Transfer large archives using bounded records and streamed resource files.
+- Follow transfer stages, elapsed time, and measured progress in the sidebar.
+- Inspect timestamped operation logs or copy a diagnostic report.
+- Recover usable history from incomplete exports with optional recovery mode.
 
-- **Move selected chats or an entire workspace's chat history.** Keep conversation titles and messages together.
-- **Work with local and Remote SSH projects.** Choose the project in the sidebar; ZIP file dialogs start on your local computer.
-- **Carry supported chat resources with you.** Exports include reachable local conversation blobs, chat images, and Cursor plan files when available.
-- **Import the same snapshot again without creating another copy.** Changed snapshots become separate copies, preserving chats you have already continued.
-- **See what happened.** Follow progress in the sidebar, open the operation log, or run Diagnostics for a separate status report.
-- **Recover usable history from incomplete exports.** Optional recovery mode is off by default and clearly reports missing data.
+## Requirements and installation
 
-## Requirements
+You need a desktop Cursor or VS Code-compatible host with API version 1.125 or later, access to a local Cursor profile, and the `sqlite3` command-line executable. The extension runs on the local computer, including when the project is remote. Browser-only editors are not supported. VS Code can host the extension, but does not provide Cursor's native conversation interface.
 
-- Cursor desktop, or a VS Code-compatible desktop host supporting API version 1.85 or later.
-- Access to the local Cursor profile that contains the chats.
-- A local `sqlite3` command-line executable, available on `PATH` or configured in the extension settings.
+Check SQLite with `sqlite3 --version`. Install it with your operating system's package manager or the [official SQLite tools](https://www.sqlite.org/download.html). If it is not on `PATH`, set `cursorChatTransit.sqlitePath` to its absolute path.
 
-VS Code can host the extension to access Cursor storage; it does not provide Cursor's native chat interface. Browser-only editors are not supported.
+To install a release:
 
-To check SQLite availability:
-
-```bash
-sqlite3 --version
-```
-
-On Windows, macOS, or Linux, install SQLite using your preferred package manager or the [official SQLite tools](https://www.sqlite.org/download.html). If it is not on `PATH`, set `cursorChatTransit.sqlitePath` to the executable's absolute path.
-
-## Install
-
-Install a built `.vsix` package in Cursor:
-
-1. Open **Extensions**.
-2. Open the **…** menu and choose **Install from VSIX…**.
-3. Select the package, then reload the editor if prompted.
+1. Download the `.vsix` asset from a [GitHub Release](https://github.com/oshokin/cursor-chat-transit/releases).
+2. Open **Extensions → … → Install from VSIX…** in Cursor.
+3. Select the package and reload if prompted.
 4. Open **Cursor Chat Transit** in the Activity Bar.
 
-To build a package yourself, see [Development](#development). A published Marketplace listing is not required to install a VSIX.
+No extension registry is required. To build your own VSIX, see [Development](docs/development.md).
 
-## Quick start
+## Export chats
 
-### Export chats
-
-1. In the sidebar, use **Change…** to choose the workspace whose chats you want to export.
+1. Choose **Change…** in the sidebar to select the source workspace.
 2. Select **Export chats**.
-3. Choose all chats or select individual conversations.
-4. Save the suggested `*.cursor-chat.zip` file. You can edit its name before saving.
+3. Export all chats or choose **Select chats…**.
+4. Save the suggested `*.cursor-chat.zip` file.
 
-The suggested filename uses the workspace or selected chat name, cleans characters that are unsafe in filenames, and includes an export timestamp. The archive is format version 4: a small manifest, chat data in bounded NDJSON parts, and resources as original bytes. Older monolithic JSON exports are not imported. Export those chats again with this version.
+The filename includes the workspace or selected chat name and a timestamp. If an export is incomplete, the result identifies the affected chats. Check the operation log before relying on that archive.
 
-If an export is incomplete, the result identifies affected chats. Open the operation log for details before treating that file as a complete backup.
+## Import chats
 
-### Import chats
+1. Select the destination workspace in the sidebar.
+2. Choose **Import chats** and select a `*.cursor-chat.zip` archive.
+3. Wait for the result.
+4. If chats were added, choose **Quit Cursor**, then reopen Cursor to load them.
 
-1. Choose the destination workspace in the sidebar.
-2. Select **Import chats** and choose an export file.
-3. Check the selected destination in the sidebar and wait for the import result.
-4. After an import adds chats, choose **Quit Cursor** in the operation panel, then reopen Cursor to load them. The button uses Cursor's normal quit action and closes all windows in the current application instance. It does not reopen Cursor automatically.
+**Quit Cursor** uses the application's normal quit action and closes its windows. Cursor controls quit confirmation and unsaved-work prompts. The extension does not relaunch it. If the button is unavailable, quit from Cursor's application menu.
 
-Cursor controls any quit confirmation and unsaved-work prompts. The extension does not add a second confirmation or change Cursor's settings. If you have disabled quit confirmation in Cursor, the button may close the application immediately.
+Imports create new local chat and message IDs and preserve existing conversations. An import that makes no changes does not require a restart.
 
-If the quit action is unavailable, quit Cursor from its application menu. The button appears only after an import adds chats. Exports, cancelled or failed imports, and imports that make no changes do not show it.
+## Find and inspect chats
 
-Imports create copies with new local chat and message IDs. Existing conversations are preserved. If every selected snapshot has already been imported, the operation makes no chat changes and does not require a restart.
+Workspaces are grouped by location, with the current workspace first. Each row shows the project name, location, and path. Chats with titles appear first, ordered by recent activity; untitled chats follow in the same order. Missing titles or dates do not hide a chat. Technical IDs appear only when needed to distinguish otherwise identical rows.
 
-## Local projects and Remote SSH
+### Workspace counts
 
-The selected workspace identifies **which project's chats** to read or write. It does not determine where the export file must live.
+In the workspace picker, use the chart button, **Count chats in each workspace**. Results appear under each workspace, for example:
 
-Cursor Chat Transit runs on the local side of the editor and uses the local Cursor profile's global and workspace databases, including entries associated with Remote SSH projects. A remote project URI is kept distinct from a local path, so projects on different SSH hosts are not grouped merely because their directory names match.
+> 12 titled · 3 untitled · /home/alex/project
 
-Import and export dialogs start in a local directory. If you explicitly choose a remote ZIP archive for import, the extension reads it through the editor's remote file provider. Export destinations must be local files; copy the resulting ZIP archive elsewhere using your usual tools.
+“Titled” means the stored title contains non-whitespace text. “Untitled” means it does not; it does not mean the conversation is empty or disposable. Counts include the unique chats in the extension's resolved workspace list, including archived chats. They can differ from Cursor's filtered chat list.
 
-This extension does not transfer the project's source files. References to files that only exist on the original machine may still need the project to be checked out or opened at the destination.
+### Chat statistics
 
-## Finding a workspace or chat
+In **Select chats…**, use the chart button, **Count user messages and identify chat formats**. Each row shows a result such as:
 
-The workspace picker shows the current workspace first, followed by **This computer**, **SSH**, **Containers**, **WSL**, other remote workspaces, and unidentified entries. Empty groups are omitted. Within each group, recently changed workspace storage comes first. This uses database and WAL modification times as an activity hint, not an exact history of when you opened the project.
+> 3 user messages · Legacy format — may not continue
 
-Chats are listed by their last update, newest first, with creation time used when an update time is unavailable. Undated chats remain selectable at the bottom. Type to filter by title or the brief chat description. The list stays stable while it is open. Technical IDs are shown only when otherwise identical rows need disambiguation.
+| Label                            | Meaning                                                                                                                                         |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| User messages                    | Recognized user entries in the stored conversation index, or a supported inline conversation; assistant replies and tool responses are excluded |
+| Legacy format — may not continue | The stored `isNAL` flag is explicitly `false`; Cursor may show **Chat Too Old**                                                                 |
+| Agent format                     | The stored `isNAL` flag is explicitly `true`; this is not a continuation guarantee                                                              |
+| Format unknown                   | The record does not identify a recognized format                                                                                                |
+| Message count unavailable        | The stored conversation index is absent or cannot be counted reliably                                                                           |
+| Statistics unavailable           | Metadata could not be read; check the operation log                                                                                             |
 
-## What an export contains
+Analysis is optional and runs in a background process. You can keep typing, scrolling, selecting, or accepting while it runs. The title reports completed rows. The chart button becomes **Stop analysis**; closing or accepting the picker also cancels the scan. Completed results remain visible after stopping. Run analysis again to refresh them. Results are kept only while that picker is open and are not updated live as Cursor writes new messages.
 
-| Included when available and supported | Purpose                                                          |
-| ------------------------------------- | ---------------------------------------------------------------- |
-| Chat titles and metadata              | Identify the conversations you selected                          |
-| Conversation and message records      | Preserve the stored chat history                                 |
-| Referenced local conversation blobs   | Carry supported state used by Cursor conversations               |
-| Chat image attachments                | Keep supported attached images with the conversation             |
-| Cursor plan files                     | Carry referenced `.plan.md` files from the local plans directory |
+Analysis does not modify chats, convert formats, copy the database, or read the entire conversation blob graph. Cursor's internal formats are not a public compatibility contract. Exporting and importing a legacy conversation does not make it continuable.
 
-The only supported format is version 4: a ZIP archive containing a manifest, bounded NDJSON parts, and binary resources. Old monolithic JSON exports are rejected; re-export with this version. One JSON record and one SQLite value are limited to 32 MiB; the entire archive may be larger.
+## Archive contents and limits
 
-This is a chat export, not a complete Cursor profile or project backup. It does not intentionally collect account credentials, extension settings, or arbitrary project files. Chat content and attachments can themselves contain sensitive information, so review an export before sharing it.
+An archive contains a manifest, per-chat metadata, bounded NDJSON parts, and supported binary resources:
 
-## Importing the same file again
+- Chat headers, conversation entries, and message records.
+- Referenced local conversation blobs.
+- Chat images, Cursor plan files, and canvases when available and supported.
 
-There is no overwrite-or-merge decision to make for every chat:
+The supported archive format is version 4. Monolithic JSON files and other archive versions are not accepted. The archive as a whole can exceed 1 GiB; an individual JSON record or SQLite value is limited to 32 MiB. See the [storage and archive contract](docs/architecture.md) for details.
 
-| Situation                                                         | Result                                                   |
-| ----------------------------------------------------------------- | -------------------------------------------------------- |
-| The same chat snapshot was already imported into this destination | Skip it; keep the existing copy                          |
-| You deleted that imported chat in Cursor                          | Import again to create a new independent copy            |
-| The source chat has changed since the earlier export              | Add a separate copy; keep the previous version           |
-| You continued or renamed the imported chat                        | Importing the old snapshot does not replace your changes |
-| Two different chats have the same title                           | Treat them as different conversations                    |
-| The destination is a different workspace                          | Import independently into that workspace                 |
-| An earlier import stopped partway through                         | Check the recorded state before creating any new copies  |
+An export is a chat archive, not a complete Cursor profile or project backup. It does not copy your source tree or intentionally collect account credentials and extension settings. Messages and attachments may themselves contain sensitive information.
 
-Leftover SQLite rows from a deleted chat are kept. The next import of the same snapshot writes a new independent copy and does not reuse those rows. An import that stopped partway through is still checked before any new copy is written.
+## Repeat imports and recovery
 
-The extension records import receipts in its own local storage. Clearing that storage removes its record of earlier imports. Chats imported before receipts were introduced may not be recognized as previous imports.
+| Situation                                                  | Result                                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| The same snapshot was already imported into this workspace | Keep the existing copy                                                       |
+| You deleted the imported chat in Cursor                    | Restore it as a new independent copy when the recorded state can be verified |
+| The source chat changed                                    | Add a separate copy                                                          |
+| You continued or renamed the imported chat                 | Keep your changes                                                            |
+| Two chats have the same title                              | Treat them as separate conversations                                         |
+| The destination workspace is different                     | Import independently into that workspace                                     |
+| An earlier import stopped partway through                  | Check the recorded pending state before writing another copy                 |
 
-Separate chat copies do not override resource conflicts: a plan file with the same filename but different contents is still a conflict. The existing file is preserved.
+Import receipts are stored in the extension's local storage. Clearing that storage removes the record used to recognize earlier imports. Resource conflicts remain errors: a plan with the same filename and different contents is not overwritten.
 
-## Recovering an incomplete export
+Incomplete exports are rejected by default. To recover readable history when a complete export is no longer available, enable `cursorChatTransit.import.allowPartial` in user settings. Recovery may import usable chats and skip unusable ones; it cannot reconstruct missing state or guarantee continuation. Unsafe paths, invalid JSON, and conflicting data remain errors. Review the result and turn recovery off when finished.
 
-By default, an export with missing required data is rejected before new chat data is written. The preferred fix is to export again from the original Cursor profile while the missing data is still available.
+## Local storage and remote projects
 
-If that is no longer possible, enable recovery in your **user settings**:
+The selected workspace identifies which chats to transfer, not where the ZIP file must live. Cursor Chat Transit uses the local Cursor profile's global and workspace databases, including entries for remote projects. Different SSH authorities remain distinct even when project paths match.
 
-```json
-{
-  "cursorChatTransit.import.allowPartial": true
-}
-```
+File dialogs start locally. A remote ZIP selected for import is read through the editor's file provider. Export destinations must be local; copy the archive elsewhere using your usual tools.
 
-Recovery can import complete chats, preserve readable history from incomplete chats, and skip unusable conversations. It does not reconstruct missing blobs or guarantee that a recovered chat can continue. Invalid JSON, unsafe resource paths, unsupported formats, and conflicting data remain errors.
+Typical Cursor user-data directories:
 
-Review the operation result and log. Turn recovery off again when you no longer need it.
+| Platform | Directory                                        |
+| -------- | ------------------------------------------------ |
+| Linux    | `$XDG_CONFIG_HOME/Cursor`, or `~/.config/Cursor` |
+| macOS    | `~/Library/Application Support/Cursor`           |
+| Windows  | `%APPDATA%\Cursor`                               |
+
+For an explicit profile, select the directory containing `User`, not a project directory or an individual database. The extension does not silently substitute another profile when that directory is unavailable.
 
 ## Settings
 
-| Setting                                            | Default | When to change it                                                                                    |
-| -------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `cursorChatTransit.userDataDir`                    | Empty   | Point to a specific **local Cursor user-data directory** instead of automatic discovery              |
-| `cursorChatTransit.sqlitePath`                     | Empty   | Use a local SQLite executable that is not on `PATH`                                                  |
-| `cursorChatTransit.import.allowPartial`            | `false` | Attempt to recover readable history from an incomplete export                                        |
-| `cursorChatTransit.plansDirectory`                 | Empty   | Read and restore local plan files in a non-default directory; empty uses `~/.cursor/plans`           |
-| `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`   | Deadline for a query/process or one session request; 30–3600 seconds.                                |
-| `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`     | Wait longer for brief database contention; allowed range 0–30 seconds, with 0 meaning no wait        |
-| `cursorChatTransit.logLevel`                       | `info`  | Show less in the operation log: `warn` or `error`. Lines are marked `[INFO]`, `[WARN]`, or `[ERROR]` |
+Open User Settings and search `@ext:oshokin.cursor-chat-transit`.
 
-Path and SQLite timeout settings are machine-scoped. Paths must be absolute; shell variables and `~` are not expanded. The plans setting changes where this extension looks, not where Cursor saves new plans. Recovery and the operation log level are user/application settings. Workspace settings cannot silently enable recovery, hide log lines, or redirect the extension to another profile.
+| Setting                                            | Default | Purpose                                                                       |
+| -------------------------------------------------- | ------- | ----------------------------------------------------------------------------- |
+| `cursorChatTransit.userDataDir`                    | Empty   | Use a specific local Cursor profile; empty means automatic discovery          |
+| `cursorChatTransit.sqlitePath`                     | Empty   | Absolute path to SQLite when it is not on `PATH`                              |
+| `cursorChatTransit.plansDirectory`                 | Empty   | Read and restore plans in a custom directory; empty uses `~/.cursor/plans`    |
+| `cursorChatTransit.import.allowPartial`            | `false` | Attempt recovery from incomplete exports                                      |
+| `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`   | Query/process or persistent-session request deadline, from 30 to 3600 seconds |
+| `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`     | SQLite busy-handler wait, from 0 to 30 seconds                                |
+| `cursorChatTransit.logLevel`                       | `info`  | Minimum operation-log level: `info`, `warn`, or `error`                       |
 
-To adjust a slow query deadline or lock wait, open **User Settings** and search `@ext:oshokin.cursor-chat-transit`, or set:
+Path and timeout settings are machine-scoped. Paths must be absolute; `~` and shell variables are not expanded. The plans setting does not change where Cursor saves new plans. Recovery and log level are application settings. Repository settings cannot redirect these paths or silently enable recovery.
 
-```json
-{
-  "cursorChatTransit.sqlite.operationTimeoutSeconds": 600,
-  "cursorChatTransit.sqlite.busyTimeoutSeconds": 5
-}
+Timeouts apply to the next transfer or analysis. A query deadline is not a deadline for the whole operation; a busy-handler wait does not cover every kind of SQLite lock.
+
+## Database access
+
+Exports read selected records through a read-only transaction and release it before archive hashing and compression. Imports prepare rows outside Cursor's database, write bounded batches, publish chat headers, and verify the result. Neither operation creates a full database backup. The extension has no full-profile restore command; its journal supports interrupted-import reconciliation, not arbitrary rollback.
+
+In WAL mode, reads allow concurrent writes but can delay checkpointing while a transaction is open. Other journal modes follow SQLite's normal reader/writer locking rules. The extension does not change journal mode or force checkpoints. Statistics use short read transactions and release them between rows.
+
+## Progress and troubleshooting
+
+The sidebar shows the current transfer stage, chat or file, and elapsed time. Remaining time appears only when the current stage has measurable progress. Estimates apply to that stage, not the entire transfer.
+
+**Open operation log** opens **Cursor Chat Transit — Operations**. Lines use local time with an explicit UTC offset, bracketed severity, and an operation ID:
+
+```text
+[2026-10-02 09:30:12.345+03:00] [INFO] Workspace statistics started operation=12ab34cd
 ```
 
-Settings are captured at the start of the transfer; cancel and retry to apply changes. Query deadlines and lock waits are independent. Export reads selected chat records through one read-only transaction on the global database, without copying the full database. It closes the transaction before inventory hashing and ZIP compression. In WAL mode writers can continue, although a reader can delay checkpoint progress while it is active. The extension does not force a checkpoint or change Cursor's journal mode. Non-WAL databases retain SQLite's normal reader/writer contention.
+File actions include concrete paths, chat identity when available, byte counts with readable units, durations, and failure codes. Message bodies and SQL are not logged. **Diagnostics** opens a separate dialog with **Copy report** and **Close**.
 
-For `userDataDir`, select the directory containing `User`, not the project directory or an individual `state.vscdb` file. Typical locations are:
+| Problem                               | Action                                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| SQLite is unavailable                 | Check `sqlite3 --version` and configure its executable path                               |
+| A workspace is missing                | Open it in Cursor and check the selected local profile                                    |
+| An imported chat is missing           | Quit and reopen Cursor, then check the destination workspace                              |
+| Cursor shows **Chat Too Old**         | Preserve or export the history and start a new chat; format analysis does not migrate it  |
+| Statistics are unavailable            | Check the operation log; a failed read is not a zero count                                |
+| Data is incomplete or conflicts       | Inspect the result and re-export from the source when possible                            |
+| A transfer lock remains after a crash | Use **Clear stale lock** when offered; only a verified dead owner's lock can be removed   |
+| SQLite reports a lock                 | Stop the operation and inspect the log; clearing an extension lock does not unlock SQLite |
 
-| Platform | Cursor user-data directory                                                   |
-| -------- | ---------------------------------------------------------------------------- |
-| macOS    | `~/Library/Application Support/Cursor`                                       |
-| Windows  | `%APPDATA%\Cursor`                                                           |
-| Linux    | `$XDG_CONFIG_HOME/Cursor`, or `~/.config/Cursor` when that variable is unset |
+Do not delete Cursor's `state.vscdb`, `-wal`, or `-shm` files to clear an extension lock. When [reporting a problem](https://github.com/oshokin/cursor-chat-transit/issues), include the extension version, Cursor version, operating system, and a redacted diagnostic report. Do not attach private chat databases or exports to a public issue.
 
-An explicit directory is authoritative. If its expected databases are missing, the extension reports the problem instead of silently switching to a different profile.
+## Development and license
 
-## Commands
+See [Development](docs/development.md) for setup, tests, packaging, and the locally controlled GitHub release workflow. See [Architecture](docs/architecture.md) for implementation and storage details.
 
-Open the Command Palette and search for **Cursor Chat Transit**:
-
-| Command                  | Action                                              |
-| ------------------------ | --------------------------------------------------- |
-| Export Chats             | Export from the selected workspace                  |
-| Import Chats             | Import a v4 ZIP archive into the selected workspace |
-| Export Current Workspace | Prefer the workspace open in the editor             |
-| Diagnostics              | Open a status report                                |
-| Open Operation Log       | Show the import/export output channel               |
-
-## Diagnostics and troubleshooting
-
-**Diagnostics** opens a native dialog with **Copy report** and **Close**. There is one Output channel: **Cursor Chat Transit — Operations**.
-
-Each line uses local time with milliseconds and an explicit UTC offset, for example `[2026-10-01 13:40:48.802+03:00] [INFO] Verify imported chat data`. Action messages use sentence case; severity is bracketed. The labelled `operation=…` field correlates one transfer. File actions include full source/destination paths, the chat name and ID when known, exact byte counts with binary units, duration and error code. Message bodies and SQL are not logged. Review private paths and chat titles before sharing logs.
-
-The sidebar shows the current stage, the current chat or file, and elapsed time. A remaining-time estimate appears only while the current stage has a measured amount of work; otherwise that line is omitted. ZIP extraction measures the whole archive rather than resetting its estimate for each file. Verification and resource preparation report measured counts. An export snapshot is labeled **Creating database snapshot** and shows the temporary file size. The full path, exact byte count, deadline, and that copy's own duration stay in the operation log, with a heartbeat every ten seconds. The CLI does not expose page progress: file size is not a percentage, an estimate, or proof that the snapshot is complete. A counter unchanged for ten seconds shows the time since measured progress, without diagnosing a database lock. Estimates describe the current step, not the full remaining transfer.
-
-| Problem                                      | What to do                                                                                      |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| SQLite cannot be found                       | Run `sqlite3 --version`, then set `cursorChatTransit.sqlitePath` if needed                      |
-| The expected workspace is missing            | Open that project in Cursor and check that the correct local Cursor profile is selected         |
-| Exported or imported chats appear incomplete | Read the operation log and re-export from the original profile with all required data available |
-| Cursor cannot find an old project file       | Open or restore the project at the destination; chat export does not copy the project tree      |
-| An imported chat does not appear             | Use **Quit Cursor** after a successful import, reopen Cursor, then check the selected workspace |
-| Existing resource data differs               | Keep the existing file or data; inspect the conflict instead of overwriting it                  |
-| The previous import needs checking           | Keep the export and log; do not delete the journal merely to bypass the check                   |
-| Another operation is running                 | Let it finish or cancel it before starting another import/export                                |
-| A previous transfer needs attention          | Use **Clear stale lock** when offered, then retry; a running or changed owner is never removed  |
-
-Before filing a bug, collect the extension version, Cursor version, operating system, whether the workspace is local or SSH, and the relevant diagnostic result. Remove private paths, chat text, and other sensitive content from logs. Please do not attach your full Cursor database or chat export to a public issue.
-
-[Report a problem](https://github.com/oshokin/cursor-chat-transit/issues).
-
-## Platform support
-
-The extension targets desktop Linux, macOS and Windows. It runs in the local UI host even when the selected project is on SSH, in WSL or in a container. Install SQLite on the computer running the Cursor window.
-
-| Client OS | Default Cursor data directory                                                |
-| --------- | ---------------------------------------------------------------------------- |
-| Linux     | `$XDG_CONFIG_HOME/Cursor` when XDG is absolute; otherwise `~/.config/Cursor` |
-| macOS     | `~/Library/Application Support/Cursor`                                       |
-| Windows   | `%APPDATA%\Cursor`; fallback `%USERPROFILE%\AppData\Roaming\Cursor`          |
-
-For portable installs, custom `--user-data-dir` profiles or another Cursor channel, set `cursorChatTransit.userDataDir` explicitly. Automatic discovery does not cover every packaging method. Plans default to `~/.cursor/plans` on the client OS. Exported source-code paths are historical references and are not automatically mapped between operating systems.
-
-SQLite must be executable on the client OS and architecture. Local filesystems with normal SQLite locking and hard-link support are the intended storage target; unusual network/removable filesystems may reject the safe no-overwrite resource write. Filesystem permissions and antivirus software can also prevent a write. The extension reports failures rather than bypassing checks.
-
-The CI definition runs core tests on Linux, macOS and Windows. A configured matrix is not evidence that every Cursor version has passed a native smoke test; release notes should record the actual tested Cursor builds and systems. A version increase on the default branch, after those checks pass, publishes one VSIX and `SHA256SUMS` as a GitHub Release. Marketplace publishing remains a separate maintainer action.
-
-## Data safety and compatibility
-
-- Import does not create full database backups. It validates the archive and existing records, writes bounded transactions, and retains its journal for repeat-import reconciliation after interruption. This is not a full rollback of the Cursor profile. Existing backup files from older builds are not deleted.
-- Existing resource files are reused only when their contents match. Conflicting files are not overwritten.
-- Concurrent metadata changes are checked before a write is committed. An interrupted write is reported as incomplete rather than silently accepted.
-- Cursor's global and workspace databases are separate. Their updates cannot be treated as one crash-atomic transaction.
-- Unknown write layouts are rejected. Cursor's private storage can change independently of the VS Code extension API.
-
-Continuing an imported conversation depends on the Cursor version, conversation format, and availability of required data. Successful transfers have been manually checked by the maintainer, but that is not a compatibility guarantee for every Cursor release or every historical export.
-
-The import journal supports retrying interrupted transfers; it is not a copy of the Cursor profile. Existing backup files from older builds remain untouched.
-
-## Development
-
-An optional [Taskfile](Taskfile.yml) provides short recipes over the npm scripts. The usual loop is `task setup` → `task check` → `task package`. `check` is compile, types, lint, format, and tests; `package` builds the VSIX. `task setup` installs Node from `.nvmrc` when npm is missing (Task does not load nvm from `~/.bashrc`; on Windows 10/11 it uses `scripts/dev-node.cmd`):
-
-```sh
-task setup
-task check
-task package
-```
-
-Run `task --list` for linting, formatting, unit/SQLite tests, watch mode and cleanup. `task node` prints the resolved toolchain. See the [development guide](docs/development.md) for version managers and the equivalent npm commands.
-
-Use Node.js 24 and the local SQLite CLI. Once `node` and `npm` are on PATH:
-
-```bash
-npm ci
-npm run check
-```
-
-`check` compiles the extension and sidebar, checks TypeScript, runs ESLint and Prettier, and executes the Node test suite. SQLite integration tests use temporary fixture databases.
-
-F5 is the UI loop (`task watch`, reload the debug window). `task package` then **Install from VSIX** is the storage loop. Point `cursorChatTransit.userDataDir` at a copy of `User/` when a session must not write production databases. The isolated host does not generate Cursor chat databases.
-
-Useful commands:
-
-| Command                   | Purpose                                       |
-| ------------------------- | --------------------------------------------- |
-| `npm run watch`           | Rebuild the extension and sidebar as you edit |
-| `npm run test:unit`       | Run tests that do not require SQLite          |
-| `npm run test:sqlite`     | Run SQLite integration tests                  |
-| `npm run test:host`       | Run the VS Code Extension Host smoke test     |
-| `npm run lint:complexity` | Review long functions and branch-heavy code   |
-| `npm run package`         | Build `dist/cursor-chat-transit.vsix`         |
-| `npm run check-package`   | Inspect the packaged file inventory           |
-| `npm run release:preview` | Show the next version without writing files   |
-| `npm run release:prepare` | Update the version, lockfile, and changelog   |
-
-See the [development guide](docs/development.md) for build, debug, CI, and release details. The [architecture document](docs/architecture.md) describes module responsibilities, import behavior, and the known Cursor storage contract.
-
-## Contributing
-
-Keep changes focused on one behavior or responsibility. Add regression tests for storage changes, preserve existing command and setting identifiers, and include the checks you ran in your pull request. If a change affects Cursor's private storage, document the supported structure and the fixture or manual scenario that demonstrates it.
-
-Prefer small functions and cohesive modules over frameworks added for hypothetical future needs. Do not remove validation or change import behavior just to satisfy a line-count target.
-
-## License
-
-[MIT](LICENSE). The license retains the original copyright notice and includes the notice for subsequent work on Cursor Chat Transit.
-
-### Database contention
-
-Import prepares message rows in a private temporary SQLite database and batches journal writes before taking Cursor's global write lock. Prepared dependencies and messages are copied in transactions of at most 128 rows / 8 MiB (a single permitted row can be up to 32 MiB). The composer and its list entry are published after all message batches succeed. On retry, unpublished partial messages are removed only when their recorded hashes and current bytes still match; modified rows are preserved for inspection. Importers sharing that global database are serialized. Cancellation and loss of the Extension Host terminate owned SQLite processes before cleanup returns. Each batch and final publication still need a SQLite write transaction; another writer can cause a busy error. Avoid continuing chats during this final stage and retry after the competing operation finishes.
-
-**Clear stale lock** only removes an extension lock with a verified dead owner. It does not unlock or repair SQLite. Never remove `state.vscdb`, `state.vscdb-wal` or `state.vscdb-shm` as a lock-recovery step. If Cursor itself cannot open storage, close all Cursor processes normally and preserve the database and sidecars together before investigating.
+[MIT](LICENSE), including the original copyright notice and the notice for subsequent work on Cursor Chat Transit.

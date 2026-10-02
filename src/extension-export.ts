@@ -1,3 +1,4 @@
+import { pickWithStatistics } from './extension-statistics';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -66,7 +67,7 @@ export async function doExport(opts: {
         statusDetail: 'Select the workspace to export from.',
       });
 
-      workspace = await pickWorkspace(entries, identity, 'export');
+      workspace = await pickWorkspace(entries, identity, 'export', opts);
       if (workspace) setSource(workspace);
     }
 
@@ -150,15 +151,24 @@ export async function doExport(opts: {
         statusDetail: 'Choose the conversations to include.',
       });
 
-      const picked = await vscode.window.showQuickPick(
-        chatPickItems(listed.allComposers),
-        {
-          canPickMany: true,
-          title: 'Select chats to export',
-          placeHolder: 'Most recently updated first · Type to find a chat',
-          matchOnDetail: true,
-        },
-      );
+      const picked = await pickWithStatistics({
+        items: chatPickItems(listed.allComposers),
+        key: (item) => item.id,
+        many: true,
+        title: 'Select chats to export',
+        placeholder: 'Most recently updated first · Type to find a chat',
+        buttonLabel: 'Count user messages and identify chat formats',
+        operations: opts.operations,
+        job: async () => ({
+          ...sqliteCtx,
+          kind: 'chat-statistics',
+          workspace,
+          chats: listed.allComposers.map(({ composerId, name }) => ({
+            composerId,
+            name,
+          })),
+        }),
+      });
 
       if (!picked) {
         log.finish('cancelled');

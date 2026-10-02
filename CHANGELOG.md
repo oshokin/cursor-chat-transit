@@ -2,23 +2,37 @@
 
 ## 1.0.0
 
-- Keep Cursor mention selections whose selected text makes the object key larger than 64 KiB. The record size limit still bounds that key. Forbidden property names are still rejected.
-- Read agent blob dependencies from composer versions 13 through 18. Those versions store `conversationState` as the same `~` protobuf; an older or newer number is still rejected. An unsupported conversation state keeps its own error text instead of being described as a bad export file.
-- Export and import Cursor chats between workspaces and devices as a version-4 ZIP archive: a manifest, bounded NDJSON parts, and original resource bytes. Included when available: conversation records, message bodies, referenced blobs, image attachments, plan files, and canvases.
-- Stream NDJSON records and resource installation so a transfer does not keep every message body in memory or write one temporary file per message.
-- Prepare import rows in a private temporary database; copy them into Cursor in bounded transactions (at most 128 rows / 8 MiB, with a single permitted value up to 32 MiB) and publish chat headers last. On retry, recover verified unpublished message batches whose hashes and current bytes still match; leave modified rows for inspection.
-- Release owned SQLite children on cancellation, timeout and Extension Host disconnect; serialize importers that share a global database.
-- Fail closed on leftover transfer locks. A new lock name appears only after its owner record is fully written, so a concurrent attempt sees a live owner rather than an empty file. Lock release is idempotent so an old handle cannot delete a new owner's file. **Clear stale lock** removes only a verified dead owner after PID and token checks; live or changed locks stay in place.
-- Record import receipts and pending hashes in a private journal. Repeat import skips an identical previously imported snapshot and writes a separate copy when the source changed; it does not overwrite an existing chat. A change to `grouping.textPreview` alone is not a new version. An intact chat that still belongs to the workspace through the global header table is not copied again, whether or not it is archived.
-- Restore a deleted imported chat as a new independent copy when a verified receipt still points at leftover SQLite rows without a workspace list binding; keep those leftover rows and refuse unfinished pending imports. Damaged list JSON, an empty or NULL list, a list field that is not an array, a damaged body, or a missing referenced message blocks the import before any new copy is written. A missing optional field is allowed.
-- Optional recovery (`cursorChatTransit.import.allowPartial`) can keep readable history from incomplete exports; invalid JSON, unsafe paths and conflicts still fail closed.
-- Back up the global and workspace databases before writes; reuse existing resource files only when bytes match.
-- Show **Quit Cursor** only after a completed import adds chats, including usable chats recovered from an incomplete export. The action uses Cursor's normal quit command; Cursor owns confirmation and unsaved-work prompts. Overlapping quit requests and mid-lookup state changes are ignored.
-- List chats by recent activity and group workspaces by location (current workspace first, then this computer, SSH, containers, WSL and other remotes). File dialogs start locally; a remote ZIP can be imported through the editor's remote file provider. Export destinations are local files.
-- Settings, commands and views use `cursorChatTransit.*`. Machine settings cover the Cursor user-data directory, sqlite3 path, plans directory, and bounded SQLite operation/busy timeouts (timeouts apply to reads, writes and backups). Application settings cover partial recovery and operation log level.
-- Show the sidebar progress bar only while a transfer is running: stage order, current chat or file, and elapsed time. A remaining-time estimate appears only for a stage with a measured amount of work. An export snapshot is labeled Creating database snapshot and shows the temporary file size; the path, exact byte count, deadline, and that copy's duration stay in the operation log. Native pickers wait without a progress bar or a premature “reading” message.
-- Write timestamped operation logs with concrete paths, chat identity, byte sizes, durations and failure codes. Diagnostics is a native dialog with **Copy report** and **Close**.
-- Cover SQLite contention, interruption, lock recovery, archive format, logging and progress with regression tests, plus an opt-in performance benchmark.
-- Pin `@types/vscode` to 1.85.0 to match `engines.vscode`. `task setup` installs the Node.js version from `.nvmrc` when npm is missing (POSIX on Linux/macOS, PowerShell 5.1 on Windows 10/11). F5 compile/watch uses the same Node wrapper as Task. Debug uses an empty isolated host; storage checks use a VSIX installed into Cursor.
-- CI runs core tests on Linux, macOS and Windows and smokes `dev-node` on that matrix. A version increase on the default branch, or a manual run with publish enabled, publishes a GitHub Release of the already built VSIX after the same gates. The workflow summary names the version, commit, release, and VSIX, or says that an unchanged version did not request a release. Marketplace publish is a separate maintainer action.
-- MIT license with the original copyright notice and the notice for subsequent work on Cursor Chat Transit.
+Initial release of Cursor Chat Transit.
+
+### Chat transfer
+
+- Export selected chats or a workspace's chat history to a ZIP archive and import it into another workspace or device.
+- Include supported messages, conversation state, images, plan files, and canvases.
+- Process large archives with bounded JSON records, streamed NDJSON parts, and binary resource files.
+- Preserve existing conversations, recognize repeated imports, and create separate copies of changed snapshots.
+- Restore deleted imported chats as independent copies when their recorded state can be verified.
+- Recover usable history from incomplete exports with optional recovery mode.
+
+### Workspace and chat selection
+
+- Group workspaces by location, with the current workspace first, and distinguish local, SSH, WSL, and container projects.
+- List titled chats by recent activity, followed by untitled chats.
+- Count titled and untitled chats per workspace on demand.
+- Show user-message counts and detected legacy or Agent formats for individual chats.
+- Run statistics in a cancellable background process while keeping search, selection, and navigation available.
+
+### Operations and diagnostics
+
+- Show transfer stages, elapsed time, and remaining-time estimates for measurable work.
+- Write timestamped operation logs with concrete file paths, chat identity, byte counts, durations, and error codes.
+- Provide a copyable diagnostic report and a guarded action for clearing stale transfer locks.
+- Offer Cursor's normal quit action after an import adds chats.
+- Read exports without copying the full database; prepare imports outside Cursor's database and write bounded batches with journaled recovery and verification.
+- Configure local storage paths, SQLite query deadlines, lock waits, recovery mode, and log verbosity.
+
+### Development and distribution
+
+- Provide Task and npm commands for setup, checks, packaging, and explicit local release preparation.
+- Validate changes with automated tests, cross-platform SQLite checks, and extension-host smoke tests in CI.
+- Publish verified VSIX packages and checksums as GitHub Release assets, with no registry publishing.
+- Distribute under the MIT license with the required copyright notices.

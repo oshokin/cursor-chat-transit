@@ -50,7 +50,7 @@ async function main(): Promise<void> {
         `--user-data-dir=${path.join(tmp, 'data')}`,
         `--extensions-dir=${path.join(tmp, 'ext')}`,
       ],
-      version: process.env.VSCODE_TEST_VERSION || '1.85.0',
+      version: process.env.VSCODE_TEST_VERSION || '1.125.0',
     });
   } finally {
     await fs.promises.rm(tmp, { recursive: true, force: true });

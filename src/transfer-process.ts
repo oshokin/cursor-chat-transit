@@ -1,3 +1,4 @@
+import type { StatisticsJob, StatisticsUpdate } from './statistics';
 import type { TransferEvent } from './transfer-events';
 import type {
   TransferPhase,
@@ -35,8 +36,10 @@ export interface TransferJob {
 
 /** Start the transfer process and return its result. There is no in-process fallback. */
 export async function runTransfer<T>(
-  job: TransferJob,
+  job: TransferJob | StatisticsJob,
   handlers: {
+    /** One completed statistics row. */
+    onStatistics?: (update: StatisticsUpdate) => void;
     /** Cancellation. */
     signal?: AbortSignal;
     /** Progress from the child. */
@@ -76,6 +79,8 @@ export async function runTransfer<T>(
     const onMessage = (message: {
       /** IPC kind: event, phase, note, done, or error. */
       type: string;
+      /** A compact statistics result; no chat payloads. */
+      statistics?: StatisticsUpdate;
       /** File or byte event when `type` is `event`. */
       event?: TransferEvent;
       /** Named transfer stage when `type` is `phase`. */
@@ -95,6 +100,9 @@ export async function runTransfer<T>(
       /** Extra error detail copied onto the thrown Error. */
       detail?: string;
     }) => {
+      if (message.type === 'statistics' && message.statistics)
+        handlers.onStatistics?.(message.statistics);
+
       if (message.type === 'event' && message.event)
         handlers.onEvent?.(message.event);
 

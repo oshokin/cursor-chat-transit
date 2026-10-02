@@ -193,6 +193,10 @@ export async function resolveComposers(
     layoutGl: Layout;
     /** When true, merge timestamp columns from composerHeaders into headers. */
     includeColumnDates?: boolean;
+    /** Global header sources already read by an on-demand statistics scan. */
+    globalSources?: HeaderSource[];
+    /** Reject damaged metadata rather than report an empty count. */
+    strictMetadata?: boolean;
   },
 ): Promise<ComposerHeader[]> {
   const { storageId, identity, layoutWs, layoutGl } = opts;
@@ -205,8 +209,13 @@ export async function resolveComposers(
   }> = [];
 
   if (layoutWs.itemTable) {
-    const data = await readItemJson(connWs, 'composer.composerData');
-    const all = data?.allComposers;
+    const data = await readItemJson(
+      connWs,
+      'composer.composerData',
+      opts.strictMetadata,
+    );
+
+    const all = checkedHeaderList(data, opts.strictMetadata);
 
     if (Array.isArray(all)) {
       sources.push({
@@ -225,37 +234,94 @@ export async function resolveComposers(
         connWs,
         layoutWs.headerColumns,
         opts.includeColumnDates,
+        opts.strictMetadata,
       ),
     });
   }
 
-  if (layoutGl.composerHeaders) {
-    const all = await readComposerHeadersTable(
+  const globals =
+    opts.globalSources ??
+    (await readGlobalHeaderSources(
       connGl,
-      layoutGl.headerColumns,
+      layoutGl,
       opts.includeColumnDates,
-    );
+      opts.strictMetadata,
+    ));
 
+  for (const source of globals) {
     sources.push({
-      source: 'table',
-      records: all.filter((h) => matchesWorkspace(h, storageId, identity)),
+      ...source,
+      records: source.records.filter((h) =>
+        matchesWorkspace(h, storageId, identity),
+      ),
     });
   }
 
-  if (layoutGl.itemTable) {
-    const blob = await readItemJson(connGl, 'composer.composerHeaders');
-    const all = blob?.allComposers;
+  return mergeHeaders(sources);
+}
+
+/** Header metadata shared across workspaces; never contains message bodies. */
+export interface HeaderSource {
+  /** Metadata precedence. */
+  source: HeaderMergeSource;
+  /** Headers available in this source. */
+  records: ComposerHeader[];
+}
+
+/** Read global metadata once per statistics scan, not once per workspace. */
+export async function readGlobalHeaderSources(
+  conn: SqliteConn,
+  layout: Layout,
+  includeColumnDates = false,
+  strict = false,
+): Promise<HeaderSource[]> {
+  const sources: HeaderSource[] = [];
+
+  if (layout.composerHeaders) {
+    sources.push({
+      source: 'table',
+      records: await readComposerHeadersTable(
+        conn,
+        layout.headerColumns,
+        includeColumnDates,
+        strict,
+      ),
+    });
+  }
+
+  if (layout.itemTable) {
+    const blob = await readItemJson(conn, 'composer.composerHeaders', strict);
+    const all = checkedHeaderList(blob, strict);
 
     if (Array.isArray(all)) {
       sources.push({
         source: 'blob',
         records: all
           .map(asComposerHeader)
-          .filter((h): h is ComposerHeader => !!h)
-          .filter((h) => matchesWorkspace(h, storageId, identity)),
+          .filter((h): h is ComposerHeader => !!h),
       });
     }
   }
 
-  return mergeHeaders(sources);
+  return sources;
+}
+
+/** Statistics must not turn a malformed list into a measured zero. */
+function checkedHeaderList(
+  data: Record<string, unknown> | null,
+  strict = false,
+): unknown {
+  const all = data?.allComposers;
+
+  if (
+    strict &&
+    all !== undefined &&
+    (!Array.isArray(all) || all.some((h) => !asComposerHeader(h)))
+  ) {
+    throw Object.assign(new Error('Invalid chat header list.'), {
+      code: 'HEADER_METADATA_INVALID',
+    });
+  }
+
+  return all;
 }

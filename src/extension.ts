@@ -91,7 +91,11 @@ export function activate(context: vscode.ExtensionContext): void {
     if (action === 'chooseWorkspace') {
       if (runtime.busy) return;
       const { entries, identity } = listHostEntries();
-      const picked = await pickWorkspace(entries, identity, 'select');
+
+      const picked = await pickWorkspace(entries, identity, 'select', {
+        context,
+        operations,
+      });
 
       if (picked) setSource(picked);
 

@@ -1,3 +1,6 @@
+import { pickWithStatistics } from './extension-statistics';
+import { workspaceStatisticsKey } from './statistics';
+import type { TransitLog } from './output-ui';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -80,6 +83,7 @@ export async function pickWorkspace(
   entries: WorkspaceEntry[],
   current: WorkspaceIdentity | undefined,
   action: WorkspacePickAction,
+  analysis: { context: vscode.ExtensionContext; operations: TransitLog },
 ): Promise<WorkspaceEntry | undefined> {
   if (!entries.length) {
     throw new Error(
@@ -87,37 +91,48 @@ export async function pickWorkspace(
     );
   }
 
-  const pick = await vscode.window.showQuickPick(
-    workspacePickItems(entries, current).flatMap((item, index, items) => {
-      const previous = items[index - 1];
+  const picked = await pickWithStatistics({
+    items: workspacePickItems(entries, current).flatMap(
+      (item, index, items) => {
+        const previous = items[index - 1];
 
-      const group = item.isCurrent
-        ? 'Current workspace'
-        : workspacePresentation(item.entry).group;
-
-      const previousGroup =
-        previous &&
-        (previous.isCurrent
+        const group = item.isCurrent
           ? 'Current workspace'
-          : workspacePresentation(previous.entry).group);
+          : workspacePresentation(item.entry).group;
 
-      return group === previousGroup
-        ? [item]
-        : [
-            {
-              label: group,
-              kind: vscode.QuickPickItemKind.Separator,
-            } as vscode.QuickPickItem,
-            item,
-          ];
+        const previousGroup =
+          previous &&
+          (previous.isCurrent
+            ? 'Current workspace'
+            : workspacePresentation(previous.entry).group);
+
+        return group === previousGroup
+          ? [item]
+          : [
+              {
+                label: group,
+                kind: vscode.QuickPickItemKind.Separator,
+              } as vscode.QuickPickItem,
+              item,
+            ];
+      },
+    ),
+    title: workspacePickTitle(action),
+    placeholder: workspacePickPlaceholder(),
+    key: (item) =>
+      'entry' in item
+        ? workspaceStatisticsKey((item as { entry: WorkspaceEntry }).entry)
+        : undefined,
+    buttonLabel: 'Count chats in each workspace',
+    operations: analysis.operations,
+    job: async () => ({
+      ...(await prepareSqlite(analysis.context)),
+      kind: 'workspace-statistics',
+      workspaces: entries,
     }),
-    {
-      title: workspacePickTitle(action),
-      placeHolder: workspacePickPlaceholder(),
-      matchOnDescription: true,
-      matchOnDetail: true,
-    },
-  );
+  });
+
+  const pick = picked?.[0];
 
   return pick && 'entry' in pick
     ? (pick as { entry: WorkspaceEntry }).entry

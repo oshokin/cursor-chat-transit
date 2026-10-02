@@ -1,10 +1,10 @@
 # Development
 
-The combined design record — modules, product language, repeat-import policy, and the Cursor storage contract — is [architecture.md](architecture.md). This page is the contributor guide.
+The implementation and storage contract are documented in [architecture.md](architecture.md). This page is the contributor guide.
 
 ## Prerequisites
 
-- Node.js 24, pinned in `.nvmrc` (audit used 24.19.0). npm ships with that official Node.js build.
+- Node.js 24, pinned in `.nvmrc`. npm ships with that official Node.js build.
 - sqlite3 CLI
 - Cursor or VS Code for F5
 - Optional: [Task v3](https://taskfile.dev/docs/installation)
@@ -15,7 +15,7 @@ Install Node with a version manager or let `task setup` download the official bi
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [fnm](https://github.com/Schniz/fnm) | Fast, cross-platform, reads `.nvmrc`. `eval "$(fnm env)"` in `~/.bashrc` is enough for an interactive terminal, not for F5.                           |
 | [nvm](https://github.com/nvm-sh/nvm) | Common on Linux/macOS; source `nvm.sh` in the **same** shell, then `nvm install`. Task and F5 do not load `~/.bashrc`.                                |
-| [Volta](https://volta.sh/)           | LinkedIn-style shims in `~/.volta/bin` on the **login** PATH. No `eval` hook; GUI apps can see `node` after a session restart.                        |
+| [Volta](https://volta.sh/)           | Toolchain shims in `~/.volta/bin` on the **login** PATH. No `eval` hook; GUI apps can see `node` after a session restart.                             |
 | Official tarball                     | [nodejs.org/download](https://nodejs.org/en/download); `task setup` unpacks it into gitignored `.tools/node` (Linux/macOS tarball, Windows 10/11 zip) |
 
 Cursor's helper `node` (`…/resources/helpers/node`) is not a development toolchain: it has no `npm`.
@@ -36,7 +36,7 @@ task package
 
 `check` is compile, types, lint, format, and core tests. `package` builds and inventories the VSIX. Split recipes (`build`, `lint`, `test`, …) are listed below.
 
-`task setup` reuses Node 24 + npm when they are already on PATH, otherwise downloads the `.nvmrc` build from nodejs.org (SHA-256 checked) into `.tools/node`, then runs `npm ci`. Linux/macOS use `scripts/dev-node.sh`; Windows 10/11 use `scripts/dev-node.cmd` (PowerShell 5.1, no extra install). After that, `task build` and the other recipes call the same runner.
+`task setup` reuses the exact Node.js version from `.nvmrc` when that build is already on PATH or installed by nvm, fnm, mise, Volta, or asdf. A different Node 24 is not reused. Otherwise it downloads that build from nodejs.org (SHA-256 checked) into `.tools/node`, then runs `npm ci`. Linux/macOS use `scripts/dev-node.sh`; Windows 10/11 use `scripts/dev-node.cmd` (PowerShell 5.1, no extra install). After that, `task build` and the other recipes call the same runner.
 
 Equivalent without Task, once Node is on PATH:
 
@@ -93,7 +93,7 @@ Edit the new changelog section before committing. CI publishes that text; it doe
 
 CI publishes only when a push to the default branch increases `package.json` `version`, or when someone starts the existing workflow with `publish_release=true` on that branch. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A push that does not change the version says that the release was not requested.
 
-As of 2026-10-01 the GitHub repository has no tags and no releases. `1.0.0` is recorded in the tree and is the first version to publish, via `workflow_dispatch` with `publish_release=true`, once that commit is the one you want to ship. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
+`1.0.0` is the initial version recorded in the source. Publish it via `workflow_dispatch` with `publish_release=true`, once that commit is the one you want to ship. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
 
 Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
 
@@ -105,7 +105,7 @@ For the first release, push the reviewed implementation to `master`, open **GitH
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Prepare produced an empty changelog section for a technical patch | Write the user-facing notes before committing; CI rejects empty notes                                        |
 | Fix or clarify notes before publication                           | Keep the prepared version and edit its existing section                                                      |
-| CI rejected the code before tag creation                          | Commit the fix without another bump, then run `ci` on `master` with `publish_release=true`                   |
+| CI rejected the code before tag creation                          | Commit the fix without another bump, then run **Check and release** on `master` with `publish_release=true`  |
 | Upload or API failure, same code and artifact                     | Use **Re-run failed jobs** on the original run                                                               |
 | Draft already contains different bytes after a complete rebuild   | Stop; retry the original publisher/artifact, never overwrite the existing asset                              |
 | Tag already points to another commit                              | Do not move it; finish that candidate or explicitly resolve the unpublished candidate before another version |
@@ -119,7 +119,7 @@ GitHub's tag-name endpoint is used for published releases. On a 404 the publishe
 
 ## Stale transfer lock
 
-After a crash, use **Clear stale lock** when offered in the sidebar or error notification, then retry. The extension rechecks the recorded owner PID and token before removing that same `.lock` file. A live or changed owner is never removed. A lock whose owner cannot be verified needs inspection; opening the operation log shows its path. This action does not unlock SQLite, delete receipts or existing backup files, or modify Cursor's `state.vscdb`, `-wal`, or `-shm` files.
+After a crash, use **Clear stale lock** when offered in the sidebar or error notification, then retry. The extension rechecks the recorded owner PID and token before removing that same `.lock` file. A live or changed owner is never removed. A lock whose owner cannot be verified needs inspection; opening the operation log shows its path. This action does not unlock SQLite, delete receipts, or modify Cursor's `state.vscdb`, `-wal`, or `-shm` files.
 
 ## Keeping the code understandable
 
@@ -131,11 +131,11 @@ Google's [code review guidance](https://google.github.io/eng-practices/review/re
 
 ## Refactor verification
 
-Run the full test suite after moving storage code. Keep format versions, snapshot hashing, database transaction order and error semantics stable. The explicit Transit namespace change updates settings, commands, views and tests together; it does not migrate import receipts or exported chat data. `transfer.ts`, `db.ts` and `dependencies.ts` intentionally remain small public facades so callers do not all need to change.
+Run the full test suite after moving storage code. Keep format versions, snapshot hashing, database transaction order and error semantics stable. `transfer.ts`, `db.ts` and `dependencies.ts` intentionally remain small public facades so callers do not all need to change.
 
-The Node suite includes a minimal mocked VS Code contract test for command registration, shared operation locking and cancellation after module extraction. It does **not** replace `npm run test:host` or a real Cursor session. Verify that all newly compiled modules are packaged; the VSIX include pattern remains flat `out/*.js` because these modules are flat under `src/`.
+The Node suite includes a minimal mocked VS Code contract test for command registration, shared operation locking and cancellation at the native UI boundary. It does **not** replace `npm run test:host` or a real Cursor session. Verify that all newly compiled modules are packaged; the VSIX include pattern remains flat `out/*.js` because these modules are flat under `src/`.
 
-Before release, record the actual Cursor build and OS with the manual import/continue result. The maintainer's successful 2026-09-29 transfer is valid smoke evidence; avoid converting it into an unsupported claim that every Cursor version, SSH setup and historical export is compatible.
+Before release, record the actual Cursor build and OS with the manual import/continue result. Automated fixtures do not establish compatibility with every Cursor version, remote workspace, or conversation format.
 
 ## Task recipes
 
@@ -159,14 +159,31 @@ The contributor loop is `task setup` → `task check` → `task package`. `task 
 
 Ordered steps use `cmds`, because Task dependencies run in parallel. `package` does not call `check` twice: `vsce` invokes `vscode:prepublish`, which already runs it. CI uses the same npm commands without requiring Task.
 
-Core/integration tests now fail up front when `sqlite3` is absent. Use `task test:unit` for the deliberately SQLite-free subset. On headless Linux, run `xvfb-run -a npm run test:host` for the host test.
+Core/integration tests fail up front when `sqlite3` is absent. Use `task test:unit` for the deliberately SQLite-free subset. On headless Linux, run `xvfb-run -a npm run test:host` for the host test.
 
 On Windows 10/11, `task setup` downloads the official Node.js zip when npm is missing. The watch script runs TypeScript via Node.
 
-Settings and command IDs now use `cursorChatTransit.*`. There are no legacy aliases. Set any previously customized values under the new keys and update custom keybindings. Only v4 ZIP exports and SQLite receipts are supported; old monolithic JSON exports must be exported again.
+Settings and command IDs use `cursorChatTransit.*`. File imports accept only version-4 ZIP archives. Import receipts are stored in SQLite.
 
 ## Opt-in performance checks
 
 Compile, then run `npm run test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases. Defaults: 3,000 messages, 16 KiB per message. `CCT_BENCH_MESSAGES`, `CCT_BENCH_MESSAGE_BYTES`, and `CCT_BENCH_RANDOM=1` select size and less-compressible payloads. `CCT_BENCH_PROJECT` can point to a separately compiled baseline for comparison. A large check can use `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
 
 Results include import/export/repeat durations, maximum batch transaction duration when instrumented, process peak sampled RSS, logical payload size and final ZIP bytes. Values describe this synthetic workload and machine; they do not predict every Cursor profile. RSS excludes SQLite child processes. The first archive creation is setup, not part of the import timing.
+
+## Statistics development and acceptance
+
+`statistics-picker.ts` owns the native QuickPick lifecycle without importing the VS Code runtime. `extension-statistics.ts` connects it to the existing worker and operation log. `statistics.ts` reads only the metadata needed for counts and format labels. Do not add automatic scans when a picker opens or change chat payloads to make a format label look compatible.
+
+The tests cover opt-in execution, selection and focus preservation, cancellation, retry, late results, unknown formats, duplicate message references, corrupt metadata, and actual worker IPC against temporary SQLite databases. The sanitized legacy/Agent fixtures preserve the structural facts needed for counting, without private chat text.
+
+Before shipping, verify the native experience in Cursor:
+
+1. Open the workspace picker. Confirm that no analysis starts until the chart button is pressed.
+2. Start a scan, filter the list, navigate with the keyboard, and select a workspace while work is in progress.
+3. In the chat picker, change checkboxes during analysis. Confirm that results do not reset selection, filter text, or scroll position.
+4. Stop and restart analysis. Close the picker while scanning, then reopen it; no old results should appear.
+5. Check an untitled chat, an empty conversation, a legacy conversation, and an Agent conversation. Verify that unknown or unreadable metadata is never displayed as a measured zero.
+6. Inspect Operations at `info` level. Confirm that file paths, chat IDs, counts, and the terminal outcome are present, with no message bodies.
+
+Results are snapshots of the metadata read during the scan, not a live profile-wide transaction. Format detection does not certify that Cursor can continue a chat.
