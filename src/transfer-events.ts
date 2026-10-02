@@ -27,6 +27,8 @@ export interface TransferEvent {
   timeoutMs?: number;
   /** Stable code when `status` is `failed`. */
   errorCode?: string;
+  /** Bounded facts such as a KV conflict. Never payload bytes or SQL. */
+  detail?: string;
 }
 
 /** Per-operation observers, also usable by integration tests without VS Code. */
@@ -102,11 +104,20 @@ export async function traceIO<T>(
         ? String(error.code)
         : 'FAILED';
 
+    const detail =
+      error &&
+      typeof error === 'object' &&
+      'detail' in error &&
+      typeof error.detail === 'string'
+        ? error.detail
+        : undefined;
+
     transferEvent({
       action,
       status: 'failed',
       ...fields,
       errorCode: code,
+      ...(detail ? { detail } : {}),
       elapsedMs: Math.round(performance.now() - started),
     });
 

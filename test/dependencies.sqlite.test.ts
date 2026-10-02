@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import * as db from '../src/db';
+import { formatImportNotice } from '../src/operation-ui';
+import { observeTransfer, type TransferEvent } from '../src/transfer-events';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
 import { sqlText } from '../src/core';
@@ -416,12 +419,31 @@ test(
 
     await transfer.exportToFile(ctx, source.workspace, dest);
     const exported = await readJsonFile(dest);
+    const events: TransferEvent[] = [];
 
-    await assert.rejects(
+    const result = await observeTransfer(
+      { event: (event) => events.push(event) },
       () => transfer.importFromObject(ctx, exported, target.workspace),
-      (err: unknown) =>
-        err instanceof TransferError && err.code === 'RESOURCE_CONFLICT',
     );
+
+    assert.equal(result.imported, 0);
+    assert.equal(result.skipped, 1);
+    assert.equal(result.skippedChats[0]?.composerId, A);
+
+    assert.match(
+      result.skippedChats[0]?.reason || '',
+      /stored resource differs/,
+    );
+
+    const conflict = events.find((event) => event.detail?.includes('reason='));
+
+    assert.match(conflict?.detail || '', /phase=preflight/);
+    assert.match(conflict?.detail || '', /reason=content/);
+    assert.match(conflict?.detail || '', /existingClass=blob/);
+    assert.match(conflict?.detail || '', /incomingClass=blob/);
+    assert.match(conflict?.detail || '', /keyMatchesExisting=false/);
+    assert.match(conflict?.detail || '', /keyMatchesIncoming=true/);
+    assert.equal(conflict?.key, blobKey);
 
     const stored = await sql.execSql({
       ...target.gl,
@@ -429,6 +451,315 @@ test(
     });
 
     assert.equal(stored.trim(), '11');
+  },
+);
+
+test(
+  'identical blob bytes and storage class are reused',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+
+    await seedChat(source.gl, source.ws, { state, blob: true });
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, X'${bytes.toString('hex')}');`,
+    });
+
+    const dest = path.join(root, 'same.json');
+
+    await transfer.exportToFile(ctx, source.workspace, dest);
+
+    const result = await transfer.importFromObject(
+      ctx,
+      await readJsonFile(dest),
+      target.workspace,
+    );
+
+    assert.equal(result.imported, 1);
+    assert.equal(result.skipped, 0);
+
+    const stored = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT typeof(value) || ' ' || hex(value) || ' ' || count(*) FROM cursorDiskKV WHERE key='${blobKey}';`,
+    });
+
+    assert.equal(
+      stored.trim(),
+      `blob ${bytes.toString('hex').toUpperCase()} 1`,
+    );
+  },
+);
+
+test(
+  'same blob bytes with a different storage class stay untouched',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+
+    await seedChat(source.gl, source.ws, { state, blob: true });
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, CAST(X'${bytes.toString('hex')}' AS TEXT));`,
+    });
+
+    const dest = path.join(root, 'class.json');
+
+    await transfer.exportToFile(ctx, source.workspace, dest);
+    const events: TransferEvent[] = [];
+
+    const exported = await readJsonFile(dest);
+
+    const result = await observeTransfer(
+      { event: (event) => events.push(event) },
+      () => transfer.importFromObject(ctx, exported, target.workspace),
+    );
+
+    assert.equal(result.imported, 0);
+    assert.equal(result.skipped, 1);
+
+    assert.match(
+      events.find((event) => event.detail?.includes('phase=preflight'))
+        ?.detail || '',
+      /reason=storage-class/,
+    );
+
+    const stored = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT typeof(value) || ' ' || hex(value) FROM cursorDiskKV WHERE key='${blobKey}';`,
+    });
+
+    assert.equal(stored.trim(), `text ${bytes.toString('hex').toUpperCase()}`);
+  },
+);
+
+test(
+  'hex text of an addressed blob is restored to the raw blob',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+
+    await seedChat(source.gl, source.ws, { state, blob: true });
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, ${sqlText(bytes.toString('hex'))});`,
+    });
+
+    const dest = path.join(root, 'hex.json');
+
+    await transfer.exportToFile(ctx, source.workspace, dest);
+    const exported = await readJsonFile(dest);
+    const events: TransferEvent[] = [];
+
+    const result = await observeTransfer(
+      { event: (event) => events.push(event) },
+      () => transfer.importFromObject(ctx, exported, target.workspace),
+    );
+
+    assert.equal(result.imported, 1);
+    assert.equal(result.skipped, 0);
+
+    assert.equal(
+      events.filter((event) => event.action === 'Restore hex-encoded blob')
+        .length,
+      1,
+    );
+
+    const stored = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT typeof(value) || ' ' || hex(value) FROM cursorDiskKV WHERE key='${blobKey}';`,
+    });
+
+    assert.equal(stored.trim(), `blob ${bytes.toString('hex').toUpperCase()}`);
+  },
+);
+
+test('hex text of different bytes stays a conflict', { skip }, async (t) => {
+  const { root, ctx, source, target } = await fixture(t);
+
+  await seedChat(source.gl, source.ws, { state, blob: true });
+
+  await sql.execSqlScript({
+    ...target.gl,
+    sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, '09');`,
+  });
+
+  const dest = path.join(root, 'hex-other.json');
+
+  await transfer.exportToFile(ctx, source.workspace, dest);
+
+  const result = await transfer.importFromObject(
+    ctx,
+    await readJsonFile(dest),
+    target.workspace,
+  );
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.skipped, 1);
+
+  const stored = await sql.execSql({
+    ...target.gl,
+    sql: `SELECT typeof(value) || ' ' || value FROM cursorDiskKV WHERE key='${blobKey}';`,
+  });
+
+  assert.equal(stored.trim(), 'text 09');
+});
+
+test(
+  'a conflicting first chat does not block the other chats',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+    const third = '55555555-5555-4555-8555-555555555555';
+    const bubbleC = '66666666-6666-4666-8666-666666666666';
+    const bubbleThird = '77777777-7777-4777-8777-777777777777';
+
+    await seedChat(source.gl, source.ws, {
+      id: A,
+      state,
+      blob: true,
+      extra: { name: 'RocksDB and gRPC update' },
+    });
+
+    await seedChat(source.gl, source.ws, {
+      id: C,
+      bubbleId: bubbleC,
+      extra: { name: 'Second chat' },
+    });
+
+    await seedChat(source.gl, source.ws, {
+      id: third,
+      bubbleId: bubbleThird,
+      extra: { name: 'Third chat' },
+    });
+
+    await sql.execSqlScript({
+      ...source.ws,
+      sql: db.itemReplaceSql('composer.composerData', {
+        allComposers: [
+          { composerId: A, name: 'RocksDB and gRPC update' },
+          { composerId: C, name: 'Second chat' },
+          { composerId: third, name: 'Third chat' },
+        ],
+      }),
+    });
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, X'11');`,
+    });
+
+    const dest = path.join(root, 'three.json');
+
+    await transfer.exportToFile(ctx, source.workspace, dest);
+
+    const first = await transfer.importFromBundle(ctx, dest, target.workspace);
+
+    const notice = formatImportNotice(first);
+
+    assert.equal(first.imported, 2);
+    assert.equal(first.skipped, 1);
+    assert.equal(first.skippedChats[0]?.composerId, A);
+    assert.match(notice.title, /Imported 2 chats/);
+    assert.match(notice.detail, /1 chat was skipped/);
+
+    assert.ok(
+      notice.items.some((item) =>
+        item.includes('RocksDB and gRPC update — a stored resource differs'),
+      ),
+    );
+
+    const again = await transfer.importFromBundle(ctx, dest, target.workspace);
+
+    assert.equal(again.imported, 0);
+    assert.equal(again.alreadyImported, 2);
+    assert.equal(again.skipped, 1);
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `UPDATE cursorDiskKV SET value = X'${bytes.toString('hex')}' WHERE key = ${sqlText(blobKey)};`,
+    });
+
+    const retried = await transfer.importFromBundle(
+      ctx,
+      dest,
+      target.workspace,
+    );
+
+    assert.equal(retried.imported, 1);
+    assert.equal(retried.alreadyImported, 2);
+    assert.equal(retried.skipped, 0);
+
+    const composers = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT count(*) FROM cursorDiskKV WHERE key LIKE 'composerData:%';`,
+    });
+
+    assert.equal(composers.trim(), '3');
+  },
+);
+
+test(
+  'a blob changed between the check and the write is not replaced',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+
+    await seedChat(source.gl, source.ws, { state, blob: true });
+
+    await sql.execSqlScript({
+      ...target.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, X'${bytes.toString('hex')}');`,
+    });
+
+    const dest = path.join(root, 'race.json');
+
+    await transfer.exportToFile(ctx, source.workspace, dest);
+    const exported = await readJsonFile(dest);
+    let changed = false;
+
+    await assert.rejects(
+      () =>
+        transfer.importFromObject(
+          {
+            ...ctx,
+            onPhase(phase, metrics) {
+              if (changed || phase !== 'write' || metrics?.chats !== 1) return;
+              changed = true;
+
+              execFileSync(executable as string, [
+                target.workspace.globalDbPath,
+                `UPDATE cursorDiskKV SET value = X'22' WHERE key = ${sqlText(blobKey)};`,
+              ]);
+            },
+          },
+          exported,
+          target.workspace,
+        ),
+      (err: unknown) =>
+        err instanceof TransferError &&
+        err.code === 'RESOURCE_CONFLICT' &&
+        typeof err.detail === 'string' &&
+        err.detail.includes('phase=write') &&
+        err.detail.includes('reason=content'),
+    );
+
+    const stored = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT hex(value) FROM cursorDiskKV WHERE key='${blobKey}';`,
+    });
+
+    assert.equal(stored.trim(), '22');
+
+    const composers = await sql.execSql({
+      ...target.gl,
+      sql: `SELECT count(*) FROM cursorDiskKV WHERE key LIKE 'composerData:%';`,
+    });
+
+    assert.equal(composers.trim(), '0');
   },
 );
 

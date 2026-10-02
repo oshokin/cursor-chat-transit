@@ -28,7 +28,7 @@ export function sqliteResourceLiteral(
   return kind === 'blob' ? literal : `CAST(${literal} AS TEXT)`;
 }
 
-/** INSERT missing typed resources and conflict if the existing row differs. */
+/** INSERT missing typed resources and conflict if the existing row differs. Same rule as classifyKvConflict: storage class or raw bytes. */
 export function kvInsertTypedSql(
   rows: Array<{ key: string; storageClass: 'text' | 'blob'; bytes: Buffer }>,
 ): string {

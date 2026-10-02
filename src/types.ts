@@ -352,6 +352,8 @@ export interface DatabaseBackupPair {
 export interface SkippedChatRef {
   /** Source composer id. */
   composerId: string;
+  /** Display name when the bundle recorded one. */
+  name?: string;
   /** Human-readable skip reason. */
   reason: string;
 }

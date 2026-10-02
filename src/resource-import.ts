@@ -20,9 +20,11 @@ import {
   planFilenamesFromChat,
   readPlanFile,
 } from './plans';
-import { resourceError as fail } from './resource-bytes';
+import { classifyKvConflict, kvConflictDetail } from './kv-compare';
+import { resourceError as fail, sha256Hex } from './resource-bytes';
 import { pathInside } from './resource-files';
 import { decodeSqliteBytes } from './resource-codec';
+import { TransferError } from './types';
 import type {
   AttachmentResource,
   BubbleRecord,
@@ -143,14 +145,21 @@ export async function planImportResources(opts: {
       const bytes = decodeSqliteBytes(exported.value);
 
       if (existing) {
-        if (
-          existing.storageClass !== exported.value.storageClass ||
-          !existing.bytes.equals(bytes)
-        ) {
-          fail(
-            'RESOURCE_CONFLICT',
+        const facts = classifyKvConflict(existing, {
+          storageClass: exported.value.storageClass,
+          sha256: sha256Hex(bytes),
+          byteLength: bytes.length,
+        });
+
+        if (facts) {
+          const err = new TransferError(
             'A required chat resource already exists with different data.',
           );
+
+          err.code = 'RESOURCE_CONFLICT';
+          err.detail = kvConflictDetail(facts, key, 'preflight');
+
+          throw err;
         }
 
         continue;

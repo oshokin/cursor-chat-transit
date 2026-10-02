@@ -5,7 +5,7 @@ import { cleanUnpublishedBubbles } from './import-cleanup';
 import { inChat, transferEvent, traceIO } from './transfer-events';
 import { readFile } from './trace-fs';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { openBundle } from './bundle-reader';
@@ -61,6 +61,12 @@ import { JournalStore } from './journal-db';
 import { acquireLock } from './lock';
 import { readNdjson } from './ndjson-io';
 import { hashFile } from './hash-file';
+import {
+  classifyKvConflict,
+  hexTextOfAddressedBlob,
+  KV_ROW_MISMATCH_SQL,
+  kvConflictDetail,
+} from './kv-compare';
 import { sha256Hex } from './resource-bytes';
 import { installBlobFile } from './resource-files';
 import { parseBoundedJson } from './record-json';
@@ -76,6 +82,7 @@ import {
 import type {
   ComposerHeader,
   ImportResult,
+  SqliteConn,
   TransferContext,
   WorkspaceEntry,
 } from './types';
@@ -289,24 +296,36 @@ CREATE TABLE dep (
             }),
         };
 
-        await inChat(row.sourceId, chatName, () =>
-          writeOne({
-            ctx: chatCtx,
-            workspace,
-            pair,
-            root: bundle.root,
-            work: work!,
-            journal: journal!,
-            operationId,
-            ordinal,
-            row,
-            plansDir: plansDirOf(ctx),
-            canvasesDir: canvasesDirOf(ctx, workspace),
-            onDurable: () => {
-              durable = true;
-            },
-          }),
-        );
+        try {
+          await inChat(row.sourceId, chatName, () =>
+            writeOne({
+              ctx: chatCtx,
+              workspace,
+              pair,
+              root: bundle.root,
+              work: work!,
+              journal: journal!,
+              operationId,
+              ordinal,
+              row,
+              plansDir: plansDirOf(ctx),
+              canvasesDir: canvasesDirOf(ctx, workspace),
+              onDurable: () => {
+                durable = true;
+              },
+            }),
+          );
+        } catch (err) {
+          if (!isPreflightKvConflict(err)) throw err;
+
+          plan.skipped.push({
+            composerId: row.sourceId,
+            name: chatName,
+            reason: 'a stored resource differs',
+          });
+
+          continue;
+        }
 
         written.push(row.targetId);
         if (row.quality === 'history-only') historyOnlyIds.push(row.targetId);
@@ -939,6 +958,7 @@ async function writeOne(opts: {
   onDurable?: () => void;
 }): Promise<void> {
   opts.ctx.onPhase?.('prepare', { chats: 1 });
+  await assertKvCompatible(opts);
   const dir = path.join(opts.root, 'chats', ordinalName(opts.ordinal));
   const staging = await mkdtemp(path.join(os.tmpdir(), 'cct-write-'));
 
@@ -980,8 +1000,6 @@ async function writeOne(opts: {
       opts.workspace.storageId,
       opts.workspace.identity,
     );
-
-    await assertKvCompatible(opts);
 
     const stagedPath = path.join(staging, 'rows.sqlite');
 
@@ -1128,7 +1146,7 @@ async function writeOne(opts: {
         await global.exec(`BEGIN IMMEDIATE;
 CREATE TEMP TABLE cct_copy_guard(ok INTEGER CHECK(ok=1));
 INSERT INTO cct_copy_guard SELECT 0 FROM main.cursorDiskKV t JOIN staged.cursorDiskKV s USING(key)
-WHERE s.key=${sqlText(`composerData:${opts.row.targetId}`)} AND (typeof(t.value) != typeof(s.value) OR CAST(t.value AS BLOB) != CAST(s.value AS BLOB)) LIMIT 1;
+WHERE s.key=${sqlText(`composerData:${opts.row.targetId}`)} AND (${KV_ROW_MISMATCH_SQL}) LIMIT 1;
 INSERT INTO main.cursorDiskKV(key,value) SELECT s.key,s.value FROM staged.cursorDiskKV s
 WHERE s.key=${sqlText(`composerData:${opts.row.targetId}`)} AND NOT EXISTS(SELECT 1 FROM main.cursorDiskKV t WHERE t.key=s.key);`);
 
@@ -1962,6 +1980,16 @@ async function reusedSha(
   return null;
 }
 
+/** True when this chat's resources were refused before any of its files or rows were written. */
+function isPreflightKvConflict(err: unknown): boolean {
+  return (
+    err instanceof TransferError &&
+    err.code === 'RESOURCE_CONFLICT' &&
+    typeof err.detail === 'string' &&
+    err.detail.startsWith('phase=preflight ')
+  );
+}
+
 /** Fail when an existing blob key has different bytes or storage class. */
 async function assertKvCompatible(opts: {
   /** Transfer hooks and cancellation. */
@@ -1975,10 +2003,15 @@ async function assertKvCompatible(opts: {
   /** Extracted bundle root. */
   root: string;
 }): Promise<void> {
-  const rows: Array<{ id: string; sha256: string; storage_class: string }> = [];
+  const rows: Array<{
+    id: string;
+    sha256: string;
+    storage_class: string;
+    byte_length: number;
+  }> = [];
 
   await opts.work.queryLines(
-    `SELECT json_object('id', id, 'sha256', sha256, 'storage_class', storage_class) FROM res WHERE ordinal = ${opts.ordinal} AND class = 'kv';`,
+    `SELECT json_object('id', id, 'sha256', sha256, 'storage_class', storage_class, 'byte_length', byte_length) FROM res WHERE ordinal = ${opts.ordinal} AND class = 'kv';`,
     (line) => rows.push(json(line)),
   );
 
@@ -1995,6 +2028,12 @@ async function assertKvCompatible(opts: {
     });
 
   report();
+
+  const repairs: Array<{
+    key: string;
+    previous: Buffer;
+    decoded: Buffer;
+  }> = [];
 
   const session = await SqliteSession.open({
     ...opts.pair.connGl,
@@ -2013,18 +2052,36 @@ async function assertKvCompatible(opts: {
 
           if (!existing) return;
 
-          if (
-            existing.storageClass !== (row.storage_class || 'blob') ||
-            sha256Hex(existing.bytes) !== row.sha256
-          ) {
-            const err = new TransferError(
-              'A required chat resource already exists with different data.',
-            );
+          const incoming = {
+            storageClass: row.storage_class || 'blob',
+            sha256: row.sha256,
+            byteLength: Number(row.byte_length) || 0,
+          };
 
-            err.code = 'RESOURCE_CONFLICT';
+          const facts = classifyKvConflict(existing, incoming);
 
-            throw err;
+          if (!facts) return;
+
+          const decoded = hexTextOfAddressedBlob(existing, incoming, row.id);
+
+          if (decoded) {
+            repairs.push({
+              key: row.id,
+              previous: existing.bytes,
+              decoded,
+            });
+
+            return;
           }
+
+          const err = new TransferError(
+            'A required chat resource already exists with different data.',
+          );
+
+          err.code = 'RESOURCE_CONFLICT';
+          err.detail = kvConflictDetail(facts, row.id, 'preflight');
+
+          throw err;
         },
       );
 
@@ -2037,6 +2094,71 @@ async function assertKvCompatible(opts: {
     }
   } finally {
     await session.close();
+  }
+
+  for (const repair of repairs) {
+    opts.ctx.signal?.throwIfAborted();
+    await restoreHexEncodedBlob(opts.pair.connGl, repair);
+  }
+}
+
+/** Replace one hex-text cell with the raw blob it spells. Leave the row when it changed. */
+async function restoreHexEncodedBlob(
+  conn: SqliteConn,
+  repair: { key: string; previous: Buffer; decoded: Buffer },
+): Promise<void> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-blob-'));
+  const previousPath = path.join(dir, 'previous.bin');
+  const decodedPath = path.join(dir, 'decoded.bin');
+
+  try {
+    await writeFile(previousPath, repair.previous, { mode: 0o600 });
+    await writeFile(decodedPath, repair.decoded, { mode: 0o600 });
+
+    const session = await SqliteSession.open({ ...conn, readOnly: false });
+
+    try {
+      await session.exec(`BEGIN IMMEDIATE;
+UPDATE cursorDiskKV SET value = readfile(${sqlText(decodedPath)})
+WHERE key = ${sqlText(repair.key)}
+  AND typeof(value) = 'text'
+  AND CAST(value AS BLOB) = readfile(${sqlText(previousPath)});`);
+
+      const changed = Number((await session.exec('SELECT changes();')).trim());
+
+      const stored =
+        changed === 1 ? await readSessionKv(session, repair.key) : null;
+
+      const restored =
+        stored?.storageClass === 'blob' &&
+        sha256Hex(stored.bytes) === sha256Hex(repair.decoded);
+
+      await session.exec(restored ? 'COMMIT;' : 'ROLLBACK;');
+
+      if (!restored) {
+        const err = new TransferError(
+          'A required chat resource already exists with different data.',
+        );
+
+        err.code = 'RESOURCE_CONFLICT';
+        err.detail = `phase=preflight reason=content key=${repair.key}`;
+
+        throw err;
+      }
+    } finally {
+      await session.close();
+    }
+
+    transferEvent({
+      action: 'Restore hex-encoded blob',
+      status: 'completed',
+      path: conn.database,
+      key: repair.key,
+      bytes: repair.decoded.length,
+      detail: `previousClass=text previousBytes=${repair.previous.length} restoredClass=blob restoredBytes=${repair.decoded.length}`,
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 }
 
@@ -2051,10 +2173,15 @@ async function verifyStoredResources(opts: {
   /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
 }): Promise<void> {
-  const rows: Array<{ id: string; sha256: string; storage_class: string }> = [];
+  const rows: Array<{
+    id: string;
+    sha256: string;
+    storage_class: string;
+    byte_length: number;
+  }> = [];
 
   await opts.work.queryLines(
-    `SELECT json_object('id', id, 'sha256', sha256, 'storage_class', storage_class) FROM res WHERE ordinal = ${opts.ordinal} AND class = 'kv';`,
+    `SELECT json_object('id', id, 'sha256', sha256, 'storage_class', storage_class, 'byte_length', byte_length) FROM res WHERE ordinal = ${opts.ordinal} AND class = 'kv';`,
     (line) => rows.push(json(line)),
   );
 
@@ -2087,16 +2214,21 @@ async function verifyStoredResources(opts: {
         async () => {
           const stored = await readSessionKv(session, row.id);
 
-          if (
-            !stored ||
-            stored.storageClass !== (row.storage_class || 'blob') ||
-            sha256Hex(stored.bytes) !== row.sha256
-          ) {
+          const facts = stored
+            ? classifyKvConflict(stored, {
+                storageClass: row.storage_class || 'blob',
+                sha256: row.sha256,
+                byteLength: Number(row.byte_length) || 0,
+              })
+            : null;
+
+          if (!stored || facts) {
             const err = new TransferError(
               'Import verification failed for a chat resource.',
             );
 
             err.code = 'PARTIAL';
+            if (facts) err.detail = kvConflictDetail(facts, row.id, 'verify');
 
             throw err;
           }

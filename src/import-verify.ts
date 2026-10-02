@@ -8,7 +8,9 @@ import {
   resolveBlobGraph,
   verifyAttachmentFile,
 } from './dependencies';
+import { classifyKvConflict, kvConflictDetail } from './kv-compare';
 import { prepareImport } from './import-prepare';
+import { sha256Hex } from './resource-bytes';
 import {
   canvasFilenamesFromChat,
   readCanvasFile,
@@ -201,15 +203,25 @@ async function verifyBlobs(
     const stored = await db.readKvBytes(verifyConn, key);
     const expected = expectedResources.get(key);
 
-    if (
-      !stored ||
-      (expected &&
-        (stored.storageClass !== expected.storageClass ||
-          !stored.bytes.equals(decodeSqliteBytes(expected))))
-    ) {
-      throw new TransferError(
+    const expectedBytes = expected ? decodeSqliteBytes(expected) : null;
+
+    const facts =
+      stored && expected && expectedBytes
+        ? classifyKvConflict(stored, {
+            storageClass: expected.storageClass,
+            sha256: sha256Hex(expectedBytes),
+            byteLength: expectedBytes.length,
+          })
+        : null;
+
+    if (!stored || (expected && facts)) {
+      const err = new TransferError(
         'Import verification failed: a required chat resource is missing or changed.',
       );
+
+      if (facts) err.detail = kvConflictDetail(facts, key, 'verify');
+
+      throw err;
     }
   }
 }
