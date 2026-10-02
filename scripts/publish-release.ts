@@ -403,7 +403,7 @@ async function ensureDraft(
       JSON.stringify({
         tag_name: tag,
         target_commitish: input.sha,
-        name: `Cursor Chat Transit v${input.version}`,
+        name: tag,
         body: input.notes,
         draft: true,
         prerelease: false,

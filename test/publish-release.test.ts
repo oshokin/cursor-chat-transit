@@ -35,6 +35,8 @@ interface State {
   tagStatus?: number;
   /** Reject the next tag creation, as a dropped connection would. */
   failTagWrite?: boolean;
+  /** Title sent when a release is created. */
+  releaseName?: string;
   /** Omit drafts from the release list, as an unauthenticated list does. */
   hideDraftsInList?: boolean;
 }
@@ -159,6 +161,10 @@ function client(state: State): GitHubClient {
       }
 
       if (method === 'POST' && url.endsWith('/releases')) {
+        const parsed = JSON.parse(String(body)) as { name?: string };
+
+        state.releaseName = parsed.name;
+
         state.release = {
           id: 7,
           draft: true,
@@ -247,6 +253,7 @@ test('the first publication creates a tag, uploads both files, and publishes the
   const url = await publishRelease(input(state));
 
   assert.equal(url, 'https://github.com/example/repo/releases/tag/v1.0.1');
+  assert.equal(state.releaseName, 'v1.0.1');
   assert.equal(state.tagSha, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
   assert.equal(state.release?.draft, false);
 
