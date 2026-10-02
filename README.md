@@ -6,6 +6,8 @@ Export selected conversations or a workspace's chat history to a ZIP archive, th
 
 Cursor does not provide a way to move chats between workspaces. This extension does. Cursor's chat storage is a private format, not a public contract. A Cursor update can change that format and break export, import, or the ability to continue a chat. There is no promise that a new Cursor build will keep working with the current archive.
 
+This is free software. You use it at your own risk. The author is not responsible for what you do with it, or for lost chats, damaged databases, or a Cursor update that stops an archive from importing. Backups are your responsibility. The extension does not make them for you.
+
 ## Features
 
 - Find local, SSH, WSL, and container workspaces stored in your local Cursor profile.
