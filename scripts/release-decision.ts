@@ -59,7 +59,9 @@ export function decide(input: ReleaseDecisionInput): ReleaseDecision {
   if (input.event !== 'push') return { publish: false };
   if (!onDefault) return { publish: false };
 
-  if (!input.beforeAvailable || !input.beforeVersion) {
+  if (!input.beforeAvailable) return { publish: false };
+
+  if (!input.beforeVersion) {
     throw new Error(
       'Cannot compare package versions with the previous branch tip. Not guessing a bump.',
     );
@@ -148,7 +150,9 @@ export function skippedReleaseSummary(input: {
     ? 'Version unchanged — release not requested.'
     : input.event === 'pull_request'
       ? 'Pull request — release not requested.'
-      : 'Release not requested.';
+      : input.event === 'push' && input.beforeVersion === null
+        ? 'First push — release not requested.'
+        : 'Release not requested.';
 
   return [
     '### Release',

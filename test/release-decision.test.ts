@@ -39,8 +39,13 @@ test('a push publishes only when the stable version increased', () => {
     /not stable/,
   );
 
+  assert.deepEqual(
+    decide(input({ beforeAvailable: false, beforeVersion: null })),
+    { publish: false },
+  );
+
   assert.throws(
-    () => decide(input({ beforeAvailable: false, beforeVersion: null })),
+    () => decide(input({ beforeAvailable: true, beforeVersion: null })),
     /Not guessing a bump/,
   );
 });
@@ -57,6 +62,17 @@ test('a skipped release names the version, commit, and why nothing is published'
   assert.match(same || '', /Version: `1\.0\.0`/);
   assert.match(same || '', /Commit: `abc123`/);
   assert.match(same || '', /Version unchanged — release not requested/);
+
+  assert.match(
+    skippedReleaseSummary({
+      publish: false,
+      event: 'push',
+      shaVersion: '1.0.0',
+      beforeVersion: null,
+      sha: 'abc123',
+    }) || '',
+    /First push — release not requested/,
+  );
 
   assert.match(
     skippedReleaseSummary({

@@ -91,7 +91,7 @@ git push
 
 Edit the new changelog section before committing. CI publishes that text; it does not regenerate the changelog. The repository file stays `CHANGELOG.md`. vsce packs that file as `extension/changelog.md`, which is the name the Marketplace reads. The GitHub Release notes are that version's section plus short VSIX install steps.
 
-CI publishes only when a push to the default branch increases `package.json` `version`, or when someone starts the existing workflow with `publish_release=true` on that branch. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A push that does not change the version says that the release was not requested.
+CI publishes only when a push to the default branch increases `package.json` `version`, or when someone starts the existing workflow with `publish_release=true` on that branch. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A first push, which has no previous commit, and a later push that does not change the version both say that the release was not requested. Neither fails the workflow.
 
 `1.0.0` is the initial version recorded in the source. Publish it via `workflow_dispatch` with `publish_release=true`, once that commit is the one you want to ship. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
 
