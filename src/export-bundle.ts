@@ -1,4 +1,4 @@
-import { readSessionKv } from './kv-session';
+import { readSessionKvBatch } from './kv-session';
 import { inChat, transferEvent, traceIO } from './transfer-events';
 import { createHash } from 'node:crypto';
 import { lstat, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
@@ -345,17 +345,18 @@ async function writeResources(opts: {
     async (digests) => {
       const batch = new Map<string, Buffer | null>();
 
-      for (const digest of digests) {
+      opts.ctx.signal?.throwIfAborted();
+      const keys = digests.map((digest) => `agentKv:blob:${digest}`);
+
+      const rows = await traceIO(
+        'Read chat dependency batch',
+        { path: opts.conn.database, key: keys.join(', ') },
+        () => readSessionKvBatch(session, keys),
+      );
+
+      for (const [key, row] of rows) {
         opts.ctx.signal?.throwIfAborted();
-        const key = `agentKv:blob:${digest}`;
-
-        const row = await traceIO(
-          'Read chat dependency',
-          { path: opts.conn.database, key },
-          () => readSessionKv(session, key),
-        );
-
-        batch.set(digest, row?.bytes ?? null);
+        batch.set(key.slice('agentKv:blob:'.length), row?.bytes ?? null);
         if (!row || written.has(key)) continue;
         const sha = await writeTempBytes(opts.tmp, row.bytes);
 
@@ -385,6 +386,7 @@ async function writeResources(opts: {
 
       return batch;
     },
+    32,
   );
 
   if (closed.status !== 'ok') {
@@ -565,10 +567,9 @@ async function writeTempBytes(
   dir: string | undefined,
   bytes: Buffer,
 ): Promise<{ file: string; sha256: string }> {
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-
   // A read-only inspection validates resources without spilling or packaging them.
-  if (!dir) return { file: '', sha256 };
+  if (!dir) return { file: '', sha256: '' };
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
   const file = path.join(dir, sha256);
 
   await writeFile(file, bytes, { flag: 'wx' }).catch(

@@ -191,3 +191,46 @@ test('asynchronous graph traversal bounds a wide frontier to one payload per rea
   assert.equal(closed.keys.length, 200);
   assert.equal(closed.status, 'ok');
 });
+
+test('batched graph traversal accepts byte-bounded prefixes without losing keys', async () => {
+  const { readBlobGraph } = await import('../src/blob-graph');
+
+  const ids = Array.from({ length: 70 }, (_, i) =>
+    digest(Buffer.from(`batch-${i}`)),
+  );
+
+  let calls = 0;
+
+  const result = await readBlobGraph(
+    `~${Buffer.concat(ids.map((id) => blob(1, id))).toString('base64')}`,
+    async (wanted) => {
+      assert.ok(wanted.length <= 32);
+      calls++;
+
+      return new Map(wanted.slice(0, 7).map((id) => [id, Buffer.from('text')]));
+    },
+    32,
+  );
+
+  assert.equal(calls, 10);
+
+  assert.deepEqual(
+    result.keys,
+    ids.map((id) => `agentKv:blob:${id}`),
+  );
+
+  assert.deepEqual(result.missing, []);
+});
+
+test('batched graph traversal fails a non-progressing reader instead of looping', async () => {
+  const { readBlobGraph } = await import('../src/blob-graph');
+
+  await assert.rejects(
+    readBlobGraph(
+      `~${blob(1, 'ab'.repeat(32)).toString('base64')}`,
+      async () => new Map(),
+      32,
+    ),
+    /no progress/,
+  );
+});

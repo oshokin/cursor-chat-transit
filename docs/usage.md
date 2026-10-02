@@ -12,7 +12,7 @@ In the workspace picker, use the chart button, **Count chats in each workspace**
 
 > 12 titled · 3 untitled · /home/alex/project
 
-“Titled” means the stored title contains non-whitespace text. “Untitled” means it does not; it does not mean the conversation is empty or disposable. Counts include the unique chats in the extension's resolved workspace list, including archived chats. They can differ from Cursor's filtered chat list.
+“Titled” means the stored title contains non-whitespace text. “Untitled” means it does not; it does not mean the conversation is empty or disposable. Counts include the unique chats in the extension's resolved workspace list, including archived chats. An explicit storage ID takes priority over a matching project path. Headers without an ID use URI matching, and workspace-local lists may still share chats; equal counts alone do not prove duplicate storage. They can differ from Cursor's filtered chat list.
 
 ### Chat statistics
 
@@ -43,7 +43,7 @@ A missing project directory does not mean its stored chats are gone. Workspaces 
 
 In the chat picker, **Check all chats and select complete ones with messages** checks message references, stored message records, supported conversation dependencies, and referenced resources. After the scan, it replaces the selection with chats that passed those checks and contain indexed messages. It checks the entire list, including chats outside the current text filter. If you change checkboxes during the scan, your selection takes priority. Cancellation or a worker failure does not apply a partial selection.
 
-These checks use the export reader without writing a ZIP. They read messages and resources one after another, so they take longer than metadata-only statistics. Source data can change after the check; export and import still validate on their own. A successful check does not mean Cursor will continue the chat. Complete legacy history can still be selected when Cursor shows **Chat Too Old**.
+Workspace filtering checks for stored history without reading message bodies or dependency blobs. Checked chat selection uses the export reader without writing a ZIP: it reads messages sequentially and dependencies in byte-bounded batches, so it still takes longer than metadata-only statistics. Source data can change after the check; export and import still validate on their own. A successful check does not mean Cursor will continue the chat. Complete legacy history can still be selected when Cursor shows **Chat Too Old**.
 
 ## Archive contents and limits
 

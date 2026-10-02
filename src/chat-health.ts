@@ -15,11 +15,6 @@ import type {
 export type ChatHealth =
   'ready' | 'empty' | 'missing' | 'incomplete' | 'unknown';
 
-/** Only confirmed absence of readable history may hide a workspace. */
-export function canHideWorkspace(health: ChatHealth[]): boolean {
-  return health.every((value) => value === 'empty' || value === 'missing');
-}
-
 /** Stable human labels; unknown and incomplete remain visible for manual recovery. */
 export const healthLabel: Record<ChatHealth, string> = {
   ready: 'Transfer checks passed',

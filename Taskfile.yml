@@ -56,6 +56,10 @@ tasks:
     desc: Run SQLite integration tests (sqlite3 required)
     cmds:
       - '{{.DEV_NODE}} -- npm run test:sqlite'
+  test:perf:
+    desc: Run opt-in statistics and transfer benchmarks (sqlite3 required)
+    cmds:
+      - '{{.DEV_NODE}} -- npm run test:perf'
   check:
     desc: Compile, check types, lint, check formatting and run core tests
     cmds:

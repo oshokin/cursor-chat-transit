@@ -169,7 +169,7 @@
     "test:unit": "node --import tsx scripts/test-core.ts --unit test",
     "test:sqlite": "node --import tsx scripts/test-core.ts --sqlite test",
     "test:host": "node --import tsx scripts/test-host.ts",
-    "test:perf": "node --import tsx scripts/perf-bundle.ts",
+    "test:perf": "node --import tsx scripts/perf-statistics.ts && node --import tsx scripts/perf-bundle.ts",
     "check-package": "node --import tsx scripts/check-package.ts",
     "release:preview": "node --import tsx scripts/prepare-release.ts preview",
     "release:prepare": "node --import tsx scripts/prepare-release.ts prepare",

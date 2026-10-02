@@ -1,3 +1,4 @@
+import { mapInBatches } from './bounded-io';
 import { transferEvent, transferProgress, traceIO } from './transfer-events';
 import { writeFile } from './trace-fs';
 import { createReadStream } from 'node:fs';
@@ -214,17 +215,24 @@ export class BundleWriter {
     let contentBytes = 0;
 
     try {
-      for (const file of files) {
-        const hashed = await hashFile(file.diskPath, this.signal);
+      for await (const batch of mapInBatches(
+        files,
+        async (file) => ({
+          file,
+          hashed: await hashFile(file.diskPath, this.signal),
+        }),
+        this.signal,
+      )) {
+        for (const { file, hashed } of batch) {
+          contentBytes += hashed.bytes;
 
-        contentBytes += hashed.bytes;
-
-        await writeNdjsonLine(inventory, {
-          path: file.name,
-          bytes: hashed.bytes,
-          sha256: hashed.sha256,
-          kind: kindOf(file.name),
-        });
+          await writeNdjsonLine(inventory, {
+            path: file.name,
+            bytes: hashed.bytes,
+            sha256: hashed.sha256,
+            kind: kindOf(file.name),
+          });
+        }
       }
 
       await inventory.sync();

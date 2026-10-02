@@ -1,3 +1,4 @@
+import { mapInBatches } from './bounded-io';
 import { randomUUID } from 'node:crypto';
 import { transferEvent, transferProgress, traceIO } from './transfer-events';
 import { MAX_JSON_RECORD_BYTES, MAX_MANIFEST_BYTES } from './bundle-limits';
@@ -40,20 +41,28 @@ export async function packZip(
   const sizes = new Map<string, number>();
   let totalBytes = 0;
 
-  for (const file of files) {
-    signal?.throwIfAborted();
-    assertArchivePath(file.name);
+  for await (const batch of mapInBatches(
+    files,
+    async (file) => {
+      assertArchivePath(file.name);
 
-    const info = await traceIO(
-      'Inspect ZIP source',
-      { path: file.diskPath },
-      () => stat(file.diskPath),
-    );
+      const info = await traceIO(
+        'Inspect ZIP source',
+        { path: file.diskPath },
+        () => stat(file.diskPath),
+      );
 
-    if (!info.isFile())
-      throw new Error(`ZIP source is not a regular file: ${file.diskPath}`);
-    sizes.set(file.diskPath, info.size);
-    totalBytes += info.size;
+      if (!info.isFile())
+        throw new Error(`ZIP source is not a regular file: ${file.diskPath}`);
+
+      return { file, size: info.size };
+    },
+    signal,
+  )) {
+    for (const { file, size } of batch) {
+      sizes.set(file.diskPath, size);
+      totalBytes += size;
+    }
   }
 
   const partial = `${destPath}.${randomUUID()}.partial`;

@@ -397,3 +397,282 @@ test(
     assert.match(rows[0].detail, /Incomplete/);
   },
 );
+
+test(
+  'workspace filtering checks presence without traversing blobs or reading oversized messages',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const id = healthId('large-presence');
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.workspaceDbPath,
+      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: id, name: 'Large chat' }] }))};`,
+    });
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${id}:message',zeroblob(33554433)); INSERT INTO cursorDiskKV VALUES('composerData:${id}','{broken');`,
+    });
+
+    const events: TransferEvent[] = [],
+      rows: StatisticsUpdate[] = [];
+
+    await observeTransfer({ event: (e) => events.push(e) }, () =>
+      runStatistics(
+        {
+          ...ctx,
+          kind: 'workspace-statistics',
+          deepCheck: true,
+          workspaces: [workspace],
+        },
+        new AbortController().signal,
+        (row) => rows.push(row),
+      ),
+    );
+
+    assert.equal(rows[0].hide, false);
+    assert.equal(rows[0].failed, undefined);
+
+    assert.equal(
+      events.some((e) => /dependency|checksum|attachment/i.test(e.action)),
+      false,
+    );
+
+    assert.ok(
+      events.some(
+        (e) => e.action === 'Stored chat history found; keep workspace',
+      ),
+    );
+  },
+);
+
+test(
+  'presence checks retain uncertain state/resources and hide only proven empty or absent history',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const { inspectChatPresence } = await import('../src/chat-presence');
+    const { openReadTransaction } = await import('../src/read-transaction');
+
+    const cases: Array<[string, unknown, string]> = [
+      ['empty', { fullConversationHeadersOnly: [] }, 'empty'],
+      ['absent', undefined, 'missing'],
+      [
+        'future',
+        { _v: 99, conversationState: '~', fullConversationHeadersOnly: [] },
+        'unknown',
+      ],
+      [
+        'invalid-state',
+        { _v: 17, conversationState: 'bad', fullConversationHeadersOnly: [] },
+        'unknown',
+      ],
+      [
+        'references',
+        { fullConversationHeadersOnly: [{ bubbleId: 'missing', type: 1 }] },
+        'present',
+      ],
+      ['no-layout', {}, 'unknown'],
+      [
+        'wrong-id',
+        { composerId: 'other', fullConversationHeadersOnly: [] },
+        'unknown',
+      ],
+      [
+        'canvas',
+        {
+          canvas: { path: '/source/canvases/chart.canvas.tsx' },
+          fullConversationHeadersOnly: [],
+        },
+        'unknown',
+      ],
+    ];
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: cases
+        .filter(([, body]) => body !== undefined)
+        .map(
+          ([name, body]) =>
+            `INSERT INTO cursorDiskKV VALUES('composerData:${healthId(name)}',${sqlText(JSON.stringify(body))});`,
+        )
+        .join('\n'),
+    });
+
+    const view = await openReadTransaction({
+      ...ctx,
+      database: workspace.globalDbPath,
+    });
+
+    try {
+      for (const [name, , expected] of cases)
+        assert.equal(
+          await inspectChatPresence(view.conn, healthId(name)),
+          expected,
+          name,
+        );
+    } finally {
+      await view.close();
+    }
+  },
+);
+
+test(
+  'workspace presence scan releases each 32-chat read view and cancellation drains it',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+
+    const headers = Array.from({ length: 65 }, (_, i) => ({
+      composerId: healthId(`batch-${i}`),
+    }));
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.workspaceDbPath,
+      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
+    });
+
+    const events: TransferEvent[] = [];
+
+    const job: StatisticsJob = {
+      ...ctx,
+      kind: 'workspace-statistics',
+      deepCheck: true,
+      workspaces: [workspace],
+    };
+
+    await observeTransfer({ event: (e) => events.push(e) }, () =>
+      runStatistics(job, new AbortController().signal, () => {}),
+    );
+
+    assert.equal(
+      events.filter(
+        (e) =>
+          e.action === 'Open database read transaction' &&
+          e.status === 'started' &&
+          e.path === workspace.globalDbPath,
+      ).length,
+      4,
+    ); // Header view + three presence batches.
+
+    assert.equal(
+      events.filter(
+        (e) =>
+          e.action === 'Check chat history presence' &&
+          e.status === 'completed',
+      ).length,
+      65,
+    );
+
+    const abort = new AbortController();
+    let completed = 0;
+
+    await assert.rejects(
+      observeTransfer(
+        {
+          event: (e) => {
+            if (
+              e.action === 'Check chat history presence' &&
+              e.status === 'completed' &&
+              ++completed === 2
+            )
+              abort.abort();
+          },
+        },
+        () =>
+          runStatistics(job, abort.signal, () =>
+            assert.fail('Cancelled scan must not publish a row'),
+          ),
+      ),
+      /abort/i,
+    );
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: 'BEGIN EXCLUSIVE; COMMIT;',
+    });
+  },
+);
+
+test(
+  'global headers with explicit storage ids do not leak into another generation of the same project',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const { identityFromWorkspaceJson } = await import('../src/core');
+
+    const { resolveComposers, readGlobalHeaderSources } =
+      await import('../src/db-headers');
+
+    const { inspectDatabase } = await import('../src/db');
+
+    const identity = identityFromWorkspaceJson({
+      folder: 'file:///repo/ordermanager',
+    });
+
+    const entries = ['old', 'new'].map((storageId) => ({
+      ...workspace,
+      identity,
+      storageId,
+      workspaceDbPath: path.join(workspace.storageRoot, `${storageId}.vscdb`),
+    }));
+
+    for (const entry of entries)
+      await execSqlScript({
+        ...ctx,
+        database: entry.workspaceDbPath,
+        sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+      });
+
+    const allComposers = [
+      {
+        composerId: 'old-chat',
+        name: 'Old',
+        workspaceIdentifier: { id: 'old', uri: identity.uri },
+      },
+      {
+        composerId: 'new-chat',
+        name: 'New',
+        workspaceIdentifier: { id: 'new', uri: identity.uri },
+      },
+      { composerId: 'legacy-uri', workspaceIdentifier: { uri: identity.uri } },
+    ];
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `INSERT INTO ItemTable VALUES ('composer.composerHeaders',${sqlText(JSON.stringify({ allComposers }))});`,
+    });
+
+    const global = { ...ctx, database: workspace.globalDbPath, readOnly: true };
+    const { layout: layoutGl } = await inspectDatabase(global);
+
+    for (const entry of entries) {
+      const local = { ...ctx, database: entry.workspaceDbPath, readOnly: true };
+      const { layout: layoutWs } = await inspectDatabase(local);
+
+      for (const cached of [false, true]) {
+        const headers = await resolveComposers(local, global, {
+          storageId: entry.storageId,
+          identity,
+          layoutWs,
+          layoutGl,
+          ...(cached
+            ? { globalSources: await readGlobalHeaderSources(global, layoutGl) }
+            : {}),
+        });
+
+        assert.deepEqual(
+          headers.map((h) => h.composerId).sort(),
+          [`${entry.storageId}-chat`, 'legacy-uri'].sort(),
+        );
+      }
+    }
+  },
+);

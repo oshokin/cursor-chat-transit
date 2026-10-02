@@ -1,9 +1,5 @@
-import {
-  inspectChatHealth,
-  canHideWorkspace,
-  healthLabel,
-  type ChatHealth,
-} from './chat-health';
+import { inspectChatHealth, healthLabel } from './chat-health';
+import { inspectChatPresence, type ChatPresence } from './chat-presence';
 import { sqlText } from './core';
 import { inspectDatabase, readKvText } from './db';
 import {
@@ -29,7 +25,7 @@ export type StatisticsJob = Pick<
   TransferContext,
   'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
 > & {
-  /** Optional full source-data check, requested only by the filter/select action. */
+  /** Source assessment: presence for workspace filtering, full health for chat selection. */
   deepCheck?: boolean;
   /** Custom resource locations captured for this scan. */
   plansDir?: string;
@@ -197,7 +193,7 @@ export async function runStatistics(
 
     const fields =
       'storageId' in row
-        ? { path: workspace.workspaceDbPath, key }
+        ? { path: workspace.workspaceDbPath, key, source: workspace.key }
         : {
             path: workspace.globalDbPath,
             chatId: row.composerId,
@@ -248,9 +244,9 @@ export async function runStatistics(
             }
 
             if (job.deepCheck) {
-              const health: ChatHealth[] = [];
+              const health: ChatPresence[] = [];
 
-              for (const header of headers) {
+              for (let start = 0; start < headers.length; start += 32) {
                 signal.throwIfAborted();
 
                 const view = await openReadTransaction(
@@ -258,47 +254,60 @@ export async function runStatistics(
                 );
 
                 try {
-                  const status = await traceIO(
-                    'Check chat transfer data',
-                    {
-                      path: workspace.globalDbPath,
-                      chatId: header.composerId,
-                      chatName: header.name,
-                    },
-                    () => inspectChatHealth(ctx, workspace, view.conn, header),
-                  );
+                  for (const header of headers.slice(start, start + 32)) {
+                    signal.throwIfAborted();
 
-                  health.push(status);
+                    try {
+                      const status = await traceIO(
+                        'Check chat history presence',
+                        {
+                          path: workspace.globalDbPath,
+                          chatId: header.composerId,
+                          chatName: header.name,
+                        },
+                        () => inspectChatPresence(view.conn, header.composerId),
+                      );
 
-                  transferEvent({
-                    action: healthLabel[status],
-                    status: 'info',
-                    path: workspace.globalDbPath,
-                    chatId: header.composerId,
-                    chatName: header.name,
-                  });
-                } catch (error) {
-                  signal.throwIfAborted();
-                  failed++;
-                  health.push('unknown');
+                      health.push(status);
 
-                  transferEvent({
-                    action: 'Chat transfer check failed',
-                    status: 'failed',
-                    path: workspace.globalDbPath,
-                    chatId: header.composerId,
-                    chatName: header.name,
-                    errorCode:
-                      error instanceof Error && 'code' in error
-                        ? String(error.code)
-                        : 'CHECK_FAILED',
-                  });
+                      transferEvent({
+                        action: {
+                          present: 'Stored chat history found; keep workspace',
+                          empty: 'No messages',
+                          missing: 'No stored chat data',
+                          unknown: 'Chat presence uncertain; keep workspace',
+                        }[status],
+                        status: 'info',
+                        path: workspace.globalDbPath,
+                        chatId: header.composerId,
+                        chatName: header.name,
+                      });
+                    } catch (error) {
+                      signal.throwIfAborted();
+                      failed++;
+                      health.push('unknown');
+
+                      transferEvent({
+                        action: 'Chat presence check failed',
+                        status: 'failed',
+                        path: workspace.globalDbPath,
+                        chatId: header.composerId,
+                        chatName: header.name,
+                        errorCode:
+                          error instanceof Error && 'code' in error
+                            ? String(error.code)
+                            : 'CHECK_FAILED',
+                      });
+                    }
+                  }
                 } finally {
                   await view.close();
                 }
               }
 
-              hide = canHideWorkspace(health);
+              hide = health.every(
+                (status) => status === 'empty' || status === 'missing',
+              );
 
               transferEvent({
                 action: hide

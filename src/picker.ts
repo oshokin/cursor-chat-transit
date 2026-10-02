@@ -1,4 +1,5 @@
 import { workspaceKey } from './core';
+import path from 'node:path';
 import {
   chatActivityLabel,
   compareText,
@@ -75,14 +76,26 @@ export function chatListLabel(name: unknown): string {
 export function workspacePickItems(
   entries: WorkspaceEntry[],
   current: WorkspaceIdentity | undefined,
+  currentDatabase?: string,
 ): WorkspacePickItem[] {
   const currentKey = current ? workspaceKey(current.kind, current.uri) : null;
 
+  const identityMatches = entries.filter(
+    (entry) =>
+      currentKey &&
+      entry.identity &&
+      workspaceKey(entry.identity.kind, entry.identity.uri) === currentKey,
+  );
+
+  const normalize = (file: string) =>
+    process.platform === 'win32'
+      ? path.resolve(file).toLowerCase()
+      : path.resolve(file);
+
   const items = entries.map((entry) => {
-    const isCurrent =
-      !!currentKey &&
-      !!entry.identity &&
-      workspaceKey(entry.identity.kind, entry.identity.uri) === currentKey;
+    const isCurrent = currentDatabase
+      ? normalize(entry.workspaceDbPath) === normalize(currentDatabase)
+      : identityMatches.length === 1 && identityMatches[0] === entry;
 
     const label = workspacePresentation(entry);
 

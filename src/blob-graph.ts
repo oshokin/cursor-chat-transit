@@ -398,6 +398,7 @@ export function resolveBlobGraph(
 export async function readBlobGraph(
   state: unknown,
   loadMany: (digests: string[]) => Promise<ReadonlyMap<string, Buffer | null>>,
+  batchSize = 1,
 ): Promise<{
   /** `unsupported` when conversation state cannot be decoded. */
   status: 'ok' | 'unsupported';
@@ -406,6 +407,8 @@ export async function readBlobGraph(
   /** Required blob keys that were absent. */
   missing: string[];
 }> {
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 32)
+    throw new Error('Blob graph batch size must be between 1 and 32.');
   const graph = openBlobGraph(state);
 
   if (graph.status !== 'ok') {
@@ -413,10 +416,14 @@ export async function readBlobGraph(
   }
 
   for (;;) {
-    const want = graph.want(1);
+    const want = graph.want(batchSize);
 
     if (!want.length) break;
-    graph.provide(await loadMany(want));
+    const found = await loadMany(want);
+
+    // Byte-bounded readers may return a prefix instead of the whole frontier.
+    if (!found.has(want[0]!)) throw new Error('Blob reader made no progress.');
+    graph.provide(found);
   }
 
   return { status: graph.status, ...graph.finish() };

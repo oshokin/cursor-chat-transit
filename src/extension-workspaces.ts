@@ -92,31 +92,38 @@ export async function pickWorkspace(
   }
 
   const picked = await pickWithStatistics({
-    items: workspacePickItems(entries, current).flatMap(
-      (item, index, items) => {
-        const previous = items[index - 1];
+    items: workspacePickItems(
+      entries,
+      current,
+      analysis.context.storageUri?.scheme === 'file'
+        ? path.join(
+            path.dirname(analysis.context.storageUri.fsPath),
+            'state.vscdb',
+          )
+        : undefined,
+    ).flatMap((item, index, items) => {
+      const previous = items[index - 1];
 
-        const group = item.isCurrent
+      const group = item.isCurrent
+        ? 'Current workspace'
+        : workspacePresentation(item.entry).group;
+
+      const previousGroup =
+        previous &&
+        (previous.isCurrent
           ? 'Current workspace'
-          : workspacePresentation(item.entry).group;
+          : workspacePresentation(previous.entry).group);
 
-        const previousGroup =
-          previous &&
-          (previous.isCurrent
-            ? 'Current workspace'
-            : workspacePresentation(previous.entry).group);
-
-        return group === previousGroup
-          ? [item]
-          : [
-              {
-                label: group,
-                kind: vscode.QuickPickItemKind.Separator,
-              } as vscode.QuickPickItem,
-              item,
-            ];
-      },
-    ),
+      return group === previousGroup
+        ? [item]
+        : [
+            {
+              label: group,
+              kind: vscode.QuickPickItemKind.Separator,
+            } as vscode.QuickPickItem,
+            item,
+          ];
+    }),
     title: workspacePickTitle(action),
     placeholder: workspacePickPlaceholder(),
     key: (item) =>

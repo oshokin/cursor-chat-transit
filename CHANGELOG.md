@@ -8,7 +8,8 @@ Initial release of Cursor Chat Transit.
 
 - Export selected chats or a workspace's chat history to a ZIP archive and import it into another workspace or device.
 - Include supported messages, conversation state, images, plan files, and canvases.
-- Process large archives with bounded JSON records, streamed NDJSON parts, and binary resource files.
+- Process large archives with bounded JSON records, streamed NDJSON parts, byte-bounded dependency reads, and binary resource files.
+- Read independent archive metadata and checksums with bounded concurrency while preserving deterministic inventory order.
 - Preserve existing conversations, recognize repeated imports, and create separate copies of changed snapshots.
 - Restore deleted imported chats as independent copies when their recorded state can be verified.
 - Recover usable history from incomplete exports with optional recovery mode.
@@ -17,11 +18,11 @@ Initial release of Cursor Chat Transit.
 
 - Group workspaces by location, with the current workspace first, and distinguish local, SSH, WSL, and container projects.
 - List titled chats by recent activity, followed by untitled chats.
-- Count titled and untitled chats per workspace on demand.
+- Count titled and untitled chats per workspace on demand, with explicit storage bindings taking priority over reused project paths.
 - Show user-message counts and detected legacy or Agent formats for individual chats.
 - Run statistics in a cancellable background process while keeping search, selection, and navigation available.
 
-- Filter workspaces without readable chat history after an on-demand check, with a one-click action to show every workspace again.
+- Filter workspaces without readable chat history using lightweight presence checks and short read views, with a one-click action to show every workspace again.
 - Select nonempty chats that pass source-data checks for messages and supported resources; preserve manual selection changes during analysis.
 - Present a transparent blue-to-teal extension mark and consistent monochrome command icons.
 

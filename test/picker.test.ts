@@ -266,3 +266,46 @@ test('picker shows a decoded SSH host, not encoded authority', () => {
   assert.doesNotMatch(item.description, /ssh-remote/i);
   assert.doesNotMatch(item.description, /%2B/i);
 });
+
+test('Current identifies the host storage rather than every generation of the same URI', () => {
+  const identity: WorkspaceIdentity = {
+    kind: 'folder',
+    uri: uri('', '/repo/ordermanager', 'file'),
+  };
+
+  const old = {
+    ...entry('old', identity),
+    workspaceDbPath: '/storage/old/state.vscdb',
+  };
+
+  const active = {
+    ...entry('active', identity),
+    workspaceDbPath: '/storage/active/state.vscdb',
+  };
+
+  const items = workspacePickItems(
+    [old, active],
+    identity,
+    active.workspaceDbPath,
+  );
+
+  assert.equal(items.length, 2);
+  assert.equal(items.filter((item) => item.isCurrent).length, 1);
+  assert.equal(items[0].entry.storageId, 'active');
+});
+
+test('ambiguous URI-only current identity never guesses a storage or merges rows', () => {
+  const identity: WorkspaceIdentity = {
+    kind: 'folder',
+    uri: uri('', '/repo/ordermanager', 'file'),
+  };
+
+  const items = workspacePickItems(
+    [entry('old', identity), entry('new', identity)],
+    identity,
+  );
+
+  assert.equal(items.length, 2);
+  assert.ok(items.every((item) => !item.isCurrent));
+  assert.ok(items.every((item) => item.detail.includes('Storage')));
+});

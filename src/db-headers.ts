@@ -81,6 +81,19 @@ export function matchesWorkspace(
   return headerKey === workspaceKey(identity.kind, identity.uri);
 }
 
+/** Enumerate physical storage: an explicit binding outranks a reused folder URI. */
+export function matchesWorkspaceStorage(
+  header: ComposerHeader,
+  storageId: string,
+  identity: WorkspaceIdentity | undefined,
+): boolean {
+  const id = header.workspaceIdentifier?.id;
+
+  if (typeof id === 'string' && id.length > 0) return id === storageId;
+
+  return matchesWorkspace(header, storageId, identity);
+}
+
 /**
  * How one header relates to the destination workspace.
  * `match` is the same test export uses. `other` is a different workspace.
@@ -252,7 +265,7 @@ export async function resolveComposers(
     sources.push({
       ...source,
       records: source.records.filter((h) =>
-        matchesWorkspace(h, storageId, identity),
+        matchesWorkspaceStorage(h, storageId, identity),
       ),
     });
   }

@@ -167,7 +167,7 @@ Settings and command IDs use `cursorChatTransit.*`. File imports accept only ver
 
 ## Opt-in performance checks
 
-Compile, then run `npm run test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases. Defaults: 3,000 messages, 16 KiB per message. `CCT_BENCH_MESSAGES`, `CCT_BENCH_MESSAGE_BYTES`, and `CCT_BENCH_RANDOM=1` select size and less-compressible payloads. `CCT_BENCH_PROJECT` can point to a separately compiled baseline for comparison. A large check can use `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
+Compile, then run `npm run test:perf` or `task test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases, then runs two benchmarks in order. Workspace filtering and checked chat selection use three repetitions; `CCT_BENCH_BLOBS` defaults to 2048 and `CCT_BENCH_CHATS` to 4. Import, export, and repeated import use `CCT_BENCH_MESSAGES` (default 3,000), `CCT_BENCH_MESSAGE_BYTES` (default 16 KiB), and `CCT_BENCH_RANDOM=1` for less-compressible payloads. `CCT_BENCH_PROJECT` points both benchmarks at another compiled checkout. Compare versions one after another on the same machine. A large transfer check can still start only the archive benchmark with `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
 
 Results include import/export/repeat durations, maximum batch transaction duration when instrumented, process peak sampled RSS, logical payload size and final ZIP bytes. Values describe this synthetic workload and machine; they do not predict every Cursor profile. RSS excludes SQLite child processes. The first archive creation is setup, not part of the import timing.
 
@@ -195,3 +195,9 @@ Check that the toolbar order is Statistics → Filter/Select, with only Stop ava
 Verify checked selection with complete legacy history, a complete Agent chat, an empty chat, missing messages, and missing resources. Change checkboxes during the scan and confirm they are preserved. Cancel midway and confirm neither a partial filter nor a partial selection is applied. Verify keyboard navigation and group separators when every workspace is hidden.
 
 In Extensions, inspect the transparent mark on light and dark themes and on a highlighted list row. In the Activity Bar, confirm the monochrome mark follows the host color and remains legible at the normal icon size.
+
+### Performance regression checks
+
+`npm run test:perf` includes this measurement: three repetitions of workspace filtering and checked chat selection on temporary databases, then the transfer benchmark. See [Opt-in performance checks](#opt-in-performance-checks) and [performance and cleanup](performance-and-cleanup.md).
+
+For workspace identity regression checks, create two storage entries with the same URI and distinct global-header storage IDs. Each entry must receive its explicitly bound global chats. URI-only headers and local lists are retained as fallback evidence; never merge or delete storage based on the title, path, or equal counts.

@@ -221,3 +221,33 @@ test('currentIdentity uses workspaceFile before folders', () => {
   assert.equal(id?.kind, 'workspace');
   assert.equal(id?.uri.path, '/ws.code-workspace');
 });
+
+test('physical storage matching gives an explicit id priority over a reused URI', async () => {
+  const { matchesWorkspaceStorage } = await import('../src/db-headers');
+
+  const identity = identityFromWorkspaceJson({
+    folder: 'file:///repo/ordermanager',
+  });
+
+  const header = {
+    composerId: 'chat',
+    workspaceIdentifier: { id: 'old', uri: identity.uri },
+  };
+
+  assert.equal(matchesWorkspaceStorage(header, 'new', identity), false);
+  assert.equal(matchesWorkspaceStorage(header, 'old', identity), true);
+
+  assert.equal(
+    matchesWorkspaceStorage(
+      { ...header, workspaceIdentifier: { uri: identity.uri } },
+      'new',
+      identity,
+    ),
+    true,
+  );
+
+  assert.equal(
+    matchesWorkspaceStorage({ composerId: 'unbound' }, 'new', identity),
+    false,
+  );
+});
