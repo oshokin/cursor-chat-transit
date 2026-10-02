@@ -91,25 +91,25 @@ git push
 
 Edit the new changelog section before committing. CI publishes that text; it does not regenerate the changelog. The repository file stays `CHANGELOG.md`. vsce packs that file as `extension/changelog.md`, which is the name the Marketplace reads. The GitHub Release notes are that version's section plus short VSIX install steps.
 
-CI publishes only when a push to the default branch increases `package.json` `version`, or when someone starts the existing workflow with `publish_release=true` on that branch. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A first push, which has no previous commit, and a later push that does not change the version both say that the release was not requested. Neither fails the workflow.
+CI publishes a push to the default branch when GitHub has no published release, or when `package.json` `version` is newer than the latest published release. A push whose version already matches that release does not publish again. Starting the same workflow with `publish_release=true` on the default branch publishes the recorded version even when the numbers already match. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A matching published version says that the release was not requested and does not fail the workflow.
 
-`1.0.0` is the initial version recorded in the source. Publish it via `workflow_dispatch` with `publish_release=true`, once that commit is the one you want to ship. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
+`1.0.0` is the initial version recorded in the source. The first push of that version to the default branch publishes it after the checks pass, because nothing is published yet. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
 
 Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
 
 ### First release and recovery
 
-For the first release, push the reviewed implementation to `master`, open **GitHub → Actions → Check and release → Run workflow**, select `master`, and enable `publish_release`. Keep it disabled for a checks-only run. The recorded version is published only after the validation jobs and package job succeed. No local release preparation is needed for the initial `1.0.0`.
+For the first release, push the reviewed implementation to `master`. The recorded version is published after the validation jobs and package job succeed, because no release is posted yet. No local release preparation is needed for the initial `1.0.0`. Run **Check and release** with `publish_release` only to publish again when that version is already posted. Keep the input disabled for a checks-only run.
 
-| Situation                                                         | Developer action                                                                                             |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Prepare produced an empty changelog section for a technical patch | Write the user-facing notes before committing; CI rejects empty notes                                        |
-| Fix or clarify notes before publication                           | Keep the prepared version and edit its existing section                                                      |
-| CI rejected the code before tag creation                          | Commit the fix without another bump, then run **Check and release** on `master` with `publish_release=true`  |
-| Upload or API failure, same code and artifact                     | Use **Re-run failed jobs** on the original run                                                               |
-| Draft already contains different bytes after a complete rebuild   | Stop; retry the original publisher/artifact, never overwrite the existing asset                              |
-| Tag already points to another commit                              | Do not move it; finish that candidate or explicitly resolve the unpublished candidate before another version |
-| Published release needs a fix                                     | Make a fix commit and prepare the next patch                                                                 |
+| Situation                                                         | Developer action                                                                                                    |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Prepare produced an empty changelog section for a technical patch | Write the user-facing notes before committing; CI rejects empty notes                                               |
+| Fix or clarify notes before publication                           | Keep the prepared version and edit its existing section                                                             |
+| CI rejected the code before tag creation                          | Commit the fix without another bump and push to the default branch; CI publishes because that version is not posted |
+| Upload or API failure, same code and artifact                     | Use **Re-run failed jobs** on the original run                                                                      |
+| Draft already contains different bytes after a complete rebuild   | Stop; retry the original publisher/artifact, never overwrite the existing asset                                     |
+| Tag already points to another commit                              | Do not move it; finish that candidate or explicitly resolve the unpublished candidate before another version        |
+| Published release needs a fix                                     | Make a fix commit and prepare the next patch                                                                        |
 
 Wait until GitHub shows a completed, published release before preparing the next version. The local guard checks Git tags; a tag can already exist while CI is still uploading a draft. A tag alone does not prove publication succeeded.
 

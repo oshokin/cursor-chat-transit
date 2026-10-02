@@ -16,10 +16,8 @@ export interface ReleaseDecisionInput {
   publishRelease: boolean;
   /** package.json version at the event SHA. */
   shaVersion: string;
-  /** False when the previous branch tip cannot be read. */
-  beforeAvailable: boolean;
-  /** package.json version at `github.event.before`, when it could be read. */
-  beforeVersion: string | null;
+  /** Latest published stable version, without a `v` prefix. Null when nothing is published. */
+  publishedVersion: string | null;
 }
 
 /** Result consumed by the release job. */
@@ -59,27 +57,67 @@ export function decide(input: ReleaseDecisionInput): ReleaseDecision {
   if (input.event !== 'push') return { publish: false };
   if (!onDefault) return { publish: false };
 
-  if (!input.beforeAvailable) return { publish: false };
-
-  if (!input.beforeVersion) {
+  if (!stableVersion(input.shaVersion)) {
     throw new Error(
-      'Cannot compare package versions with the previous branch tip. Not guessing a bump.',
+      `Recorded version ${input.shaVersion} is not a stable X.Y.Z. Not publishing.`,
     );
   }
 
-  if (!stableVersion(input.beforeVersion) || !stableVersion(input.shaVersion)) {
+  if (input.publishedVersion === null) return { publish: true };
+
+  if (!stableVersion(input.publishedVersion)) {
     throw new Error(
-      `Cannot publish because a version is not stable X.Y.Z (${input.beforeVersion} -> ${input.shaVersion}).`,
+      `Published version ${input.publishedVersion} is not a stable X.Y.Z. Not guessing a release.`,
     );
   }
 
-  if (semver.lt(input.shaVersion, input.beforeVersion)) {
+  if (semver.lt(input.shaVersion, input.publishedVersion)) {
     throw new Error(
-      `Version decreased from ${input.beforeVersion} to ${input.shaVersion}. Not publishing.`,
+      `Version decreased from ${input.publishedVersion} to ${input.shaVersion}. Not publishing.`,
     );
   }
 
-  return { publish: semver.gt(input.shaVersion, input.beforeVersion) };
+  return { publish: semver.gt(input.shaVersion, input.publishedVersion) };
+}
+
+/** Read the latest published stable version. A 404 means nothing is published. */
+export function publishedVersionFromLatest(
+  status: number,
+  body: string,
+): string | null {
+  if (status === 404) return null;
+
+  if (status !== 200) {
+    throw new Error(
+      `GitHub API ${status} while reading the latest release. Not guessing a release.`,
+    );
+  }
+
+  let parsed: { tag_name?: unknown };
+
+  try {
+    parsed = JSON.parse(body) as { tag_name?: unknown };
+  } catch {
+    throw new Error(
+      'Latest release response is not JSON. Not guessing a release.',
+    );
+  }
+
+  if (typeof parsed.tag_name !== 'string') {
+    throw new Error('Latest release has no tag. Not guessing a release.');
+  }
+
+  const bare = parsed.tag_name.startsWith('v')
+    ? parsed.tag_name.slice(1)
+    : parsed.tag_name;
+
+  if (!stableVersion(bare)) {
+    throw new Error(
+      `Published release ${parsed.tag_name} is not a stable vX.Y.Z. Not guessing a release.`,
+    );
+  }
+
+  return bare;
 }
 
 /** Read `package.json` version from a commit that is already in this clone. */
@@ -103,29 +141,6 @@ function versionAt(rev: string): string {
   return version;
 }
 
-/** Read the previous tip, fetching that one commit when the clone does not have it. */
-function beforeVersion(rev: string): string {
-  try {
-    return versionAt(rev);
-  } catch (error) {
-    const fetched = spawnSync('git', ['fetch', '--no-tags', 'origin', rev], {
-      encoding: 'utf8',
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-    });
-
-    if (fetched.status !== 0) {
-      const reason = error instanceof Error ? error.message : String(error);
-
-      throw new Error(
-        `${reason}\nCould not fetch ${rev} from origin. Not guessing a bump.\n${(fetched.stderr || '').trim()}`,
-        { cause: error },
-      );
-    }
-
-    return versionAt(rev);
-  }
-}
-
 /** Workflow summary when this run will not publish. */
 export function skippedReleaseSummary(input: {
   /** True when the release job should run. */
@@ -134,25 +149,21 @@ export function skippedReleaseSummary(input: {
   event: string;
   /** package.json version on this commit. */
   shaVersion: string;
-  /** package.json version on the previous tip, when known. */
-  beforeVersion: string | null;
+  /** Latest published stable version, when this run compared one. */
+  publishedVersion: string | null;
   /** Commit that this workflow is building. */
   sha: string;
 }): string | null {
   if (input.publish) return null;
 
-  const unchanged =
-    input.event === 'push' &&
-    input.beforeVersion !== null &&
-    input.shaVersion === input.beforeVersion;
+  const matches =
+    input.event === 'push' && input.publishedVersion === input.shaVersion;
 
-  const reason = unchanged
-    ? 'Version unchanged — release not requested.'
+  const reason = matches
+    ? 'Published version matches package.json — release not requested.'
     : input.event === 'pull_request'
       ? 'Pull request — release not requested.'
-      : input.event === 'push' && input.beforeVersion === null
-        ? 'First push — release not requested.'
-        : 'Release not requested.';
+      : 'Release not requested.';
 
   return [
     '### Release',
@@ -181,22 +192,45 @@ function writeOutput(publish: boolean): void {
   else process.stdout.write(line);
 }
 
+/** Latest published release, or null when GitHub has none. */
+async function readPublishedVersion(): Promise<string | null> {
+  const repository = process.env.GITHUB_REPOSITORY || '';
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+
+  if (!repository || !token) {
+    throw new Error(
+      'GITHUB_REPOSITORY and GITHUB_TOKEN are required to read the published release. Not guessing a release.',
+    );
+  }
+
+  const response = await fetch(
+    `https://api.github.com/repos/${repository}/releases/latest`,
+    {
+      headers: {
+        accept: 'application/vnd.github+json',
+        authorization: `Bearer ${token}`,
+        'user-agent': 'cursor-chat-transit',
+        'x-github-api-version': '2022-11-28',
+      },
+    },
+  );
+
+  return publishedVersionFromLatest(response.status, await response.text());
+}
+
 /** Decide from GitHub Actions environment variables. */
-function main(): void {
+async function main(): Promise<void> {
   const event = process.env.GITHUB_EVENT_NAME || '';
   const ref = process.env.GITHUB_REF || '';
   const defaultBranch = process.env.DEFAULT_BRANCH || '';
   const publishRelease = process.env.PUBLISH_RELEASE === 'true';
   const shaVersion = versionAt('HEAD');
-  const before = process.env.BEFORE || '';
-  const zero = '0000000000000000000000000000000000000000';
-  let available = false;
-  let previous: string | null = null;
 
-  if (event === 'push' && before && before !== zero) {
-    previous = beforeVersion(before);
-    available = true;
-  }
+  const onDefault =
+    Boolean(defaultBranch) && ref === `refs/heads/${defaultBranch}`;
+
+  const published =
+    event === 'push' && onDefault ? await readPublishedVersion() : null;
 
   const decision = decide({
     event,
@@ -204,8 +238,7 @@ function main(): void {
     defaultBranch,
     publishRelease,
     shaVersion,
-    beforeAvailable: available,
-    beforeVersion: previous,
+    publishedVersion: published,
   });
 
   writeOutput(decision.publish);
@@ -215,7 +248,7 @@ function main(): void {
       publish: decision.publish,
       event,
       shaVersion,
-      beforeVersion: previous,
+      publishedVersion: published,
       sha: process.env.GITHUB_SHA || '',
     }),
   );
@@ -225,10 +258,8 @@ function main(): void {
 const entry = process.argv[1] ? path.resolve(process.argv[1]) : '';
 
 if (entry.endsWith(`${path.sep}release-decision.ts`)) {
-  try {
-    main();
-  } catch (error) {
+  main().catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
-  }
+  });
 }

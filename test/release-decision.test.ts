@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   decide,
+  publishedVersionFromLatest,
   skippedReleaseSummary,
   type ReleaseDecisionInput,
 } from '../scripts/release-decision';
@@ -16,8 +17,7 @@ function input(
     defaultBranch: 'master',
     publishRelease: false,
     shaVersion: '1.0.0',
-    beforeAvailable: true,
-    beforeVersion: '1.0.0',
+    publishedVersion: '1.0.0',
     ...overrides,
   };
 }
@@ -29,24 +29,42 @@ test('a pull request never publishes, even when the version changed', () => {
   );
 });
 
-test('a push publishes only when the stable version increased', () => {
+test('a push publishes when nothing is published or the published version is older', () => {
   assert.deepEqual(decide(input()), { publish: false });
+
+  assert.deepEqual(decide(input({ publishedVersion: null })), {
+    publish: true,
+  });
+
   assert.deepEqual(decide(input({ shaVersion: '1.0.1' })), { publish: true });
   assert.throws(() => decide(input({ shaVersion: '0.9.0' })), /decreased/);
 
   assert.throws(
-    () => decide(input({ shaVersion: '1.0.1-beta' })),
-    /not stable/,
+    () => decide(input({ shaVersion: '1.0.1-beta', publishedVersion: null })),
+    /Not publishing/,
+  );
+});
+
+test('the latest published release is its stable tag, and a missing release is empty', () => {
+  assert.equal(
+    publishedVersionFromLatest(200, JSON.stringify({ tag_name: 'v1.0.0' })),
+    '1.0.0',
   );
 
-  assert.deepEqual(
-    decide(input({ beforeAvailable: false, beforeVersion: null })),
-    { publish: false },
+  assert.equal(publishedVersionFromLatest(404, ''), null);
+
+  assert.throws(
+    () => publishedVersionFromLatest(500, ''),
+    /Not guessing a release/,
   );
 
   assert.throws(
-    () => decide(input({ beforeAvailable: true, beforeVersion: null })),
-    /Not guessing a bump/,
+    () =>
+      publishedVersionFromLatest(
+        200,
+        JSON.stringify({ tag_name: 'v1.0.0-beta' }),
+      ),
+    /not a stable/,
   );
 });
 
@@ -55,23 +73,16 @@ test('a skipped release names the version, commit, and why nothing is published'
     publish: false,
     event: 'push',
     shaVersion: '1.0.0',
-    beforeVersion: '1.0.0',
+    publishedVersion: '1.0.0',
     sha: 'abc123',
   });
 
   assert.match(same || '', /Version: `1\.0\.0`/);
   assert.match(same || '', /Commit: `abc123`/);
-  assert.match(same || '', /Version unchanged — release not requested/);
 
   assert.match(
-    skippedReleaseSummary({
-      publish: false,
-      event: 'push',
-      shaVersion: '1.0.0',
-      beforeVersion: null,
-      sha: 'abc123',
-    }) || '',
-    /First push — release not requested/,
+    same || '',
+    /Published version matches package.json — release not requested/,
   );
 
   assert.match(
@@ -79,7 +90,7 @@ test('a skipped release names the version, commit, and why nothing is published'
       publish: false,
       event: 'pull_request',
       shaVersion: '1.0.1',
-      beforeVersion: '1.0.0',
+      publishedVersion: null,
       sha: 'def',
     }) || '',
     /Pull request — release not requested/,
@@ -89,8 +100,8 @@ test('a skipped release names the version, commit, and why nothing is published'
     skippedReleaseSummary({
       publish: true,
       event: 'push',
-      shaVersion: '1.0.1',
-      beforeVersion: '1.0.0',
+      shaVersion: '1.0.0',
+      publishedVersion: null,
       sha: 'abc',
     }),
     null,
