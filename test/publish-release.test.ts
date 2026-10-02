@@ -430,8 +430,15 @@ test('changelog notes keep one non-empty top section and add install steps', () 
 - Original section that must survive.
 `;
 
+  assert.match(changelogSection(markdown, '1.0.1'), /## \[1\.0\.1\]/);
   assert.match(changelogSection(markdown, '1.0.1'), /correct a path/);
-  assert.match(releaseNotes(markdown, '1.0.1'), /Install from VSIX/);
+
+  const notes = releaseNotes(markdown, '1.0.1');
+
+  assert.match(notes, /^### Bug Fixes/m);
+  assert.match(notes, /correct a path/);
+  assert.match(notes, /Install from VSIX/);
+  assert.doesNotMatch(notes, /^## \[1\.0\.1\]/m);
 
   assert.throws(
     () => changelogSection('## 1.0.0\n\n## 1.0.1\n\n- later\n', '1.0.1'),

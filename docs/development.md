@@ -89,7 +89,7 @@ git commit -m "chore(release): 1.0.1"
 git push
 ```
 
-Edit the new changelog section before committing. CI publishes that text; it does not regenerate the changelog. The repository file stays `CHANGELOG.md`. vsce packs that file as `extension/changelog.md`, which is the name the Marketplace reads. The GitHub Release notes are that version's section plus short VSIX install steps.
+Edit the new changelog section before committing. CI publishes that text; it does not regenerate the changelog. The repository file stays `CHANGELOG.md`. vsce packs that file as `extension/changelog.md`, which is the name the Marketplace reads. The GitHub Release notes are that version's section without its version heading, plus short VSIX install steps.
 
 CI publishes a push to the default branch when GitHub has no published release, or when `package.json` `version` is newer than the latest published release. A push whose version already matches that release does not publish again. Starting the same workflow with `publish_release=true` on the default branch publishes the recorded version even when the numbers already match. Pull requests are checks only. There is no Release PR bot. `v*` tag pushes are not a second publisher. The workflow summary lists the version and commit. A published run also links the release and names the VSIX. A matching published version says that the release was not requested and does not fail the workflow.
 

@@ -88,9 +88,11 @@ export function changelogSection(markdown: string, version: string): string {
   return `${top.heading}\n\n${top.body}\n`;
 }
 
-/** Changelog section plus the VSIX install steps for a GitHub Release. */
+/** Changelog body plus the VSIX install steps. The release title already shows the version. */
 export function releaseNotes(markdown: string, version: string): string {
-  const section = changelogSection(markdown, version).trimEnd();
+  const section = changelogSection(markdown, version)
+    .trimEnd()
+    .replace(/^##[^#][^\n]*\n+/, '');
 
   return `${section}
 
