@@ -114,7 +114,7 @@ export async function exportBundle(opts: {
         header.composerId,
         header.name || header.composerId,
         () =>
-          exportOneChat({
+          readChatForExport({
             ctx: opts.ctx,
             workspace: opts.workspace,
             conn: opts.conn,
@@ -165,7 +165,7 @@ export async function exportBundle(opts: {
 }
 
 /** Export one composer: body, bubbles, and the blob closure. */
-async function exportOneChat(opts: {
+export async function readChatForExport(opts: {
   /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext;
   /** Workspace whose global database is being read. */
@@ -175,9 +175,18 @@ async function exportOneChat(opts: {
   /** Composer header for this chat. */
   header: ComposerHeader;
   /** Archive writer receiving this chat. */
-  writer: BundleWriter;
-  /** Directory for spilled resource bytes. */
-  tmp: string;
+  writer: Pick<
+    BundleWriter,
+    | 'beginChat'
+    | 'writeComposer'
+    | 'writeConversation'
+    | 'writeBubble'
+    | 'writeResource'
+    | 'addBlob'
+    | 'endChat'
+  >;
+  /** Directory for spilled resources; omitted by read-only inspection. */
+  tmp?: string;
   /** Incomplete-chat reasons collected for the summary. */
   issues: ExportChatIssue[];
   /** Composer ids that were not fully exported. */
@@ -280,9 +289,18 @@ async function writeResources(opts: {
   /** Composer header for this chat. */
   header: ComposerHeader;
   /** Archive writer receiving resource pointers. */
-  writer: BundleWriter;
-  /** Directory for spilled resource bytes. */
-  tmp: string;
+  writer: Pick<
+    BundleWriter,
+    | 'beginChat'
+    | 'writeComposer'
+    | 'writeConversation'
+    | 'writeBubble'
+    | 'writeResource'
+    | 'addBlob'
+    | 'endChat'
+  >;
+  /** Directory for spilled resources; omitted by read-only inspection. */
+  tmp?: string;
   /** Incomplete-chat reasons collected for the summary. */
   issues: ExportChatIssue[];
   /** Composer JSON used to discover blob dependencies. */
@@ -341,7 +359,7 @@ async function writeResources(opts: {
         if (!row || written.has(key)) continue;
         const sha = await writeTempBytes(opts.tmp, row.bytes);
 
-        await opts.writer.addBlob(sha.sha256, sha.file);
+        if (sha.file) await opts.writer.addBlob(sha.sha256, sha.file);
 
         await opts.writer.writeResource({
           class: 'kv',
@@ -351,7 +369,7 @@ async function writeResources(opts: {
           storageClass: row.storageClass,
         });
 
-        await rm(sha.file, { force: true });
+        if (sha.file) await rm(sha.file, { force: true });
         written.add(key);
 
         if (performance.now() - lastProgress >= 250) {
@@ -385,6 +403,7 @@ async function writeResources(opts: {
 
   try {
     for (const [uuid, aliases] of opts.refs.images) {
+      opts.ctx.signal?.throwIfAborted();
       await rejectImageSymlinks(opts.workspace, uuid);
       const names = [...aliases];
 
@@ -400,9 +419,10 @@ async function writeResources(opts: {
       }
 
       for (const resource of found.resources) {
+        opts.ctx.signal?.throwIfAborted();
         const sha = await writeTempBytes(opts.tmp, decodeAttachment(resource));
 
-        await opts.writer.addBlob(resource.sha256, sha.file);
+        if (sha.file) await opts.writer.addBlob(resource.sha256, sha.file);
 
         await opts.writer.writeResource({
           class: 'image',
@@ -414,7 +434,7 @@ async function writeResources(opts: {
           aliases: resource.aliases,
         });
 
-        await rm(sha.file, { force: true });
+        if (sha.file) await rm(sha.file, { force: true });
       }
     }
   } catch (err) {
@@ -427,6 +447,7 @@ async function writeResources(opts: {
   let missingPlans = 0;
 
   for (const name of opts.refs.plans) {
+    opts.ctx.signal?.throwIfAborted();
     const resource = await readPlanFile(plansDirOf(opts.ctx), name);
 
     if (!resource) {
@@ -436,7 +457,7 @@ async function writeResources(opts: {
 
     const sha = await writeTempBytes(opts.tmp, decodePlan(resource));
 
-    await opts.writer.addBlob(resource.sha256, sha.file);
+    if (sha.file) await opts.writer.addBlob(resource.sha256, sha.file);
 
     await opts.writer.writeResource({
       class: 'plan',
@@ -446,14 +467,15 @@ async function writeResources(opts: {
       byteLength: resource.byteLength,
     });
 
-    await rm(sha.file, { force: true });
+    if (sha.file) await rm(sha.file, { force: true });
   }
 
   const canvasesDir = canvasesDirOf(opts.ctx, opts.workspace);
-  let missingCanvases = 0;
+  let missingCanvases = canvasesDir ? 0 : opts.refs.canvases.size;
 
   if (canvasesDir) {
     for (const name of opts.refs.canvases) {
+      opts.ctx.signal?.throwIfAborted();
       const resource = await readCanvasFile(canvasesDir, name);
 
       if (!resource) {
@@ -463,7 +485,7 @@ async function writeResources(opts: {
 
       const sha = await writeTempBytes(opts.tmp, decodeCanvas(resource));
 
-      await opts.writer.addBlob(resource.sha256, sha.file);
+      if (sha.file) await opts.writer.addBlob(resource.sha256, sha.file);
 
       await opts.writer.writeResource({
         class: 'canvas',
@@ -473,7 +495,7 @@ async function writeResources(opts: {
         byteLength: resource.byteLength,
       });
 
-      await rm(sha.file, { force: true });
+      if (sha.file) await rm(sha.file, { force: true });
     }
   }
 
@@ -540,10 +562,13 @@ async function valueBytes(conn: SqliteConn, key: string): Promise<number> {
 
 /** Spill bytes to a content-addressed temp file. */
 async function writeTempBytes(
-  dir: string,
+  dir: string | undefined,
   bytes: Buffer,
 ): Promise<{ file: string; sha256: string }> {
   const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+  // A read-only inspection validates resources without spilling or packaging them.
+  if (!dir) return { file: '', sha256 };
   const file = path.join(dir, sha256);
 
   await writeFile(file, bytes, { flag: 'wx' }).catch(

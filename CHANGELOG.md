@@ -21,6 +21,10 @@ Initial release of Cursor Chat Transit.
 - Show user-message counts and detected legacy or Agent formats for individual chats.
 - Run statistics in a cancellable background process while keeping search, selection, and navigation available.
 
+- Filter workspaces without readable chat history after an on-demand check, with a one-click action to show every workspace again.
+- Select nonempty chats that pass source-data checks for messages and supported resources; preserve manual selection changes during analysis.
+- Present a transparent blue-to-teal extension mark and consistent monochrome command icons.
+
 ### Operations and diagnostics
 
 - Show transfer stages, elapsed time, and remaining-time estimates for measurable work.

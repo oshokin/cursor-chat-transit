@@ -187,3 +187,11 @@ Before shipping, verify the native experience in Cursor:
 6. Inspect Operations at `info` level. Confirm that file paths, chat IDs, counts, and the terminal outcome are present, with no message bodies.
 
 Results are snapshots of the metadata read during the scan, not a live profile-wide transaction. Format detection does not certify that Cursor can continue a chat.
+
+### Picker action acceptance
+
+Check that the toolbar order is Statistics → Filter/Select, with only Stop available while work runs. Filter an empty workspace, show all again, and confirm no storage files change. A removed project path with surviving chats must remain available. A malformed record, missing dependency, or unreadable database must not cause history to disappear.
+
+Verify checked selection with complete legacy history, a complete Agent chat, an empty chat, missing messages, and missing resources. Change checkboxes during the scan and confirm they are preserved. Cancel midway and confirm neither a partial filter nor a partial selection is applied. Verify keyboard navigation and group separators when every workspace is hidden.
+
+In Extensions, inspect the transparent mark on light and dark themes and on a highlighted list row. In the Activity Bar, confirm the monochrome mark follows the host color and remains legible at the normal icon size.

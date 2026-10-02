@@ -1,3 +1,9 @@
+import {
+  inspectChatHealth,
+  canHideWorkspace,
+  healthLabel,
+  type ChatHealth,
+} from './chat-health';
 import { sqlText } from './core';
 import { inspectDatabase, readKvText } from './db';
 import {
@@ -22,8 +28,13 @@ import type {
 export type StatisticsJob = Pick<
   TransferContext,
   'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
-> &
-  (
+> & {
+  /** Optional full source-data check, requested only by the filter/select action. */
+  deepCheck?: boolean;
+  /** Custom resource locations captured for this scan. */
+  plansDir?: string;
+  canvasesDir?: string;
+} & (
     | { kind: 'workspace-statistics'; workspaces: WorkspaceEntry[] }
     | {
         kind: 'chat-statistics';
@@ -40,6 +51,10 @@ export interface StatisticsUpdate {
   detail: string;
   /** Read failed rather than a measured zero. */
   failed?: boolean;
+  /** Confirmed complete, nonempty source data. */
+  eligible?: boolean;
+  /** Confirmed absence of readable chat history; view filtering only. */
+  hide?: boolean;
 }
 
 /** A storage id alone need not be unique across profiles. */
@@ -190,6 +205,9 @@ export async function runStatistics(
           };
 
     try {
+      let eligible: boolean | undefined;
+      let hide: boolean | undefined;
+
       const detail = await traceIO(
         'storageId' in row ? 'Count workspace chats' : 'Analyze chat metadata',
         fields,
@@ -208,10 +226,12 @@ export async function runStatistics(
               connOf(ctx, workspace.workspaceDbPath, true),
             );
 
+            let headers: ComposerHeader[];
+
             try {
               const { layout } = await inspectDatabase(local.conn);
 
-              const headers = await resolveComposers(
+              headers = await resolveComposers(
                 local.conn,
                 connOf(ctx, workspace.globalDbPath, true),
                 {
@@ -223,11 +243,74 @@ export async function runStatistics(
                   strictMetadata: true,
                 },
               );
-
-              return workspaceCounts(headers);
             } finally {
               await local.close();
             }
+
+            if (job.deepCheck) {
+              const health: ChatHealth[] = [];
+
+              for (const header of headers) {
+                signal.throwIfAborted();
+
+                const view = await openReadTransaction(
+                  connOf(ctx, workspace.globalDbPath, true),
+                );
+
+                try {
+                  const status = await traceIO(
+                    'Check chat transfer data',
+                    {
+                      path: workspace.globalDbPath,
+                      chatId: header.composerId,
+                      chatName: header.name,
+                    },
+                    () => inspectChatHealth(ctx, workspace, view.conn, header),
+                  );
+
+                  health.push(status);
+
+                  transferEvent({
+                    action: healthLabel[status],
+                    status: 'info',
+                    path: workspace.globalDbPath,
+                    chatId: header.composerId,
+                    chatName: header.name,
+                  });
+                } catch (error) {
+                  signal.throwIfAborted();
+                  failed++;
+                  health.push('unknown');
+
+                  transferEvent({
+                    action: 'Chat transfer check failed',
+                    status: 'failed',
+                    path: workspace.globalDbPath,
+                    chatId: header.composerId,
+                    chatName: header.name,
+                    errorCode:
+                      error instanceof Error && 'code' in error
+                        ? String(error.code)
+                        : 'CHECK_FAILED',
+                  });
+                } finally {
+                  await view.close();
+                }
+              }
+
+              hide = canHideWorkspace(health);
+
+              transferEvent({
+                action: hide
+                  ? 'Workspace has no readable chat history'
+                  : 'Keep workspace with readable or uncertain history',
+                status: 'info',
+                path: workspace.workspaceDbPath,
+                key,
+              });
+            }
+
+            return workspaceCounts(headers);
           }
 
           const view = await openReadTransaction(
@@ -263,7 +346,20 @@ export async function runStatistics(
                 code: 'CHAT_METADATA_INVALID',
               });
 
-            return chatStatistics(body as Record<string, unknown>);
+            const detail = chatStatistics(body as Record<string, unknown>);
+
+            if (!job.deepCheck) return detail;
+
+            const health = await inspectChatHealth(
+              ctx,
+              workspace,
+              view.conn,
+              row,
+            );
+
+            eligible = health === 'ready';
+
+            return `${detail} · ${healthLabel[health]}`;
           } finally {
             await view.close();
           }
@@ -271,7 +367,7 @@ export async function runStatistics(
       );
 
       signal.throwIfAborted();
-      update({ key, detail });
+      update({ key, detail, eligible, hide });
 
       transferEvent({
         action: `Statistics: ${detail}`,

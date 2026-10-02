@@ -2,7 +2,7 @@
 
 Cursor Chat Transit copies chat snapshots between workspace storage entries in a local Cursor profile. It does not synchronize live conversations or implement Cursor's chat runtime. Storage support is based on inspected schemas and observed record structures, not an official Cursor API.
 
-For setup, validation, packaging, and releases, see [Development](development.md). For user workflows and settings, see the [README](../README.md).
+For setup, validation, packaging, and releases, see [Development](development.md). For picker statistics, settings, and troubleshooting, see [Usage](usage.md).
 
 ## Components
 
@@ -138,7 +138,7 @@ ZIP extraction validates paths and entry metadata before installation. Resource 
 
 ## On-demand statistics
 
-Each picker has one analysis button. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
+Each picker has a metadata statistics button followed by a task-specific action. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
 
 `statistics-picker.ts` preserves filter text, selected IDs, active items, scroll position, and original order when replacing row details. Updates are coalesced on a 100 ms timer. Accepting or closing the picker cancels analysis immediately and waits for worker cleanup before the caller starts its next operation. Late results cannot update a disposed picker. A repeated click while stopping does not launch another worker.
 
@@ -183,3 +183,21 @@ The extension does not transfer the project tree, recreate unavailable server st
 - [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339#section-5.6): timestamp structure and an explicitly permitted space separator for readability.
 
 The extension's labels and behavior are product choices informed by these references, not a claim of Apple, Google, or Microsoft certification. The MIT license retains the inherited notice and the notice for subsequent Cursor Chat Transit work.
+
+## Checked selection and workspace filtering
+
+`chat-health.ts` reuses `readChatForExport()` with a metadata-only sink. Omitting the spill directory makes resource reading validate bytes without writing temporary resource files or an archive. Message bodies are processed one at a time; only IDs, types, and the bounded conversation index are retained. The source database is read through an owned read-only view.
+
+A chat passes source checks only when its supported conversation index references present message records, identities and message types agree, and the export reader reports no missing supported resources. Unsupported and ambiguous layouts are not automatically selected. Empty visible lists with leftover messages or nonempty state are unknown, not empty. Missing bodies with orphan messages are incomplete, not absent history. Referenced canvases without a resolvable canvas directory count as missing resources.
+
+A workspace is hideable only when every resolved chat is confirmed empty or has neither a body nor remaining messages. An error or unknown/incomplete chat keeps it visible. Filesystem project-path existence is not a deletion or filtering criterion. These are view decisions; no storage is removed. Filter state lasts only for the current picker and can be reversed without another scan.
+
+Filtering and bulk selection apply only after the worker finishes. Cancelled or failed runs do not apply partial changes. Per-row failures stay visible and are not selected. Checkbox state is compared with the state at the start of the scan; user changes win. Empty group separators are removed after filtering. Operations logs record both the checks and the action actually applied.
+
+The source-data result is time-bounded evidence, not a destination compatibility or continuation certificate. Actual export/import validation remains authoritative.
+
+## Icon assets
+
+`resources/marketplace.svg` is the editable source for the transparent 256 × 256 RGBA `marketplace.png`. The mark has no background rectangle. Its blue-to-teal stroke is sized for the Extensions list, while the activity-bar version uses the same geometry in `currentColor` at a thinner 24-pixel stroke weight. Import/export/diagnostic icons share a 1.5-pixel rounded stroke on a 24-pixel grid. Picker actions use native ThemeIcons.
+
+Rasterize the SVG with an SVG renderer that preserves alpha, such as resvg. Inspect the mark at 24, 48, and 128 pixels against dark, light, and selected-row backgrounds. Do not bake a particular editor theme into the PNG.

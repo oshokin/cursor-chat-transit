@@ -194,3 +194,206 @@ test(
     });
   },
 );
+
+/** Stable UUIDs exercise the same key-range validation as real Cursor chats. */
+function healthId(name: string): string {
+  const hex = createHash('sha256').update(name).digest('hex').slice(0, 32);
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+test(
+  'deep checks distinguish complete legacy history, empty chats, missing messages and lost bodies',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+
+    const bodies: Record<string, unknown> = {
+      [healthId('good')]: {
+        _v: 17,
+        isNAL: false,
+        conversationState: '~',
+        fullConversationHeadersOnly: [{ bubbleId: 'msg', type: 1 }],
+      },
+      [healthId('empty')]: {
+        _v: 10,
+        isNAL: false,
+        fullConversationHeadersOnly: [],
+      },
+      [healthId('broken')]: {
+        fullConversationHeadersOnly: [{ bubbleId: 'lost', type: 1 }],
+      },
+      [healthId('orphan')]: { fullConversationHeadersOnly: [] },
+    };
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `DELETE FROM cursorDiskKV; ${Object.entries(bodies)
+        .map(
+          ([id, body]) =>
+            `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))});`,
+        )
+        .join(
+          '\n',
+        )} INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('good')}:msg','{"bubbleId":"msg","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('orphan')}:msg','{"type":1,"text":"Keep history"}');`,
+    });
+
+    const before = await fs.readFile(workspace.globalDbPath);
+    const rows: StatisticsUpdate[] = [];
+
+    await runTransfer(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        deepCheck: true,
+        workspace,
+        chats: Object.keys(bodies).map((composerId) => ({ composerId })),
+      },
+      { onStatistics: (r) => rows.push(r) },
+    );
+
+    assert.equal(rows[0].eligible, true);
+    assert.match(rows[0].detail, /Legacy format/);
+    assert.equal(rows[1].eligible, false);
+    assert.equal(rows[2].eligible, false);
+    assert.match(rows[2].detail, /Incomplete/);
+    assert.equal(rows[3].eligible, false);
+    assert.match(rows[3].detail, /unknown/);
+    assert.deepEqual(await fs.readFile(workspace.globalDbPath), before);
+
+    assert.equal(
+      (await fs.readdir(workspace.storageRoot)).some((n) =>
+        /zip|staging|export/.test(n),
+      ),
+      false,
+    );
+  },
+);
+
+test(
+  'workspace cleanup keeps legacy, incomplete and unknown history; hides only empty or absent data',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES('composerData:${healthId('empty')}','{"fullConversationHeadersOnly":[]}'); INSERT INTO cursorDiskKV VALUES('composerData:${healthId('broken')}','{"fullConversationHeadersOnly":[{"bubbleId":"lost","type":1}]}');`,
+    });
+
+    const workspaces: WorkspaceEntry[] = [];
+
+    for (const id of ['empty', 'missing', 'broken']) {
+      const entry = {
+        ...workspace,
+        storageId: id,
+        workspaceDbPath: path.join(workspace.storageRoot, id + '.vscdb'),
+      };
+
+      await execSqlScript({
+        ...ctx,
+        database: entry.workspaceDbPath,
+        sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: healthId(id) }] }))});`,
+      });
+
+      workspaces.push(entry);
+    }
+
+    const rows: StatisticsUpdate[] = [];
+
+    await runStatistics(
+      { ...ctx, kind: 'workspace-statistics', deepCheck: true, workspaces },
+      new AbortController().signal,
+      (r) => rows.push(r),
+    );
+
+    assert.deepEqual(
+      rows.map((r) => r.hide),
+      [true, true, false],
+    );
+  },
+);
+
+test(
+  'deep selection excludes a chat with a missing image and rejects unknown state without hiding history',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const imageId = healthId('image');
+    const unknownId = healthId('future');
+
+    const body = {
+      _v: 17,
+      fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
+      conversationState: '~',
+    };
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `DELETE FROM cursorDiskKV;
+  INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + imageId)},${sqlText(JSON.stringify(body))});
+  INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + imageId + ':m')},${sqlText(JSON.stringify({ type: 1, images: [{ uuid: healthId('missing-image') }] }))});
+  INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + unknownId)},${sqlText(JSON.stringify({ ...body, _v: 99 }))});
+  INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + unknownId + ':m')},'{"type":1}');`,
+    });
+
+    const rows: StatisticsUpdate[] = [];
+
+    await runStatistics(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        deepCheck: true,
+        workspace,
+        chats: [{ composerId: imageId }, { composerId: unknownId }],
+      },
+      new AbortController().signal,
+      (r) => rows.push(r),
+    );
+
+    assert.equal(rows[0].eligible, false);
+    assert.match(rows[0].detail, /Incomplete/);
+    assert.equal(rows[1].failed, true);
+    assert.notEqual(rows[1].eligible, true);
+  },
+);
+
+test(
+  'a referenced canvas without a workspace canvas directory is incomplete',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const id = healthId('canvas');
+
+    const body = {
+      fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
+      canvas: { path: '/source/canvases/chart.canvas.tsx' },
+    };
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))}); INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + id + ':m')},'{"type":1}');`,
+    });
+
+    const rows: StatisticsUpdate[] = [];
+
+    await runStatistics(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        deepCheck: true,
+        workspace,
+        chats: [{ composerId: id }],
+      },
+      new AbortController().signal,
+      (r) => rows.push(r),
+    );
+
+    assert.equal(rows[0].eligible, false);
+    assert.match(rows[0].detail, /Incomplete/);
+  },
+);

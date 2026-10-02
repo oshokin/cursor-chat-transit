@@ -24,6 +24,17 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
       iconPath: new vscode.ThemeIcon('graph'),
       tooltip: options.buttonLabel,
     },
+    action: options.many ? 'select' : 'filter',
+    actionButton: {
+      iconPath: new vscode.ThemeIcon(options.many ? 'check-all' : 'filter'),
+      tooltip: options.many
+        ? 'Check all chats and select complete ones with messages (replaces selection)'
+        : 'Check chats and hide workspaces without readable history',
+    },
+    restoreButton: {
+      iconPath: new vscode.ThemeIcon('filter-filled'),
+      tooltip: 'Show all workspaces',
+    },
     cancelButton: {
       iconPath: new vscode.ThemeIcon('debug-stop'),
       tooltip: 'Stop analysis',
@@ -31,6 +42,7 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
     run: async (
       signal: AbortSignal,
       update: (row: StatisticsUpdate) => void,
+      deepCheck = false,
     ) => {
       const log = startOperationLog(
         options.operations,
@@ -40,10 +52,17 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
       try {
         const job = await options.job();
 
+        if (deepCheck)
+          log.fact(
+            options.many
+              ? 'Check source data before selecting complete chats with messages'
+              : 'Check workspace history before applying a view-only filter',
+          );
+
         signal.throwIfAborted();
 
         const result = await runTransfer<{ failed: number }>(
-          { ...job, ...transferSettings() },
+          { ...job, ...transferSettings(), deepCheck },
           {
             signal,
             onStatistics: update,
@@ -67,6 +86,7 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
         throw error;
       }
     },
+    onAction: (message) => options.operations.info(message),
     onError: () => undefined, // The operation log already records the failure; keep the picker open.
   });
 }

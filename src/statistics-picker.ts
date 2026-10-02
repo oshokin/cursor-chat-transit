@@ -11,11 +11,18 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   many?: boolean;
   analyzeButton: vscode.QuickInputButton;
   cancelButton: vscode.QuickInputButton;
+  /** Optional second action; filter for workspaces, checked selection for chats. */
+  actionButton?: vscode.QuickInputButton;
+  restoreButton?: vscode.QuickInputButton;
+  action?: 'filter' | 'select';
   run: (
     signal: AbortSignal,
     update: (row: StatisticsUpdate) => void,
+    deepCheck?: boolean,
   ) => Promise<{ failed: number }>;
   onError: (error: unknown) => void;
+  /** Record view actions after they are actually applied. */
+  onAction?: (message: string) => void;
 }): Promise<T[] | undefined> {
   const { picker, items } = options;
 
@@ -27,7 +34,12 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   picker.keepScrollPosition = true;
   picker.items = items;
   if (options.many) picker.selectedItems = items.filter((item) => item.picked);
-  picker.buttons = [options.analyzeButton];
+
+  picker.buttons = [
+    options.analyzeButton,
+    ...(options.actionButton ? [options.actionButton] : []),
+  ];
+
   const total = items.filter((item) => options.key(item) !== undefined).length;
   const details = new Map<string, string>();
   let closed = false;
@@ -35,6 +47,24 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   let running: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let selection: T[] | undefined;
+  let hidden = new Set<string>();
+  const updates = new Map<string, StatisticsUpdate>();
+
+  const selectionKey = () =>
+    JSON.stringify(picker.selectedItems.map(options.key).sort());
+
+  const buttons = () => {
+    picker.buttons = [
+      options.analyzeButton,
+      ...(options.actionButton
+        ? [
+            hidden.size && options.restoreButton
+              ? options.restoreButton
+              : options.actionButton,
+          ]
+        : []),
+    ];
+  };
 
   /** Restore current user selection and keyboard focus after replacing item objects. */
   const render = () => {
@@ -44,14 +74,30 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
     const selected = new Set(picker.selectedItems.map(options.key));
     const active = new Set(picker.activeItems.map(options.key));
 
-    const rows = items.map((item) => {
+    const visible = items.filter((item) => {
       const key = options.key(item);
-      const detail = key === undefined ? undefined : details.get(key);
 
-      return detail
-        ? { ...item, detail: [detail, item.detail].filter(Boolean).join(' · ') }
-        : item;
+      return key === undefined || !hidden.has(key);
     });
+
+    const rows = visible
+      .filter(
+        (item, index) =>
+          options.key(item) !== undefined ||
+          (index + 1 < visible.length &&
+            options.key(visible[index + 1]) !== undefined),
+      )
+      .map((item) => {
+        const key = options.key(item);
+        const detail = key === undefined ? undefined : details.get(key);
+
+        return detail
+          ? {
+              ...item,
+              detail: [detail, item.detail].filter(Boolean).join(' · '),
+            }
+          : item;
+      });
 
     picker.items = rows;
 
@@ -68,7 +114,7 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
 
   return new Promise((resolve) => {
     const subscriptions = [
-      picker.onDidTriggerButton(() => {
+      picker.onDidTriggerButton((button) => {
         if (running) {
           abort?.abort();
           picker.title = `${options.title} — Stopping analysis…`;
@@ -76,6 +122,25 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
           return;
         }
 
+        if (button === options.restoreButton && hidden.size) {
+          options.onAction?.(
+            `Show all workspaces; restored ${hidden.size} hidden entries`,
+          );
+
+          hidden.clear();
+          render();
+          buttons();
+          picker.title = options.title;
+
+          return;
+        }
+
+        const deepCheck =
+          !!options.actionButton && button === options.actionButton;
+
+        const selectedBefore = selectionKey();
+
+        updates.clear();
         abort = new AbortController();
         const signal = abort.signal;
         let completed = 0;
@@ -96,17 +161,62 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
         // Schedule after assigning running, including synchronous failures from run().
         running = Promise.resolve()
           .then(() =>
-            options.run(signal, (row) => {
-              if (closed || signal.aborted) return;
-              details.set(row.key, row.detail);
-              completed++;
-              picker.title = `${options.title} — Analyzing ${completed}/${total}`;
-              timer ??= setTimeout(render, 100);
-            }),
+            options.run(
+              signal,
+              (row) => {
+                if (closed || signal.aborted) return;
+                details.set(row.key, row.detail);
+                updates.set(row.key, row);
+                completed++;
+                picker.title = `${options.title} — Analyzing ${completed}/${total}`;
+                timer ??= setTimeout(render, 100);
+              },
+              deepCheck,
+            ),
           )
           .then((result) => {
-            if (!closed && !signal.aborted)
+            if (closed || signal.aborted) return;
+            render();
+
+            if (deepCheck && options.action === 'filter') {
+              hidden = new Set(
+                [...updates.values()]
+                  .filter((row) => row.hide === true && !row.failed)
+                  .map((row) => row.key),
+              );
+
+              render();
+
+              options.onAction?.(
+                `Workspace filter applied; hidden ${hidden.size} entries; no storage deleted`,
+              );
+
+              picker.title = `${options.title} — ${hidden.size} hidden${result.failed ? '; unreadable entries kept' : ''}`;
+            } else if (deepCheck && options.action === 'select') {
+              if (selectionKey() !== selectedBefore) {
+                picker.title = `${options.title} — Checks finished; your selection was kept`;
+
+                return;
+              }
+
+              const ids = new Set(
+                [...updates.values()]
+                  .filter((row) => row.eligible === true && !row.failed)
+                  .map((row) => row.key),
+              );
+
+              picker.selectedItems = picker.items.filter((item) =>
+                ids.has(options.key(item) || ''),
+              );
+
+              options.onAction?.(
+                `Selected ${picker.selectedItems.length} chats with messages that passed transfer checks`,
+              );
+
+              picker.title = `${options.title} — ${picker.selectedItems.length} checked chats selected`;
+            } else {
               picker.title = `${options.title} — ${result.failed ? 'Some statistics unavailable' : 'Statistics ready'}`;
+            }
           })
           .catch((error: unknown) => {
             if (signal.aborted || closed) return;
@@ -119,7 +229,7 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
                 picker.title = `${options.title} — Analysis stopped`;
               render();
               picker.busy = false;
-              picker.buttons = [options.analyzeButton];
+              buttons();
             }
 
             running = undefined;
