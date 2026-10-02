@@ -1,4 +1,4 @@
-name: ci
+name: Check and release
 on:
   push:
     branches: [master]

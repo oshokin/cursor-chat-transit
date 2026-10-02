@@ -99,7 +99,7 @@ Set the required status check name to **CI required** on `master` so a skipped d
 
 ### First release and recovery
 
-For the first release, push the reviewed implementation to `master`, open **GitHub → Actions → ci → Run workflow**, select `master`, and enable `publish_release`. Keep it disabled for a checks-only run. The recorded version is published only after the validation jobs and package job succeed. No local release preparation is needed for the initial `1.0.0`.
+For the first release, push the reviewed implementation to `master`, open **GitHub → Actions → Check and release → Run workflow**, select `master`, and enable `publish_release`. Keep it disabled for a checks-only run. The recorded version is published only after the validation jobs and package job succeed. No local release preparation is needed for the initial `1.0.0`.
 
 | Situation                                                         | Developer action                                                                                             |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
