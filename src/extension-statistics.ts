@@ -13,12 +13,15 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
   title: string;
   placeholder: string;
   many?: boolean;
+  /** Retain the current workspace when building the filtered list. */
+  keepVisible?: (item: T) => boolean;
   buttonLabel: string;
   operations: TransitLog;
   job: () => Promise<StatisticsJob>;
 }): Promise<T[] | undefined> {
   return showStatisticsPicker({
     ...options,
+    autoFilter: !options.many,
     picker: vscode.window.createQuickPick<T>(),
     analyzeButton: {
       iconPath: new vscode.ThemeIcon('graph'),
@@ -32,7 +35,7 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
         : 'Check chats and hide workspaces without readable history',
     },
     restoreButton: {
-      iconPath: new vscode.ThemeIcon('filter-filled'),
+      iconPath: new vscode.ThemeIcon('eye'),
       tooltip: 'Show all workspaces',
     },
     cancelButton: {

@@ -3,9 +3,9 @@ import { readSessionKv } from './kv-session';
 import { writePreparedBatches } from './import-batches';
 import { cleanUnpublishedBubbles } from './import-cleanup';
 import { inChat, transferEvent, traceIO } from './transfer-events';
-import { readFile } from './trace-fs';
+import { readFile, writeFile } from './trace-fs';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { openBundle } from './bundle-reader';
@@ -257,7 +257,7 @@ CREATE TABLE dep (
     let durable = false;
 
     try {
-      for (const ordinal of plan.create) {
+      for (const [index, ordinal] of plan.create.entries()) {
         ctx.signal?.throwIfAborted();
 
         const row = await oneChat(work, ordinal);
@@ -280,7 +280,7 @@ CREATE TABLE dep (
         const chatName =
           typeof header.name === 'string' ? header.name : row.sourceId;
 
-        const chatIndex = written.length + 1;
+        const chatIndex = index + 1;
 
         const chatCtx = {
           ...ctx,
@@ -2031,8 +2031,8 @@ async function assertKvCompatible(opts: {
 
   const repairs: Array<{
     key: string;
-    previous: Buffer;
-    decoded: Buffer;
+    previousSha256: string;
+    incoming: { storageClass: string; sha256: string; byteLength: number };
   }> = [];
 
   const session = await SqliteSession.open({
@@ -2067,8 +2067,8 @@ async function assertKvCompatible(opts: {
           if (decoded) {
             repairs.push({
               key: row.id,
-              previous: existing.bytes,
-              decoded,
+              previousSha256: facts.existingSha256,
+              incoming,
             });
 
             return;
@@ -2098,7 +2098,44 @@ async function assertKvCompatible(opts: {
 
   for (const repair of repairs) {
     opts.ctx.signal?.throwIfAborted();
-    await restoreHexEncodedBlob(opts.pair.connGl, repair);
+
+    // Retain only metadata during preflight. Load one repair body at a time.
+    const reader = await SqliteSession.open({
+      ...opts.pair.connGl,
+      readOnly: true,
+    });
+
+    let existing;
+
+    try {
+      existing = await readSessionKv(reader, repair.key);
+    } finally {
+      await reader.close();
+    }
+
+    if (existing && !classifyKvConflict(existing, repair.incoming)) continue;
+
+    const decoded =
+      existing && sha256Hex(existing.bytes) === repair.previousSha256
+        ? hexTextOfAddressedBlob(existing, repair.incoming, repair.key)
+        : null;
+
+    if (!existing || !decoded) {
+      const err = new TransferError(
+        'A required chat resource changed before repair.',
+      );
+
+      err.code = 'RESOURCE_CONFLICT';
+      err.detail = `phase=preflight reason=content key=${repair.key}`;
+
+      throw err;
+    }
+
+    await restoreHexEncodedBlob(opts.pair.connGl, {
+      key: repair.key,
+      previous: existing.bytes,
+      decoded,
+    });
   }
 }
 

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { acquireLock, type LockHandle } from './lock';
 import { startOperationLog } from './operation-log';
 import { ProgressModel } from './progress-model';
+import { humanDuration } from './duration';
 import { phaseMessage, type TransferKind } from './operation-ui';
 import { TransferSidebar, type SidebarState } from './sidebar-provider';
 import type {
@@ -65,12 +66,13 @@ export function attachPhaseProgress(
   log: ReturnType<typeof startOperationLog>,
   kind: TransferKind,
 ): (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void {
-  const model = new ProgressModel(kind);
+  const model = new ProgressModel(kind, log.startedAt);
 
   if (runtime.progressTimer) clearInterval(runtime.progressTimer);
 
   runtime.progressTimer = setInterval(() => {
-    if (runtime.busy) setUi(model.snapshot());
+    if (runtime.busy && runtime.uiState.status === 'running')
+      setUi(model.snapshot());
   }, 1000);
 
   return (phase, metrics = {}) => {
@@ -81,6 +83,21 @@ export function attachPhaseProgress(
     vscodeProgress.report({ message });
     setUi({ statusDetail: message, ...model.snapshot() });
   };
+}
+
+/** Publish one frozen total from the log clock and remove obsolete stage details. */
+export function finishPhaseProgress(
+  log: ReturnType<typeof startOperationLog>,
+): void {
+  clearInterval(runtime.progressTimer);
+  runtime.progressTimer = undefined;
+
+  setUi({
+    timingLabel: `Total ${humanDuration(log.elapsedMs())}`,
+    stageLabel: '',
+    currentItem: '',
+    progress: undefined,
+  });
 }
 
 /** Push sidebar state and refresh the view if it exists. */
@@ -159,6 +176,8 @@ export async function withLock<T>(
       busy: false,
       canCancel: false,
       progress: undefined,
+      stageLabel: '',
+      currentItem: '',
       timingLabel:
         runtime.uiState.timingLabel?.split('\n')[0]?.split(' · ')[0] || '',
     });

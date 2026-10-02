@@ -22,6 +22,8 @@ function fixture(
     update: (row: StatisticsUpdate) => void,
   ) => Promise<{ failed: number }>,
   action?: 'filter' | 'select',
+  autoFilter = false,
+  keepVisible?: (item: Row) => boolean,
 ) {
   let items: readonly Row[] = [];
 
@@ -81,6 +83,8 @@ function fixture(
     placeholder: 'Find',
     many: action !== 'filter',
     action,
+    autoFilter,
+    keepVisible,
     actionButton: action
       ? { iconPath: { id: 'filter' }, tooltip: 'Apply' }
       : undefined,
@@ -341,4 +345,151 @@ test('manual checkbox changes during a check win over late automatic selection',
   assert.match(f.picker.title, /selection was kept/);
   f.picker.hide();
   await f.done;
+});
+
+test('opening workspace picker builds one filtered list and Show all reveals empty import targets', async () => {
+  let finish!: (r: { failed: number }) => void;
+  let calls = 0;
+
+  const f = fixture(
+    async (_signal, update) => {
+      calls++;
+      update({ key: 'a', detail: 'Empty', hide: true });
+      update({ key: 'b', detail: 'Unreadable', failed: true, hide: true });
+
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    },
+    'filter',
+    true,
+  );
+
+  assert.equal(f.picker.busy, true);
+  assert.equal(f.picker.items.length, 0);
+  assert.equal(f.picker.enabled, true);
+  await tick();
+  assert.match(f.picker.title, /Preparing workspace list/);
+  finish({ failed: 1 });
+  await tick();
+
+  assert.deepEqual(
+    f.picker.items.map((r) => r.id),
+    ['b'],
+  );
+
+  assert.equal(f.picker.value, 'needle');
+
+  assert.deepEqual(
+    f.picker.buttons.map((b) => b.tooltip),
+    ['Analyze', 'Show all'],
+  );
+
+  f.fire('button', f.picker.buttons[1]);
+
+  assert.deepEqual(
+    f.picker.items.map((r) => r.id),
+    ['a', 'b'],
+  );
+
+  assert.deepEqual(
+    f.picker.buttons.map((b) => b.tooltip),
+    ['Analyze'],
+  );
+
+  assert.equal(calls, 1);
+  f.picker.hide();
+  await f.done;
+});
+
+test('automatic filter keeps the current workspace and permits showing an entirely empty list', async () => {
+  for (const protect of [true, false]) {
+    const f = fixture(
+      async (_signal, update) => {
+        update({ key: 'a', detail: 'Empty', hide: true });
+        update({ key: 'b', detail: 'Empty', hide: true });
+
+        return { failed: 0 };
+      },
+      'filter',
+      true,
+      (item) => protect && item.id === 'a',
+    );
+
+    await tick();
+
+    assert.deepEqual(
+      f.picker.items.map((r) => r.id),
+      protect ? ['a'] : [],
+    );
+
+    f.fire('button', f.picker.buttons[1]);
+    assert.equal(f.picker.items.length, 2);
+    f.picker.hide();
+    await f.done;
+  }
+});
+
+test('automatic filter failure and cancellation expose all entries without partial hiding', async () => {
+  for (const fail of [true, false]) {
+    let finish!: () => void;
+
+    const f = fixture(
+      async (_signal, update) => {
+        update({ key: 'a', detail: 'Empty', hide: true });
+
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+
+        if (fail) throw new Error('Read failed');
+
+        return { failed: 0 };
+      },
+      'filter',
+      true,
+    );
+
+    await tick();
+    if (!fail) f.fire('button');
+    finish();
+    await tick();
+    assert.equal(f.picker.items.length, 2);
+    assert.equal(f.picker.busy, false);
+    f.picker.hide();
+    await f.done;
+  }
+});
+
+test('closing during automatic preparation cancels and waits for worker cleanup', async () => {
+  let signal!: AbortSignal;
+  let finish!: () => void;
+
+  const f = fixture(
+    async (s) => {
+      signal = s;
+
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+
+      return { failed: 0 };
+    },
+    'filter',
+    true,
+  );
+
+  await tick();
+  f.picker.hide();
+  assert.equal(signal.aborted, true);
+  let resolved = false;
+
+  void f.done.then(() => {
+    resolved = true;
+  });
+
+  await tick();
+  assert.equal(resolved, false);
+  finish();
+  assert.equal(await f.done, undefined);
 });

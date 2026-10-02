@@ -22,14 +22,15 @@ Initial release of Cursor Chat Transit.
 - Show user-message counts and detected legacy or Agent formats for individual chats.
 - Run statistics in a cancellable background process while keeping search, selection, and navigation available.
 
-- Filter workspaces without readable chat history using lightweight presence checks and short read views, with a one-click action to show every workspace again.
+- Prepare the workspace list automatically using lightweight history checks and short read views; keep the current workspace visible and provide a one-click action to show empty destinations.
 - Select nonempty chats that pass source-data checks for messages and supported resources; preserve manual selection changes during analysis.
 - Present a transparent blue-to-teal extension mark and consistent monochrome command icons.
 
 ### Operations and diagnostics
 
-- Show transfer stages, elapsed time, and remaining-time estimates for measurable work.
-- Write timestamped operation logs with concrete file paths, chat identity, byte counts, durations, and error codes.
+- Show transfer stages, elapsed time, and remaining-time estimates for measurable work; retain a final total synchronized with the operation log.
+- Keep recent results compact with expandable per-chat details.
+- Write timestamped operation logs with concrete file paths, chat identity, byte counts, exact durations with human-readable equivalents, and error codes.
 - Provide a copyable diagnostic report and a guarded action for clearing stale transfer locks.
 - Offer Cursor's normal quit action after an import adds chats.
 - Read exports without copying the full database; prepare imports outside Cursor's database and write bounded batches with journaled recovery and verification.

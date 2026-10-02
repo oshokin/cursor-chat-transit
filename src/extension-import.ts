@@ -10,6 +10,7 @@ import {
 } from './extension-settings';
 import {
   attachPhaseProgress,
+  finishPhaseProgress,
   linkedSignal,
   runtime,
   setSource,
@@ -250,5 +251,7 @@ export async function doImport(opts: {
     log.finish(code === 'PARTIAL' ? 'partial' : 'failed', code, err);
 
     throw err;
+  } finally {
+    finishPhaseProgress(log);
   }
 }

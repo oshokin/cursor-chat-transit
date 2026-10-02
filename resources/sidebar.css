@@ -20,7 +20,8 @@ button {
   cursor: pointer;
   color: inherit;
 }
-button:focus-visible {
+button:focus-visible,
+summary:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: 3px;
 }
@@ -180,6 +181,15 @@ h2 {
 .status-items li {
   overflow-wrap: anywhere;
   padding: 2px 0;
+}
+.activity-details {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.activity-details summary {
+  cursor: pointer;
+  color: var(--vscode-textLink-foreground);
+  overflow-wrap: anywhere;
 }
 .status-actions {
   display: flex;

@@ -165,3 +165,27 @@ test('timestamp has an unambiguous local numeric offset, including fractional zo
     else process.env.TZ = previous;
   }
 });
+
+test('duration fields retain exact milliseconds and human units without changing paths', () => {
+  const { lines, channel } = sink();
+  let now = 100;
+  const log = startOperationLog(channel, 'import', () => now);
+
+  log.event({
+    action: 'Read file',
+    status: 'completed',
+    elapsedMs: 125,
+    timeoutMs: 600000,
+    path: '/tmp/elapsedMs=4000',
+  });
+
+  assert.match(lines.at(-1)!, /elapsedMs=125 \(125 ms\)/);
+  assert.match(lines.at(-1)!, /timeoutMs=600000 \(10m 0s\)/);
+  assert.match(lines.at(-1)!, /path="\/tmp\/elapsedMs=4000"/);
+  now += 87682;
+  log.finish('completed');
+  assert.match(lines.at(-1)!, /elapsedMs=87682 \(1m 27s\)/);
+  assert.equal(log.elapsedMs(), 87682);
+  now += 9000;
+  assert.equal(log.elapsedMs(), 87682);
+});

@@ -33,6 +33,9 @@ const STATUSES = new Set([
   'cancelled',
 ]);
 
+/** Keep the user's disclosure choice through progress and visibility refreshes. */
+let previousItems = '';
+
 /** Apply small host state using textContent; never interpret labels as HTML. */
 window.addEventListener('message', (event: MessageEvent<unknown>) => {
   const message = event.data;
@@ -71,7 +74,24 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
 
   if (list) {
     list.replaceChildren();
-    const items = Array.isArray(s.statusItems) ? s.statusItems : [];
+
+    const items = Array.isArray(s.statusItems)
+      ? s.statusItems.filter(
+          (item): item is string => typeof item === 'string' && item.length > 0,
+        )
+      : [];
+
+    const details = document.getElementById(
+      'activity-details',
+    ) as HTMLDetailsElement;
+
+    const summary = document.getElementById('activity-summary');
+    const identity = JSON.stringify(items);
+
+    details.hidden = items.length === 0;
+    if (identity !== previousItems) details.open = false;
+    previousItems = identity;
+    if (summary) summary.textContent = `Chat details (${items.length})`;
 
     list.hidden = items.length === 0;
 

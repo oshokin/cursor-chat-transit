@@ -15,6 +15,7 @@ import {
 } from './extension-settings';
 import {
   attachPhaseProgress,
+  finishPhaseProgress,
   linkedSignal,
   runtime,
   setSource,
@@ -356,5 +357,7 @@ export async function doExport(opts: {
     log.finish('failed', codeOf(err), err);
 
     throw err;
+  } finally {
+    finishPhaseProgress(log);
   }
 }

@@ -35,9 +35,9 @@ Analysis does not modify chats, convert formats, or read the entire conversation
 
 ### Filter workspaces and select complete chats
 
-The picker toolbar runs left to right: **Statistics**, then **Filter** (workspaces) or **Select checked chats** (chats). During a scan, **Stop analysis** replaces those actions.
+The workspace picker prepares its filtered list automatically when opened. The title shows **Preparing workspace list…** with a native busy indicator; typing and cancellation remain available. The toolbar offers **Statistics** and, when entries are hidden, **Show all workspaces**. The chat picker offers **Statistics**, then **Select checked chats**. During a scan, **Stop analysis** replaces these actions.
 
-In the workspace picker, **Check chats and hide workspaces without readable history** examines the listed chats and hides workspaces that have no chats, only confirmed empty chats, or only missing chat bodies with no remaining messages. This is a temporary view filter: it never deletes workspace folders, Cursor databases, or chat records. The same button becomes **Show all workspaces**. Reopening the picker restores the full list.
+Automatic workspace preparation hides entries that have no chats, only confirmed empty chats, or only missing chat bodies with no remaining messages. The current workspace stays visible, including when empty. This is a temporary view filter: it never deletes workspace folders, Cursor databases, or chat records. **Show all workspaces** restores hidden entries without another scan, including empty destinations for import. Reopening the picker performs a fresh check. If preparation fails or is stopped, the full list remains available; partial filter results are not applied.
 
 A missing project directory does not mean its stored chats are gone. Workspaces with incomplete data, unsupported formats, unknown state, or read errors remain visible. Legacy chats remain available when their history can be transferred.
 
@@ -137,3 +137,11 @@ File actions include concrete paths, chat identity when available, byte counts w
 | SQLite reports a lock                 | Stop the operation and inspect the log; clearing an extension lock does not unlock SQLite |
 
 Do not delete Cursor's `state.vscdb`, `-wal`, or `-shm` files to clear an extension lock. When [reporting a problem](https://github.com/oshokin/cursor-chat-transit/issues), include the extension version, Cursor version, operating system, and a redacted diagnostic report. Do not attach private chat databases or exports to a public issue.
+
+## Activity and duration
+
+Recent activity keeps the result, total duration, and available actions visible. **Chat details (N)** expands the per-chat results; it starts collapsed for each new result. Opening the details does not hide the result or the operation-log action.
+
+Elapsed time and the final **Total** use the same monotonic clock as the operation log, from the start of the command through its terminal result. This includes time spent choosing files and chats. The final value is frozen for successful, unchanged, incomplete, cancelled, and failed operations. Stage labels, the current item, and stage estimates are removed at completion.
+
+Duration fields retain exact milliseconds and add a compact human-readable value, for example `elapsedMs=87682 (1m 27s)` or `timeoutMs=600000 (10m 0s)`. Subsecond durations use milliseconds. Timestamps retain their existing local-time format and explicit UTC offset.

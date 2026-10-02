@@ -345,3 +345,52 @@ test('showFail writes NEEDS_ATTENTION target facts to the operation log', () => 
     'The previous import needs checking. No new copies were created.',
   );
 });
+
+test('sidebar and operation log share the start and frozen total for every terminal outcome', () => {
+  const { startOperationLog } =
+    require('../src/operation-log') as typeof import('../src/operation-log');
+
+  const { asTransitLog } =
+    require('../src/output-ui') as typeof import('../src/output-ui');
+
+  for (const outcome of [
+    'completed',
+    'incomplete',
+    'cancelled',
+    'failed',
+    'partial',
+  ] as const) {
+    const lines: string[] = [];
+    let now = performance.now() - 14000;
+    const start = now;
+
+    const log = startOperationLog(
+      asTransitLog({
+        appendLine: (line) => lines.push(line),
+        show() {},
+        dispose() {},
+      }),
+      'import',
+      () => now,
+    );
+
+    state.runtime.busy = true;
+    state.setUi({ status: 'running' });
+    const phase = state.attachPhaseProgress({ report() {} }, log, 'import');
+
+    phase('validate', { chatName: 'Last chat' });
+    assert.match(state.runtime.uiState.timingLabel!, /Elapsed 0m 14s/);
+    now = start + 87682;
+    log.finish(outcome);
+    state.finishPhaseProgress(log);
+    assert.equal(state.runtime.uiState.timingLabel, 'Total 1m 27s');
+    assert.match(lines.at(-1)!, /elapsedMs=87682 \(1m 27s\)/);
+    assert.equal(state.runtime.uiState.stageLabel, '');
+    assert.equal(state.runtime.uiState.currentItem, '');
+    assert.equal(state.runtime.progressTimer, undefined);
+    now += 10000;
+    state.finishPhaseProgress(log);
+    assert.equal(state.runtime.uiState.timingLabel, 'Total 1m 27s');
+    state.runtime.busy = false;
+  }
+});

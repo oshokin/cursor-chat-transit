@@ -130,6 +130,7 @@ export async function pickWorkspace(
       'entry' in item
         ? workspaceStatisticsKey((item as { entry: WorkspaceEntry }).entry)
         : undefined,
+    keepVisible: (item) => 'isCurrent' in item && item.isCurrent === true,
     buttonLabel: 'Count chats in each workspace',
     operations: analysis.operations,
     job: async () => ({

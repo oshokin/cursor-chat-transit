@@ -574,6 +574,15 @@ test(
     });
 
     assert.equal(stored.trim(), `blob ${bytes.toString('hex').toUpperCase()}`);
+
+    const repeated = await transfer.importFromObject(
+      ctx,
+      exported,
+      target.workspace,
+    );
+
+    assert.equal(repeated.imported, 0);
+    assert.equal(repeated.alreadyImported, 1);
   },
 );
 
@@ -656,7 +665,21 @@ test(
 
     await transfer.exportToFile(ctx, source.workspace, dest);
 
-    const first = await transfer.importFromBundle(ctx, dest, target.workspace);
+    const attempted: number[] = [];
+
+    const first = await transfer.importFromBundle(
+      {
+        ...ctx,
+        onPhase(_phase, metrics) {
+          if (metrics?.chatIndex && attempted.at(-1) !== metrics.chatIndex)
+            attempted.push(metrics.chatIndex);
+        },
+      },
+      dest,
+      target.workspace,
+    );
+
+    assert.deepEqual(attempted, [1, 2, 3]);
 
     const notice = formatImportNotice(first);
 
@@ -1534,3 +1557,89 @@ test(
 );
 
 import { TransferError } from '../src/types';
+
+test(
+  'hex repair preserves a row changed after preflight or immediately before its transaction',
+  { skip },
+  async (t) => {
+    for (const moment of ['after-preflight', 'before-update']) {
+      const { root, ctx, source, target } = await fixture(t, moment);
+
+      await seedChat(source.gl, source.ws, { state, blob: true });
+
+      await sql.execSqlScript({
+        ...target.gl,
+        sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(blobKey)}, ${sqlText(bytes.toString('hex'))});`,
+      });
+
+      const dest = path.join(root, 'repair-race.zip');
+
+      await transfer.exportToFile(ctx, source.workspace, dest);
+      let changed = false;
+
+      const mutate = () => {
+        if (changed) return;
+        changed = true;
+
+        execFileSync(executable as string, [
+          target.workspace.globalDbPath,
+          `UPDATE cursorDiskKV SET value = 'different' WHERE key = ${sqlText(blobKey)};`,
+        ]);
+      };
+
+      const result = await observeTransfer(
+        {
+          event(event) {
+            if (
+              moment === 'before-update' &&
+              event.action === 'Write file' &&
+              event.status === 'completed' &&
+              event.path?.endsWith('/decoded.bin')
+            )
+              mutate();
+          },
+        },
+        () =>
+          transfer.importFromBundle(
+            {
+              ...ctx,
+              onPhase(_phase, metrics) {
+                if (
+                  moment === 'after-preflight' &&
+                  metrics?.scope === 'assertKvCompatible' &&
+                  metrics.processed === metrics.total
+                )
+                  mutate();
+              },
+            },
+            dest,
+            target.workspace,
+          ),
+      );
+
+      assert.equal(changed, true, moment);
+      assert.equal(result.imported, 0, moment);
+      assert.equal(result.skipped, 1, moment);
+
+      assert.equal(
+        (
+          await sql.execSql({
+            ...target.gl,
+            sql: `SELECT typeof(value) || ':' || value FROM cursorDiskKV WHERE key = ${sqlText(blobKey)};`,
+          })
+        ).trim(),
+        'text:different',
+      );
+
+      assert.equal(
+        (
+          await sql.execSql({
+            ...target.gl,
+            sql: "SELECT count(*) FROM cursorDiskKV WHERE key LIKE 'composerData:%';",
+          })
+        ).trim(),
+        '0',
+      );
+    }
+  },
+);

@@ -138,7 +138,7 @@ ZIP extraction validates paths and entry metadata before installation. Resource 
 
 ## On-demand statistics
 
-Each picker has a metadata statistics button followed by a task-specific action. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
+The workspace picker automatically checks history before publishing its initial list; the current workspace is retained and hidden entries can be restored without another scan. Each picker also has a metadata statistics button; the chat picker adds a checked-selection action. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
 
 `statistics-picker.ts` preserves filter text, selected IDs, active items, scroll position, and original order when replacing row details. Updates are coalesced on a 100 ms timer. Accepting or closing the picker cancels analysis immediately and waits for worker cleanup before the caller starts its next operation. Late results cannot update a disposed picker. A repeated click while stopping does not launch another worker.
 
@@ -205,3 +205,11 @@ Rasterize the SVG with an SVG renderer that preserves alpha, such as resvg. Insp
 ## Bounded file concurrency
 
 Inventory checksums and ZIP source metadata use at most `min(4, os.availableParallelism())` independent reads. Results are consumed in input order. Every started task settles before failure escapes or staging cleanup starts. No unbounded `Promise.all`, cross-chat write parallelism, database-mode change, or persistent payload cache is introduced. Import validation and post-write verification remain mandatory. See [performance measurements and cleanup design](performance-and-cleanup.md).
+
+## Addressed blob repair
+
+Import can repair a narrowly defined representation error: an existing SQLite TEXT cell contains the hexadecimal spelling of the incoming BLOB. Repair requires valid hex, matching decoded length, and a SHA-256 matching both the incoming checksum and the `agentKv:blob:` address. Other storage-class or content conflicts remain conflicts.
+
+Preflight checks every resource before applying repairs. Its repair queue holds identifiers and comparison metadata, not resource bodies. Each repair rereads one bounded value, checks it against the preflight hash, and uses a short transaction to update only the exact TEXT bytes observed. The stored BLOB is verified before commit. A changed row is preserved. This normalization can remain committed if subsequent chat preparation fails; it is not an all-or-nothing chat rollback.
+
+A preflight resource conflict skips only that chat. Write-time conflicts and infrastructure failures stop the operation. Repeat imports reuse successful receipts. Attempt numbers include skipped chats.

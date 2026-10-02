@@ -146,7 +146,7 @@ export async function execSqlScript(
 export function busyTimeoutCommand(value = 5000): string {
   if (!Number.isInteger(value) || value < 0 || value > 30000) {
     throw new TypeError(
-      'SQLite busy timeout must be an integer from 0 to 30000 ms',
+      'SQLite busy timeout must be an integer from 0 ms (0 ms) to 30000 ms (30s)',
     );
   }
 

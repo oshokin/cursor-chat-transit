@@ -1,4 +1,5 @@
 import { formatLogLine } from './log-format';
+import { durationField } from './duration';
 import type { TransferEvent } from './transfer-events';
 import { randomUUID } from 'node:crypto';
 import type { TransitLog } from './output-ui';
@@ -12,9 +13,14 @@ type OperationKind =
 type Result = 'completed' | 'incomplete' | 'cancelled' | 'failed' | 'partial';
 
 /** Log bounded structured operation facts, never SQL, payloads, prompts, or raw stderr. */
-export function startOperationLog(channel: TransitLog, kind: OperationKind) {
+export function startOperationLog(
+  channel: TransitLog,
+  kind: OperationKind,
+  now = () => performance.now(),
+) {
   const id = randomUUID().slice(0, 8);
-  const started = performance.now();
+  const started = now();
+  let finalElapsed: number | undefined;
   let finished = false;
   let lastPhaseLog = '';
   let lastPhaseTime = -Infinity;
@@ -37,6 +43,10 @@ export function startOperationLog(channel: TransitLog, kind: OperationKind) {
 
   return {
     id,
+    /** Shared monotonic origin for the log and sidebar, including selection time. */
+    startedAt: started,
+    /** Final duration is frozen at finish, including no-op, failed and cancelled runs. */
+    elapsedMs: () => finalElapsed ?? Math.max(0, Math.round(now() - started)),
     /** Concrete file/chat action with duration and byte units; no payloads. */
     event(event: TransferEvent) {
       if (finished) return;
@@ -49,7 +59,10 @@ export function startOperationLog(channel: TransitLog, kind: OperationKind) {
         .map(([key, value]) =>
           key === 'bytes' && typeof value === 'number'
             ? `bytes=${value} (${humanBytes(value)})`
-            : `${key}=${typeof value === 'string' ? JSON.stringify(clip(value, 4096)) : value}`,
+            : (key === 'elapsedMs' || key === 'timeoutMs') &&
+                typeof value === 'number'
+              ? durationField(key, value)
+              : `${key}=${typeof value === 'string' ? JSON.stringify(clip(value, 4096)) : value}`,
         );
 
       line(
@@ -146,6 +159,7 @@ export function startOperationLog(channel: TransitLog, kind: OperationKind) {
     finish(result: Result, errorCode?: string, err?: unknown) {
       if (finished) return;
       finished = true;
+      finalElapsed = Math.max(0, Math.round(now() - started));
 
       const code =
         errorCode && /^[A-Z0-9_]{1,40}$/.test(errorCode)
@@ -157,7 +171,7 @@ export function startOperationLog(channel: TransitLog, kind: OperationKind) {
           ? ` message=${JSON.stringify(clip(err.message, 240))}`
           : '';
 
-      const text = `${kind} ${result} elapsedMs=${Math.round(performance.now() - started)}${code}${reason}`;
+      const text = `${kind} ${result} ${durationField('elapsedMs', finalElapsed)}${code}${reason}`;
 
       if (result === 'failed' || result === 'partial') line('ERROR', text);
       else if (result === 'incomplete') line('WARN', text);

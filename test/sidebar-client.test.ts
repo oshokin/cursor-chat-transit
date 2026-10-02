@@ -25,6 +25,8 @@ assert.equal(compiled.status, 0);
 type FakeEl = {
   /** Whether the node is hidden. */
   hidden: boolean;
+  /** Native disclosure state. */
+  open?: boolean;
   /** Disabled state for buttons. */
   disabled?: boolean;
   /** `data-action` mirror. */
@@ -351,4 +353,31 @@ test('terminal results hide progress even before lock cleanup finishes', () => {
     assert.equal(el('progress').hidden, true, status);
     assert.equal(el('progress').classes.has('is-indeterminate'), false, status);
   }
+});
+
+test('chat details collapse by default, preserve disclosure on refresh, and reset for a new result', () => {
+  const { receive, el } = fakeDom();
+
+  const s = {
+    status: 'completed',
+    statusTitle: 'Already imported',
+    timingLabel: 'Total 1m 27s',
+    statusItems: ['<b>plain text</b>', 'Second chat'],
+  };
+
+  send(receive, s);
+  assert.equal(el('activity-details').hidden, false);
+  assert.equal(el('activity-details').open, false);
+  assert.equal(el('activity-summary').textContent, 'Chat details (2)');
+  assert.equal(el('status-title').textContent, 'Already imported');
+  assert.equal(el('timing-label').textContent, 'Total 1m 27s');
+  el('activity-details').open = true;
+  send(receive, s);
+  assert.equal(el('activity-details').open, true);
+  send(receive, { ...s, status: 'running', statusItems: [] });
+  assert.equal(el('activity-details').hidden, true);
+  send(receive, s);
+  assert.equal(el('activity-details').open, false);
+  send(receive, { ...s, statusItems: ['', null, 3] });
+  assert.equal(el('activity-details').hidden, true);
 });
