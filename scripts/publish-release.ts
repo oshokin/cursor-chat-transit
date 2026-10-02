@@ -107,7 +107,7 @@ async function send(
     response.status >= 500
   ) {
     throw new Error(
-      `GitHub API ${response.status} for ${method} ${url}. Not treating this as a missing release.`,
+      `GitHub API ${response.status} for ${method} ${url}. Not treating this as a missing release. ${response.body.toString('utf8').trim().slice(0, 300)}`,
     );
   }
 
@@ -350,8 +350,16 @@ async function ensureDraft(
 
     if (created.status !== 201) {
       writeError = new Error(
-        `Creating release ${tag} returned ${created.status}.`,
+        `Creating release ${tag} returned ${created.status}. ${apiError(created)}`,
       );
+    } else {
+      const createdId = jsonBody<{ id?: unknown }>(created, `create ${tag}`).id;
+
+      if (typeof createdId !== 'number') {
+        throw new Error(`Creating release ${tag} returned 201 without an id.`);
+      }
+
+      return readRelease(client, input.repository, createdId);
     }
   } catch (error) {
     writeError = error;
@@ -375,6 +383,38 @@ async function ensureDraft(
   throw writeError instanceof Error
     ? writeError
     : new Error(`Release ${tag} was not created.`);
+}
+
+/** Drafts are omitted from the tag endpoint, so read the id from the create response. */
+async function readRelease(
+  client: GitHubClient,
+  repository: string,
+  id: number,
+): Promise<Release> {
+  const response = await send(
+    client,
+    'GET',
+    `${api(repository)}/releases/${id}`,
+  );
+
+  if (response.status !== 200) {
+    throw new Error(
+      `Reading release ${id} returned ${response.status}. ${apiError(response)}`,
+    );
+  }
+
+  const release = jsonBody<Release>(response, `release ${id}`);
+
+  if (!release.id || !release.tag_name) {
+    throw new Error(`Release ${id} response has no id.`);
+  }
+
+  return release;
+}
+
+/** GitHub's explanation, bounded so a failure stays readable. */
+function apiError(response: GitHubResponse): string {
+  return response.body.toString('utf8').trim().slice(0, 300);
 }
 
 /** Upload one missing asset, then download it and compare bytes. */
@@ -404,8 +444,8 @@ async function uploadAsset(
     writeError = error;
   }
 
-  const fresh = await releaseByTag(client, repository, release.tag_name);
-  const asset = fresh?.assets.find((item) => item.name === file.name);
+  const fresh = await readRelease(client, repository, release.id);
+  const asset = fresh.assets.find((item) => item.name === file.name);
 
   if (!asset) {
     throw writeError instanceof Error

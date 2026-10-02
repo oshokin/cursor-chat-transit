@@ -95,7 +95,7 @@ CI publishes a push to the default branch when GitHub has no published release, 
 
 `1.0.0` is the initial version recorded in the source. The first push of that version to the default branch publishes it after the checks pass, because nothing is published yet. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
 
-Set the required status check name to **CI required** on `master` so a skipped dependent job cannot look green. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
+Checks, SQLite, and the editor smoke test feed one `package` job. That job and `version-decision` feed **CI required**, and the release job hangs off that gate alone. Set the required status check name to **CI required** on `master`. The release job is skipped when this version is already published, so requiring it would stay pending. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
 
 ### First release and recovery
 
@@ -115,7 +115,7 @@ Wait until GitHub shows a completed, published release before preparing the next
 
 The changelog generator reads exactly the baseline-to-HEAD range without tag decorations. This prevents intermediate prerelease or unrelated tags from splitting the new stable section; the bump recommendation still comes from the pinned Conventional Commits plugin. Older changelog sections remain in place.
 
-GitHub's tag-name endpoint is used for published releases. On a 404 the publisher searches the authenticated, paginated release list, which also includes drafts. A 403/5xx is an error, never an empty list. Mock tests cover this distinction; real GitHub acceptance is still required before declaring deployment verified.
+GitHub's tag-name endpoint returns only published releases. A new draft is read back by the id from the create response, because that tag lookup and a release list can both omit it. On a 404 for an existing tag, the publisher searches the authenticated, paginated release list, which includes drafts when the token can write. A 403/5xx is an error, never an empty list. Mock tests cover this distinction; real GitHub acceptance is still required before declaring deployment verified.
 
 ## Stale transfer lock
 

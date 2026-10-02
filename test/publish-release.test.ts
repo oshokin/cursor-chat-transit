@@ -35,6 +35,8 @@ interface State {
   tagStatus?: number;
   /** Reject the next tag creation, as a dropped connection would. */
   failTagWrite?: boolean;
+  /** Omit drafts from the release list, as an unauthenticated list does. */
+  hideDraftsInList?: boolean;
 }
 
 /** Route one request against the in-memory release. */
@@ -97,10 +99,32 @@ function client(state: State): GitHubClient {
         });
       }
 
+      if (method === 'GET' && /\/releases\/\d+$/.test(url)) {
+        const id = Number(url.split('/').pop());
+
+        if (!state.release || state.release.id !== id) {
+          return { status: 404, body: Buffer.from('missing') };
+        }
+
+        return json(200, {
+          id: state.release.id,
+          tag_name: 'v1.0.1',
+          draft: state.release.draft,
+          html_url: state.release.html_url,
+          assets: state.release.assets.map((asset) => ({
+            id: asset.id,
+            name: asset.name,
+          })),
+        });
+      }
+
       if (method === 'GET' && url.includes('/releases?')) {
+        const visible =
+          state.release && !(state.release.draft && state.hideDraftsInList);
+
         return json(
           200,
-          state.release
+          visible && state.release
             ? [
                 {
                   ...state.release,
@@ -195,7 +219,12 @@ function input(state: State) {
 }
 
 test('the first publication creates a tag, uploads both files, and publishes the draft', async () => {
-  const state: State = { tagSha: null, release: null };
+  const state: State = {
+    tagSha: null,
+    release: null,
+    hideDraftsInList: true,
+  };
+
   const url = await publishRelease(input(state));
 
   assert.equal(url, 'https://github.com/example/repo/releases/tag/v1.0.1');

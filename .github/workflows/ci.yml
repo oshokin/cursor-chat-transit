@@ -159,25 +159,24 @@ jobs:
   ci-result:
     name: CI required
     if: ${{ always() }}
-    needs: [check, sqlite-integration, host-smoke, package, version-decision]
+    needs: [package, version-decision]
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      publish: ${{ needs.version-decision.outputs.publish }}
+      artifact_name: ${{ needs.package.outputs.artifact_name }}
     steps:
-      - name: Require all validation jobs
+      - name: Require packaging and the version decision
         env:
-          CHECK: ${{ needs.check.result }}
-          CORE: ${{ needs.sqlite-integration.result }}
-          HOST: ${{ needs.host-smoke.result }}
           PACKAGE: ${{ needs.package.result }}
           VERSION: ${{ needs.version-decision.result }}
         run: |
-          for result in "$CHECK" "$CORE" "$HOST" "$PACKAGE" "$VERSION"; do
-            test "$result" = success || exit 1
-          done
+          test "$PACKAGE" = success
+          test "$VERSION" = success
 
   release:
-    needs: [package, ci-result, version-decision]
-    if: needs.version-decision.outputs.publish == 'true' && needs.package.result == 'success' && needs.ci-result.result == 'success' && needs.version-decision.result == 'success'
+    needs: [ci-result]
+    if: needs.ci-result.outputs.publish == 'true' && needs.ci-result.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -198,7 +197,7 @@ jobs:
       - run: npm ci
       - name: Download validated package from this run
         env:
-          ARTIFACT_NAME: ${{ needs.package.outputs.artifact_name }}
+          ARTIFACT_NAME: ${{ needs.ci-result.outputs.artifact_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           test -n "$ARTIFACT_NAME"
