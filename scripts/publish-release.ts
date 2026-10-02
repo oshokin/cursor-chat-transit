@@ -272,9 +272,9 @@ async function ensureTag(
   if (existing === sha) return;
 
   if (existing) {
-    throw new Error(
-      `Tag ${tag} points at ${existing}, not ${sha}. Refusing to move it.`,
-    );
+    await moveUnpublishedTag(client, repository, tag, existing, sha);
+
+    return;
   }
 
   let writeError: unknown;
@@ -319,6 +319,69 @@ async function ensureTag(
   throw writeError instanceof Error
     ? writeError
     : new Error(`Tag ${tag} was not created.`);
+}
+
+/**
+ * Point an unpublished tag at the commit CI just built.
+ * A published release keeps the commit it was built from.
+ */
+async function moveUnpublishedTag(
+  client: GitHubClient,
+  repository: string,
+  tag: string,
+  existing: string,
+  sha: string,
+): Promise<void> {
+  const release = await releaseByTag(client, repository, tag);
+
+  if (release && !release.draft) {
+    throw new Error(
+      `Tag ${tag} points at ${existing}, not ${sha}. Refusing to move it.`,
+    );
+  }
+
+  if (release) await deleteRelease(client, repository, release.id);
+
+  const moved = await send(
+    client,
+    'PATCH',
+    `${api(repository)}/git/refs/tags/${encodeURIComponent(tag)}`,
+    JSON.stringify({ sha, force: true }),
+    { 'content-type': 'application/json' },
+  );
+
+  if (moved.status !== 200) {
+    throw new Error(
+      `Moving tag ${tag} returned ${moved.status}. ${apiError(moved)}`,
+    );
+  }
+
+  const current = await tagCommit(client, repository, tag);
+
+  if (current !== sha) {
+    throw new Error(
+      `Tag ${tag} points at ${current ?? 'nothing'}, not ${sha}, after moving it.`,
+    );
+  }
+}
+
+/** Remove a leftover draft. Deleting a release does not delete its tag. */
+async function deleteRelease(
+  client: GitHubClient,
+  repository: string,
+  id: number,
+): Promise<void> {
+  const response = await send(
+    client,
+    'DELETE',
+    `${api(repository)}/releases/${id}`,
+  );
+
+  if (response.status !== 204 && response.status !== 404) {
+    throw new Error(
+      `Deleting draft release ${id} returned ${response.status}. ${apiError(response)}`,
+    );
+  }
 }
 
 /** Create a draft, then read it back before uploading files. */

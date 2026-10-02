@@ -101,15 +101,16 @@ Checks, SQLite, and the editor smoke test feed one `package` job. That job and `
 
 For the first release, push the reviewed implementation to `master`. The recorded version is published after the validation jobs and package job succeed, because no release is posted yet. No local release preparation is needed for the initial `1.0.0`. Run **Check and release** with `publish_release` only to publish again when that version is already posted. Keep the input disabled for a checks-only run.
 
-| Situation                                                         | Developer action                                                                                                    |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Prepare produced an empty changelog section for a technical patch | Write the user-facing notes before committing; CI rejects empty notes                                               |
-| Fix or clarify notes before publication                           | Keep the prepared version and edit its existing section                                                             |
-| CI rejected the code before tag creation                          | Commit the fix without another bump and push to the default branch; CI publishes because that version is not posted |
-| Upload or API failure, same code and artifact                     | Use **Re-run failed jobs** on the original run                                                                      |
-| Draft already contains different bytes after a complete rebuild   | Stop; retry the original publisher/artifact, never overwrite the existing asset                                     |
-| Tag already points to another commit                              | Do not move it; finish that candidate or explicitly resolve the unpublished candidate before another version        |
-| Published release needs a fix                                     | Make a fix commit and prepare the next patch                                                                        |
+| Situation                                                          | Developer action                                                                                                    |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| Prepare produced an empty changelog section for a technical patch  | Write the user-facing notes before committing; CI rejects empty notes                                               |
+| Fix or clarify notes before publication                            | Keep the prepared version and edit its existing section                                                             |
+| CI failed before this version was published                        | Commit the fix without another bump and push to the default branch; CI publishes because that version is not posted |
+| Upload or API failure, same code and artifact                      | Use **Re-run failed jobs** on the original run                                                                      |
+| Draft already contains different bytes for this same commit        | Stop; retry the original publisher/artifact, never overwrite the existing asset                                     |
+| Tag points at another commit and that version is already published | Do not move it; publish the next version instead                                                                    |
+| Tag points at an older commit and that version is not published    | Push the same version; CI moves the tag, drops any leftover draft, and publishes                                    |
+| Published release needs a fix                                      | Make a fix commit and prepare the next patch                                                                        |
 
 Wait until GitHub shows a completed, published release before preparing the next version. The local guard checks Git tags; a tag can already exist while CI is still uploading a draft. A tag alone does not prove publication succeeded.
 

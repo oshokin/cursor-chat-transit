@@ -68,6 +68,25 @@ function client(state: State): GitHubClient {
         });
       }
 
+      if (method === 'PATCH' && url.includes('/git/refs/tags/')) {
+        const parsed = JSON.parse(String(body)) as { sha?: string };
+
+        if (!parsed.sha)
+          return { status: 422, body: Buffer.from('missing sha') };
+
+        state.tagSha = parsed.sha;
+
+        return json(200, { ref: `refs/tags/${url.split('/').pop()}` });
+      }
+
+      if (method === 'DELETE' && /\/releases\/\d+$/.test(url)) {
+        const id = Number(url.split('/').pop());
+
+        if (state.release?.id === id) state.release = null;
+
+        return { status: 204, body: Buffer.alloc(0) };
+      }
+
       if (method === 'POST' && url.endsWith('/git/refs')) {
         if (state.failTagWrite) {
           state.failTagWrite = false;
@@ -237,10 +256,51 @@ test('the first publication creates a tag, uploads both files, and publishes the
   ]);
 });
 
-test('a tag on another commit is a conflict', async () => {
+test('an unpublished tag on another commit moves to this commit', async () => {
   const state: State = {
     tagSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-    release: null,
+    release: {
+      id: 4,
+      draft: true,
+      html_url: 'https://github.com/example/repo/releases/tag/v1.0.1',
+      assets: [
+        {
+          id: 3,
+          name: 'cursor-chat-transit-1.0.1.vsix',
+          bytes: Buffer.from('old-candidate'),
+        },
+      ],
+    },
+  };
+
+  const url = await publishRelease(input(state));
+
+  assert.equal(url, 'https://github.com/example/repo/releases/tag/v1.0.1');
+  assert.equal(state.tagSha, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  assert.equal(state.release?.draft, false);
+
+  assert.equal(
+    state.release?.assets.some(
+      (asset) => asset.bytes.toString() === 'old-candidate',
+    ),
+    false,
+  );
+});
+
+test('a published release on another commit is not moved', async () => {
+  const packed = files();
+
+  const state: State = {
+    tagSha: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    release: {
+      id: 7,
+      draft: false,
+      html_url: 'https://github.com/example/repo/releases/tag/v1.0.1',
+      assets: [
+        { id: 3, name: 'cursor-chat-transit-1.0.1.vsix', bytes: packed.vsix },
+        { id: 4, name: 'SHA256SUMS', bytes: packed.sums },
+      ],
+    },
   };
 
   await assert.rejects(
@@ -248,7 +308,8 @@ test('a tag on another commit is a conflict', async () => {
     /Refusing to move it/,
   );
 
-  assert.equal(state.release, null);
+  assert.equal(state.tagSha, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  assert.equal(state.release?.draft, false);
 });
 
 test('an API 500 is not treated as a missing tag', async () => {
