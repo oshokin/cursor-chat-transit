@@ -82,16 +82,24 @@ export async function readSessionKvBatch(
   return new Map(selected.map((key, i) => [key, collectors[i]!.finish()]));
 }
 
-/** Chunk a single record so no encoded protocol line exceeds 2 MiB. */
+/** Chunk a single record so no encoded protocol line exceeds 2 MiB. Oversized values return length only. */
 function valueQuery(key: string, prefix = ''): string {
-  return `WITH RECURSIVE payload AS (
-    SELECT value FROM cursorDiskKV WHERE key=${sqlText(key)}
-  ), chunks(pos) AS (
-    VALUES(1) UNION ALL SELECT pos + 1048576 FROM chunks, payload
-    WHERE pos + 1048576 <= length(CAST(value AS BLOB)) AND length(CAST(value AS BLOB)) <= ${MAX_SQLITE_VALUE_BYTES}
-  ) SELECT ${sqlText(prefix)} || typeof(value) || '|' || length(CAST(value AS BLOB)) || '|' ||
-    CASE WHEN length(CAST(value AS BLOB)) <= ${MAX_SQLITE_VALUE_BYTES} THEN hex(substr(CAST(value AS BLOB), pos, 1048576)) ELSE '' END
-    FROM chunks, payload;`;
+  const keySql = sqlText(key);
+  const lead = sqlText(prefix);
+  const size = `coalesce(length(CAST(value AS BLOB)), 0)`;
+
+  return `SELECT ${lead} || typeof(value) || '|' || ${size} || '|'
+    FROM cursorDiskKV WHERE key=${keySql} AND ${size} > ${MAX_SQLITE_VALUE_BYTES}
+    UNION ALL
+    SELECT ${lead} || typeof(value) || '|' || ${size} || '|' || hex(substr(CAST(value AS BLOB), pos, 1048576))
+    FROM cursorDiskKV, (
+      WITH RECURSIVE chunks(pos) AS (
+        VALUES(1) UNION ALL SELECT pos + 1048576 FROM chunks
+        WHERE pos <= ${MAX_SQLITE_VALUE_BYTES}
+          AND pos + 1048576 <= (SELECT ${size} FROM cursorDiskKV WHERE key=${keySql})
+      ) SELECT pos FROM chunks
+    )
+    WHERE key=${keySql} AND ${size} <= ${MAX_SQLITE_VALUE_BYTES};`;
 }
 
 /** Validate chunk metadata before allocating bytes; retain SQLite text/blob identity. */

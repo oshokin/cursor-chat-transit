@@ -1188,9 +1188,16 @@ test(
       target.workspace,
     );
 
-    const uri = (parsed as { uri?: { path?: string } }).uri;
+    const destCanvas = path.join(targetCanvases, CANVAS_NAME);
 
-    assert.equal(uri?.path, path.join(targetCanvases, CANVAS_NAME));
+    const uri = (parsed as { uri?: { path?: string; fsPath?: string } }).uri;
+
+    assert.equal(
+      uri?.path,
+      decodeURIComponent(pathToFileURL(destCanvas).pathname),
+    );
+
+    assert.equal(uri?.fsPath, destCanvas);
     assert.equal(bubbleText, `see ${marker}`);
   },
 );

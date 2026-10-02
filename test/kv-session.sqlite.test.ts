@@ -7,32 +7,70 @@ import { SqliteSession } from '../src/sqlite-session';
 import { readSessionKv } from '../src/kv-session';
 import { ensureInitFile, findSqliteExecutable, execSql } from '../src/sqlite';
 
+/** Close the sqlite process before deleting its files. A failed first after-hook does not run the rest. */
+async function removeFixture(
+  session: SqliteSession | undefined,
+  root: string,
+): Promise<void> {
+  try {
+    await session?.close();
+  } finally {
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+  }
+}
+
+/** Build a database, then register cleanup only after the read session exists. */
+async function openReadSession(
+  t: { after(hook: () => Promise<void>): void },
+  dirPrefix: string,
+  sql: string,
+): Promise<SqliteSession> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), dirPrefix));
+
+  const options = {
+    executable,
+    database: path.join(root, 'kv.sqlite'),
+    initFile: await ensureInitFile(root),
+  };
+
+  try {
+    await execSql({ ...options, readOnly: false, sql });
+
+    const session = await SqliteSession.open({ ...options, readOnly: true });
+
+    t.after(() => removeFixture(session, root));
+
+    return session;
+  } catch (error) {
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 200,
+    });
+
+    throw error;
+  }
+}
+
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH)!;
 
 test(
   'bounded KV reader preserves multi-chunk blobs, text with NUL and missing/empty values',
   { skip: !executable },
   async (t) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-session-'));
-
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
-
-    const options = {
-      executable,
-      database: path.join(root, 'kv.sqlite'),
-      initFile: await ensureInitFile(root),
-    };
-
-    await execSql({
-      ...options,
-      readOnly: false,
-      sql: `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value);
+    const session = await openReadSession(
+      t,
+      'cct-kv-session-',
+      `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value);
     INSERT INTO cursorDiskKV VALUES ('large', zeroblob(3145735)), ('text', CAST(X'610062' AS TEXT)), ('empty', X'');`,
-    });
+    );
 
-    const session = await SqliteSession.open({ ...options, readOnly: true });
-
-    t.after(() => session.close());
     const large = await readSessionKv(session, 'large');
 
     assert.equal(large?.storageClass, 'blob');
@@ -57,25 +95,11 @@ test(
   'KV reader rejects an oversized value before emitting its payload',
   { skip: !executable },
   async (t) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-large-'));
-
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
-
-    const options = {
-      executable,
-      database: path.join(root, 'kv.sqlite'),
-      initFile: await ensureInitFile(root),
-    };
-
-    await execSql({
-      ...options,
-      readOnly: false,
-      sql: "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value); INSERT INTO cursorDiskKV VALUES ('too-large', zeroblob(33554433));",
-    });
-
-    const session = await SqliteSession.open({ ...options, readOnly: true });
-
-    t.after(() => session.close());
+    const session = await openReadSession(
+      t,
+      'cct-kv-large-',
+      "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value); INSERT INTO cursorDiskKV VALUES ('too-large', zeroblob(33554433));",
+    );
 
     await assert.rejects(
       () => readSessionKv(session, 'too-large'),
@@ -91,25 +115,12 @@ test(
     const { readSessionKvBatch, KV_BATCH_BYTES } =
       await import('../src/kv-session');
 
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-batch-'));
+    const session = await openReadSession(
+      t,
+      'cct-kv-batch-',
+      `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES ('text',CAST(X'610062' AS TEXT)),('empty',X''),('small',zeroblob(1024)),('large',zeroblob(${KV_BATCH_BYTES + 1})),('last',X'FF');`,
+    );
 
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
-
-    const options = {
-      executable,
-      database: path.join(root, 'kv.sqlite'),
-      initFile: await ensureInitFile(root),
-    };
-
-    await execSql({
-      ...options,
-      readOnly: false,
-      sql: `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES ('text',CAST(X'610062' AS TEXT)),('empty',X''),('small',zeroblob(1024)),('large',zeroblob(${KV_BATCH_BYTES + 1})),('last',X'FF');`,
-    });
-
-    const session = await SqliteSession.open({ ...options, readOnly: true });
-
-    t.after(() => session.close());
     await session.exec('BEGIN;');
     const keys = ['missing', 'text', 'empty', 'small', 'large', 'last'];
     const first = await readSessionKvBatch(session, keys);
@@ -128,10 +139,10 @@ test(
 
     assert.deepEqual([...second.keys()], ['large']);
 
-    assert.deepEqual(
-      second.get('large')?.bytes,
-      Buffer.alloc(KV_BATCH_BYTES + 1),
-    );
+    const largeBytes = second.get('large')?.bytes;
+
+    assert.equal(largeBytes?.length, KV_BATCH_BYTES + 1);
+    assert.equal(largeBytes?.includes(1), false);
 
     assert.deepEqual(
       (await readSessionKvBatch(session, ['last'])).get('last')?.bytes,
@@ -147,7 +158,7 @@ test(
     const { readSessionKvBatch } = await import('../src/kv-session');
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-batch-bad-'));
 
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    t.after(() => removeFixture(undefined, root));
 
     const options = {
       executable,

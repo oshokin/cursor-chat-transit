@@ -4,6 +4,7 @@ import nodeFs from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 describe('export writer', { concurrency: false }, () => {
@@ -21,7 +22,7 @@ describe('export writer', { concurrency: false }, () => {
         '-e',
         `
 import fs from 'node:fs';
-import { ExportFileWriter } from ${JSON.stringify(path.resolve(__dirname, '../src/format.ts'))};
+import { ExportFileWriter } from ${JSON.stringify(pathToFileURL(path.resolve(__dirname, '../src/format.ts')).href)};
 const orig = fs.promises.open.bind(fs.promises);
 fs.promises.open = (async (...args: Parameters<typeof orig>) => {
   const file = await orig(...args);
