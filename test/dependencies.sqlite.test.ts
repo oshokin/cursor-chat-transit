@@ -1594,7 +1594,8 @@ test(
               moment === 'before-update' &&
               event.action === 'Write file' &&
               event.status === 'completed' &&
-              event.path?.endsWith('/decoded.bin')
+              event.path &&
+              path.basename(event.path) === 'decoded.bin'
             )
               mutate();
           },
