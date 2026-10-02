@@ -74,7 +74,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   await execSqlScript({
     ...ctx,
     database: workspace.globalDbPath,
-    sql: `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB); CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); ${headers.map((h, i) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${h.composerId}`)},${sqlText(JSON.stringify(bodies[i]))});`).join('\n')} INSERT INTO cursorDiskKV VALUES ('agentKv:blob:unrelated',zeroblob(8388608));`,
+    sql: `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB); CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); ${headers.map((h, i) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${h.composerId}`)},${sqlText(JSON.stringify(bodies[i]))});`).join('\n')}`,
   });
 
   await execSqlScript({
@@ -91,6 +91,12 @@ test(
   { skip },
   async (t) => {
     const { ctx, workspace, headers } = await fixture(t);
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `INSERT INTO cursorDiskKV VALUES ('agentKv:blob:unrelated',zeroblob(8388608));`,
+    });
 
     const hash = async (file: string) =>
       createHash('sha256')
