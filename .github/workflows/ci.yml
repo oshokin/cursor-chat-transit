@@ -75,10 +75,14 @@ jobs:
           if not "%ERRORLEVEL%"=="7" exit /b 1
           call scripts\dev-node.cmd -- npm run compile
           if errorlevel 1 exit /b 1
-      - run: npm test
+      - name: SQLite integration tests
+        if: runner.os == 'Linux'
+        run: npm run test:sqlite
+      - name: Unit and SQLite tests
+        if: runner.os != 'Linux'
+        run: npm test
 
   host-smoke:
-    needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -94,6 +98,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: .vscode-test
+          key: vscode-host-${{ runner.os }}-${{ matrix.vscode }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            vscode-host-${{ runner.os }}-${{ matrix.vscode }}-
       - run: xvfb-run -a npm run test:host
         env:
           VSCODE_TEST_VERSION: ${{ matrix.vscode }}
@@ -136,8 +146,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run ensure-ci-sqlite
-      - run: npm run package
+      - run: npm run package:vsix
       - run: npm run check-package
       - id: artifact
         run: |
@@ -156,27 +165,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  ci-result:
-    name: CI required
-    if: ${{ always() }}
-    needs: [package, version-decision]
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      publish: ${{ needs.version-decision.outputs.publish }}
-      artifact_name: ${{ needs.package.outputs.artifact_name }}
-    steps:
-      - name: Require packaging and the version decision
-        env:
-          PACKAGE: ${{ needs.package.result }}
-          VERSION: ${{ needs.version-decision.result }}
-        run: |
-          test "$PACKAGE" = success
-          test "$VERSION" = success
-
   release:
-    needs: [ci-result]
-    if: needs.ci-result.outputs.publish == 'true' && needs.ci-result.result == 'success'
+    needs: [package, version-decision]
+    if: needs.version-decision.outputs.publish == 'true' && needs.package.result == 'success' && needs.version-decision.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -197,7 +188,7 @@ jobs:
       - run: npm ci
       - name: Download validated package from this run
         env:
-          ARTIFACT_NAME: ${{ needs.ci-result.outputs.artifact_name }}
+          ARTIFACT_NAME: ${{ needs.package.outputs.artifact_name }}
           GH_TOKEN: ${{ github.token }}
         run: |
           test -n "$ARTIFACT_NAME"

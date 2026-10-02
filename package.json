@@ -175,8 +175,9 @@
     "release:prepare": "node --import tsx scripts/prepare-release.ts prepare",
     "ensure-ci-sqlite": "node --import tsx scripts/ensure-ci-sqlite.ts",
     "check": "npm run compile && npm run typecheck && npm run lint && npm run format:check && npm test",
-    "package": "node --import tsx scripts/prepare-dist.ts && vsce package --out dist/cursor-chat-transit.vsix",
-    "vscode:prepublish": "npm run check",
+    "package:vsix": "node --import tsx scripts/prepare-dist.ts && vsce package --out dist/cursor-chat-transit.vsix",
+    "package": "npm run check && npm run package:vsix",
+    "vscode:prepublish": "npm run compile",
     "lint:complexity": "eslint src --rule \"max-lines-per-function: [warn, {max: 80, skipBlankLines: true, skipComments: true}]\" --rule \"complexity: [warn, 15]\"",
     "clean": "node --import tsx scripts/clean.ts"
   },

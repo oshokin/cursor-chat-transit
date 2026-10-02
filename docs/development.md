@@ -61,13 +61,14 @@ The extension discovers the real local Cursor user-data directory unless you set
 
 ## Scripts
 
-| Script              | Purpose                                         |
-| ------------------- | ----------------------------------------------- |
-| `npm run compile`   | `tsc` → `out/` and sidebar client               |
-| `npm run typecheck` | noEmit check of src, scripts, and tests         |
-| `npm test`          | all Node tests (`--unit` / `--sqlite` to split) |
-| `npm run test:host` | VS Code smoke (`@vscode/test-electron`)         |
-| `npm run package`   | VSIX into `dist/`                               |
+| Script                 | Purpose                                         |
+| ---------------------- | ----------------------------------------------- |
+| `npm run compile`      | `tsc` → `out/` and sidebar client               |
+| `npm run typecheck`    | noEmit check of src, scripts, and tests         |
+| `npm test`             | all Node tests (`--unit` / `--sqlite` to split) |
+| `npm run test:host`    | VS Code smoke (`@vscode/test-electron`)         |
+| `npm run package`      | Run `check`, then build the VSIX                |
+| `npm run package:vsix` | Build the VSIX; CI uses this after the tests    |
 
 ## Packaging
 
@@ -95,7 +96,7 @@ CI publishes a push to the default branch when GitHub has no published release, 
 
 `1.0.0` is the initial version recorded in the source. The first push of that version to the default branch publishes it after the checks pass, because nothing is published yet. `release:prepare` refuses to invent the next number until tag `v1.0.0` exists on the reachable history. Do not create that tag by hand on an unverified commit.
 
-Checks, SQLite, and the editor smoke test feed one `package` job. That job and `version-decision` feed **CI required**, and the release job hangs off that gate alone. Set the required status check name to **CI required** on `master`. The release job is skipped when this version is already published, so requiring it would stay pending. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
+Checks, SQLite, and the editor smoke test start together. `package` waits for all of them, then builds the VSIX. The release job runs after that when `version-decision` asks to publish. It is skipped when this version is already published, so a branch-protection rule must not require the release job. Require `check`, the SQLite jobs, the host smoke jobs, `package`, and `version-decision` if you want a merge gate. The workflow file cannot enable that rule by itself. The workflow trigger lists `master` because that is the repository default branch.
 
 ### First release and recovery
 
@@ -153,14 +154,14 @@ The contributor loop is `task setup` → `task check` → `task package`. `task 
 | `format`                            | Apply formatting                                                       |
 | `test`, `test:unit`, `test:sqlite`  | Core tests and filtered suites                                         |
 | `check`                             | Local pre-commit validation                                            |
-| `package`                           | Validate, build and inspect the VSIX; does not publish                 |
+| `package`                           | Run `check`, build the VSIX, and inspect it; does not publish          |
 | `release:preview`                   | Show the recommended version and changelog draft; writes nothing       |
 | `release:prepare`                   | Apply the recommended or explicit version bump to local files only     |
 | `clean`                             | Remove `out/`, `dist/`, `coverage/`; preserve `.dev/` and dependencies |
 
-Ordered steps use `cmds`, because Task dependencies run in parallel. `package` does not call `check` twice: `vsce` invokes `vscode:prepublish`, which already runs it. CI uses the same npm commands without requiring Task.
+Ordered steps use `cmds`, because Task dependencies run in parallel. `npm run package` runs `check` once. `vsce` then compiles through `vscode:prepublish`. CI builds with `npm run package:vsix` after the test jobs, so it does not run the suite again. CI uses the same npm commands without requiring Task.
 
-Core/integration tests fail up front when `sqlite3` is absent. Use `task test:unit` for the deliberately SQLite-free subset. On headless Linux, run `xvfb-run -a npm run test:host` for the host test.
+Core/integration tests fail up front when `sqlite3` is absent. Use `task test:unit` for the deliberately SQLite-free subset. On headless Linux, run `xvfb-run -a npm run test:host` for the host test. A dropped connection to the VS Code update service is retried. CI keeps `.vscode-test`, so a later run can use a copy already fetched when that service does not answer.
 
 On Windows 10/11, `task setup` downloads the official Node.js zip when npm is missing. The watch script runs TypeScript via Node.
 
