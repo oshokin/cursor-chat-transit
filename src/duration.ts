@@ -1,5 +1,8 @@
 /** Compact duration; exact milliseconds remain available in structured log fields. */
-export function humanDuration(ms: number): string {
+export function humanDuration(
+  /** Duration in milliseconds. */
+  ms: number,
+): string {
   if (!Number.isFinite(ms) || ms < 0) return 'unknown';
   if (ms < 1000) return `${Math.round(ms)} ms`;
   const seconds = Math.floor(ms / 1000);
@@ -13,6 +16,10 @@ export function humanDuration(ms: number): string {
 }
 
 /** Keep the machine-readable value and add the same human duration used by the UI. */
-export function durationField(name: string, ms: number): string {
+export function durationField(
+  name: string,
+  /** Duration in milliseconds. */
+  ms: number,
+): string {
   return `${name}=${ms} (${humanDuration(ms)})`;
 }

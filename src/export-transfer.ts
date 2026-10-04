@@ -16,6 +16,7 @@ import type {
 
 /** List composer headers for a workspace without loading bubble bodies. */
 export async function listWorkspaceChats(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   workspace: WorkspaceEntry,
   options: {
@@ -73,8 +74,10 @@ export async function listWorkspaceChats(
 
 /** Build an export object for a workspace; missing bodies are listed as incomplete. */
 export async function buildExportObject(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   workspace: WorkspaceEntry,
+  /** Composer ids to keep. An empty list keeps none. */
   selectedIds?: string[],
 ): Promise<ExportObject> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-object-'));
@@ -94,10 +97,16 @@ export async function buildExportObject(
 
 /** Write an export file, or skip when the selection is empty. */
 export async function exportToFile(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
+  /** Workspace whose chats are exported. */
   workspace: WorkspaceEntry,
+  /** Destination archive path. */
   destPath: string,
+  /** Chat ids to export. Omit to export every listed chat. */
   selectedIds?: string[],
+  /** When true, count recoverable chats and skip compression when none exist. */
+  assessRecovery = false,
 ): Promise<
   | {
       /** True when the user cancelled or there was nothing to write. */
@@ -139,6 +148,7 @@ export async function exportToFile(
       selected,
       source: listed.source,
       readComplete: global.close,
+      assessRecovery,
     });
   } finally {
     try {

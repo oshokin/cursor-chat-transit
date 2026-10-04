@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 
 /** Sidebar button ids posted from the webview. */
 export type SidebarAction =
+  | 'manage'
   | 'chooseWorkspace'
   | 'export'
   | 'import'
@@ -61,6 +62,7 @@ export interface SidebarState {
 
 /** Actions the host will honour from the webview. */
 const ACTIONS = new Set<SidebarAction>([
+  'manage',
   'chooseWorkspace',
   'export',
   'import',
@@ -83,7 +85,10 @@ export class TransferSidebar implements vscode.WebviewViewProvider {
     /** Current sidebar model. */
     private readonly state: () => SidebarState,
     /** Host handler for one sidebar button. */
-    private readonly run: (action: SidebarAction) => Promise<void>,
+    private readonly run: (
+      /** Sidebar or command action. */
+      action: SidebarAction,
+    ) => Promise<void>,
     /** Host handler when an action rejects. */
     private readonly onError: (error: unknown) => void,
   ) {}
@@ -112,7 +117,14 @@ export class TransferSidebar implements vscode.WebviewViewProvider {
     this.context.subscriptions.push(
       view.webview.onDidReceiveMessage((message: unknown) => {
         if (!message || typeof message !== 'object') return;
-        const type = (message as { type?: unknown }).type;
+
+        /** Record type discriminant. */
+        const type = (
+          message as {
+            /** Message kind posted by the webview. */
+            type?: unknown;
+          }
+        ).type;
 
         if (type === 'ready') {
           this.refresh();

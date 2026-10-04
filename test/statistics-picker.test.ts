@@ -42,6 +42,7 @@ function fixture(
   };
 
   const picker = {
+    ignoreFocusOut: false,
     title: '',
     value: 'needle',
     busy: false,
@@ -88,6 +89,7 @@ function fixture(
     actionButton: action
       ? { iconPath: { id: 'filter' }, tooltip: 'Apply' }
       : undefined,
+    hideButton: { iconPath: { id: 'eye-closed' }, tooltip: 'Hide empty' },
     restoreButton: { iconPath: { id: 'filter-filled' }, tooltip: 'Show all' },
     analyzeButton: { iconPath: { id: 'graph' }, tooltip: 'Analyze' },
     cancelButton: { iconPath: { id: 'debug-stop' }, tooltip: 'Stop' },
@@ -394,8 +396,19 @@ test('opening workspace picker builds one filtered list and Show all reveals emp
 
   assert.deepEqual(
     f.picker.buttons.map((b) => b.tooltip),
-    ['Analyze'],
+    ['Analyze', 'Hide empty'],
   );
+
+  f.fire('button', f.picker.buttons[1]);
+
+  assert.deepEqual(
+    f.picker.items.map((r) => r.id),
+    ['b'],
+  );
+
+  assert.equal(f.picker.buttons[1].tooltip, 'Show all');
+  f.fire('button', f.picker.buttons[1]);
+  assert.equal(f.picker.items.length, 2);
 
   assert.equal(calls, 1);
   f.picker.hide();
@@ -492,4 +505,30 @@ test('closing during automatic preparation cancels and waits for worker cleanup'
   assert.equal(resolved, false);
   finish();
   assert.equal(await f.done, undefined);
+});
+
+test('switching windows preserves analysis; explicit dismissal still cancels it', async () => {
+  let signal!: AbortSignal;
+
+  const f = fixture(async (value) => {
+    signal = value;
+
+    return new Promise((resolve) =>
+      value.addEventListener('abort', () => resolve({ failed: 0 }), {
+        once: true,
+      }),
+    );
+  });
+
+  f.fire('button');
+  await tick();
+  assert.equal(f.picker.ignoreFocusOut, true);
+  // Native QuickPick hides on focus loss only when ignoreFocusOut is false.
+  if (!f.picker.ignoreFocusOut) f.fire('hide');
+  assert.equal(signal.aborted, false);
+  assert.equal(f.picker.disposed, false);
+  f.fire('hide');
+  assert.equal(await f.done, undefined);
+  assert.equal(signal.aborted, true);
+  assert.equal(f.picker.disposed, true);
 });

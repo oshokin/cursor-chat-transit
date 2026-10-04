@@ -54,7 +54,9 @@ function hasAll(have: Set<string>, need: Set<string>): boolean {
 
 /** True when PRAGMA reports a NOT NULL column we do not populate and that has no default. */
 function extraRequiredWithoutDefault(
+  /** Rows already loaded. */
   rows: string[][],
+  /** Storage id to the workspace entry. */
   known: Set<string>,
 ): boolean {
   for (const r of rows) {

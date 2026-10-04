@@ -12,7 +12,10 @@ export interface LockHandle {
 }
 
 /** Return whether `pid` is still running. Unknown kill errors fail closed as alive. */
-function isAlive(pid: number): boolean {
+function isAlive(
+  /** Process id that holds the lock. */
+  pid: number,
+): boolean {
   if (pid === process.pid) return true;
 
   try {
@@ -65,7 +68,11 @@ async function refuseExistingLock(lockPath: string): Promise<never> {
   let pid: number | undefined;
 
   try {
-    const existing = JSON.parse(text) as { pid?: unknown };
+    /** Process id that holds the lock. */
+    const existing = JSON.parse(text) as {
+      /** Process id recorded in the lock file. */
+      pid?: unknown;
+    };
 
     if (typeof existing.pid === 'number' && Number.isInteger(existing.pid)) {
       pid = existing.pid;
@@ -92,7 +99,11 @@ async function refuseExistingLock(lockPath: string): Promise<never> {
     `A previous Cursor Chat Transit operation did not finish (pid ${pid}). Use Clear stale lock, then retry. Lock: ${lockPath}`,
   );
 
-  const record = JSON.parse(text) as { token?: unknown };
+  /** Cancellation token from the progress notification. */
+  const record = JSON.parse(text) as {
+    /** Token recorded in the lock file. */
+    token?: unknown;
+  };
 
   if (
     typeof record.token === 'string' &&
@@ -109,6 +120,7 @@ async function refuseExistingLock(lockPath: string): Promise<never> {
 async function claimLock(
   lockPath: string,
   payload: string,
+  /** Cancellation token from the progress notification. */
   token: string,
 ): Promise<void> {
   const temporary = `${lockPath}.${token}.partial`;
@@ -135,7 +147,9 @@ async function claimLock(
 
 /** Exclusive transfer lock. A leftover file is never unlinked automatically. */
 export async function acquireLock(
+  /** Directory that holds the transfer lock. */
   lockDir: string,
+  /** Lock name under the lock directory. */
   name: string,
 ): Promise<LockHandle> {
   await fs.promises.mkdir(lockDir, { recursive: true });
@@ -181,7 +195,12 @@ export async function acquireLock(
 
       try {
         const text = await fs.promises.readFile(lockPath, 'utf8');
-        const existing = JSON.parse(text) as { token?: unknown };
+
+        /** Cancellation token from the progress notification. */
+        const existing = JSON.parse(text) as {
+          /** Token recorded in the lock file. */
+          token?: unknown;
+        };
 
         if (existing.token !== token) return;
         await fs.promises.unlink(lockPath);

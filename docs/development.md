@@ -203,3 +203,34 @@ In Extensions, inspect the transparent mark on light and dark themes and on a hi
 `npm run test:perf` includes this measurement: three repetitions of workspace filtering and checked chat selection on temporary databases, then the transfer benchmark. See [Opt-in performance checks](#opt-in-performance-checks) and [performance and cleanup](performance-and-cleanup.md).
 
 For workspace identity regression checks, create two storage entries with the same URI and distinct global-header storage IDs. Each entry must receive its explicitly bound global chats. URI-only headers and local lists are retained as fallback evidence; never merge or delete storage based on the title, path, or equal counts.
+
+### Management and partial-history acceptance
+
+Use disposable Cursor profiles and copies of test chats. Do not test destructive commands on your only copy of history.
+
+1. Open Manage chats with empty, populated, unreadable and unknown-format entries. Toggle Show all / Hide empty or unavailable repeatedly without another scan. Search collapsed workspaces by name, path and chat title. Confirm physical storage identities stay distinct.
+2. Select two workspaces and individual chats; uncheck a child of a checked workspace. Its siblings stay selected. Toggle visibility, clear selection and refresh. With checked items, both row and toolbar Delete act on all checked scopes, including hidden ones. Right-click an unchecked row and verify it is not added. With no checkboxes, row Delete acts only on that row and toolbar Delete asks for checked items, even when another row is focused. Verify the row tooltip changes between Delete checked history and Delete this history. Cancel confirmation and confirm Cursor stays open.
+3. Export with Recover Text enabled and disabled. Use full bodies, preview-only bodies, known-role gaps, unknown roles and no surviving text. Full text must never be replaced by a shorter preview. Original database rows remain unchanged.
+4. Import the recovered ZIP, decline and then accept the partial-history review, restart Cursor, open the copied history and run **Export Transcript**. Verify source-order text and visible preview/gap labels. This native Cursor check is a release acceptance requirement: automated SQLite tests alone cannot establish it. Repeat import must not add another copy.
+5. Close other Cursor windows, stop Agent tasks, and delete test history in the remaining window. Verify confirmation, progress, cancellation, partial outcomes, a busy database and the Quit button after writes. Quit completely and reopen; deleted chats must stay deleted, unrelated history must open, and new messages must save. Check the OS/build combinations you intend to support; passing Linux SQLite tests alone does not certify macOS or Windows Cursor.
+6. Verify the seven documented settings at User scope. Running workers keep captured values. Workspace values cannot redirect paths or enable salvage. Deletion must work without any OS-process scan and must never quit Cursor automatically.
+
+Automated tests exercise real SQLite export/import round trips, ordinary deletion-worker execution, cancellation rollback, partial commits, uncertain commit acknowledgements, index changes, shared ownership, triggers/foreign keys, SQL batching, grouped checks, selection, notifications and command wiring. Native Cursor rendering, cache behavior after shutdown, and Export Transcript still require manual verification.
+
+### JSDoc policy
+
+Document exported functions, classes, interfaces, type aliases, enums and module constants with JSDoc. Explain the contract: ownership, units, side effects, failure behavior, cancellation, ordering and format constraints when relevant. Document non-obvious private code at the decision that needs explaining. An obvious local variable or callback does not need a comment. Do not paraphrase an identifier or repeat TypeScript types in JSDoc.
+
+`eslint-plugin-jsdoc` enforces `require-jsdoc` for exported declarations in `src/` and `webview/`, and `no-types` prevents duplicate type annotations. It is a pinned development-only dependency. Automatic empty-comment generation is disabled. Mandatory `@param`, `@returns`, descriptions for every field, and comments on every private method are deliberately not enabled. Review still owns comment accuracy; ESLint can require presence but cannot judge whether the explanation is useful.
+
+This follows the distinction in Google's [TypeScript style guide](https://google.github.io/styleguide/tsguide.html#document-all-top-level-exports-of-modules) and [code review guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html#comments). Microsoft's [TypeScript contributor guidelines](https://github.com/microsoft/TypeScript/wiki/Coding-guidelines#comments) also use JSDoc for functions and types; these are project-specific guides, not a universal FAANG standard.
+
+### Header lookup benchmark
+
+Run `node --import tsx scripts/perf-header-index.ts` for a synthetic comparison of repeated filtering and one operation-local index. It uses 10,000 headers and 1,000 workspace lookups, includes index construction, and checks identical ordered results on every repetition. This measures header lookup CPU time only, not SQLite, ZIP throughput or the full user operation. SQL batching has a deterministic regression test: 130 selected IDs require three insert requests and three indexed-delete requests, plus verification, instead of one request per ID. Bulk-check tests assert one worker job per workspace rather than per chat.
+
+### Deletion identity and ownership regressions
+
+Migrated `composer.composerData` values may contain flags and selected/focused IDs without `allComposers`. Keep this supported case separate from malformed lists. Strict table readers must compare `composerHeaders.composerId` and nonempty `workspaceId` columns with the JSON identities; conflicting evidence cannot establish ownership. Selected/focused IDs in migrated workspace metadata remain ownership evidence even without a list or table row; include them only for deletion ownership, not normal display counts. During deletion preflight, an unrecognized header table in any inspected workspace must stop ownership assessment rather than appear empty. Repeat identity checks under the target write transaction. Incoming foreign-key table names are matched case-insensitively, including references to attached workspace tables.
+
+The text-recovery tests compare chat files from exports with the setting on and off for complete records, existing empty messages and missing agent resources. Those cases must remain identical. Existing round-trip tests cover absent bodies with previews, labelled gaps, source preservation, incomplete-history consent and repeat-import identity. Native Cursor transcript rendering still needs manual acceptance.

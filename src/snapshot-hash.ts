@@ -6,7 +6,10 @@ import { canonicalJson } from './import-policy';
  * Drop `grouping.textPreview` on one conversation header only.
  * Nested objects keep a field of the same name. An empty `grouping` is removed.
  */
-export function stripConversationPreview(value: unknown): unknown {
+export function stripConversationPreview(
+  /** Conversation header that may carry a preview. */
+  value: unknown,
+): unknown {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
   const grouping = record.grouping;
@@ -41,7 +44,10 @@ export class SnapshotHasher {
   }
 
   /** Header without workspace binding. */
-  header(value: Record<string, unknown>): void {
+  header(
+    /** Header JSON included in the snapshot. */
+    value: Record<string, unknown>,
+  ): void {
     const copy = { ...value };
 
     delete copy.workspaceIdentifier;
@@ -49,7 +55,10 @@ export class SnapshotHasher {
   }
 
   /** Composer fields with the conversation array already removed. */
-  composer(value: Record<string, unknown>): void {
+  composer(
+    /** Composer fields included in the snapshot. */
+    value: Record<string, unknown>,
+  ): void {
     this.frame('composer', canonicalJson(value));
   }
 
@@ -60,7 +69,10 @@ export class SnapshotHasher {
   }
 
   /** One conversation element in source order. */
-  conversationItem(value: unknown): void {
+  conversationItem(
+    /** One conversation element included in the snapshot. */
+    value: unknown,
+  ): void {
     if (this.conversation !== 'present') {
       throw new Error('Conversation item without a present conversation.');
     }
@@ -79,12 +91,18 @@ export class SnapshotHasher {
   }
 
   /** One dependency component. Caller supplies kind/id order. */
-  dependency(value: unknown): void {
+  dependency(
+    /** Dependency record included in the snapshot. */
+    value: unknown,
+  ): void {
     this.frame('dependency', canonicalJson(value));
   }
 
   /** Completeness bit. */
-  quality(value: 'complete' | 'history-only'): void {
+  quality(
+    /** complete or history-only. */
+    value: 'complete' | 'history-only',
+  ): void {
     this.frame('quality', value);
   }
 
@@ -101,7 +119,12 @@ export class SnapshotHasher {
   }
 
   /** Mix one labeled string into the snapshot hash. */
-  private frame(type: string, text: string): void {
+  /** Record type discriminant. */
+  private frame(
+    /** Type tag. */
+    type: string,
+    text: string,
+  ): void {
     const kind = Buffer.from(type, 'utf8');
     const body = Buffer.from(text, 'utf8');
     const len = Buffer.alloc(8);

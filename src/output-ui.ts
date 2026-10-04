@@ -11,7 +11,10 @@ export interface TransitLog {
   /** Error line. */
   error(message: string): void;
   /** Reveal the channel; Cursor ignores show() on log:true channels. */
-  show(preserveFocus?: boolean): void;
+  show(
+    /** When true, revealing the channel does not steal focus. */
+    preserveFocus?: boolean,
+  ): void;
   /** Dispose the underlying OutputChannel. */
   dispose(): void;
 }
@@ -21,7 +24,10 @@ type HostChannel = {
   /** Append one line to the Output channel. */
   appendLine(value: string): void;
   /** Reveal the channel. Cursor may ignore this on a log channel. */
-  show(preserveFocus?: boolean): void;
+  show(
+    /** When true, revealing the channel does not steal focus. */
+    preserveFocus?: boolean,
+  ): void;
   /** Dispose the underlying OutputChannel. */
   dispose(): void;
   /** Present when this is a log channel. */
@@ -35,7 +41,10 @@ type HostChannel = {
 };
 
 /** True when the host channel can color and filter by level. */
-function isLogChannel(channel: HostChannel): channel is HostChannel & {
+function isLogChannel(
+  /** Output channel that receives the log. */
+  channel: HostChannel,
+): channel is HostChannel & {
   /** Host log level. Present only on a log channel. */
   logLevel: number;
   /** Colored info line. */
@@ -54,21 +63,31 @@ function isLogChannel(channel: HostChannel): channel is HostChannel & {
 }
 
 /** Preserve an already formatted operation line; format standalone host messages. */
-function formatted(level: 'INFO' | 'WARN' | 'ERROR', message: string): string {
+function formatted(
+  /** Log level word. */
+  level: 'INFO' | 'WARN' | 'ERROR',
+  message: string,
+): string {
   return /^\[\d{4}-\d\d-\d\d [^\]]+\] \[(INFO|WARN|ERROR)\] /.test(message)
     ? message
     : formatLogLine(level, message);
 }
 
 /** Wrap an Output channel. A log channel keeps its own level methods. */
-export function asTransitLog(channel: HostChannel): TransitLog {
+export function asTransitLog(
+  /** Output channel that receives the log. */
+  channel: HostChannel,
+): TransitLog {
   if (isLogChannel(channel)) {
     return {
       appendLine: (value) => channel.appendLine(formatted('INFO', value)),
       info: (message) => channel.info(formatted('INFO', message)),
       warn: (message) => channel.warn(formatted('WARN', message)),
       error: (message) => channel.error(formatted('ERROR', message)),
-      show: (preserveFocus) => channel.show(preserveFocus),
+      show: (
+        /** When true, revealing the channel does not steal focus. */
+        preserveFocus,
+      ) => channel.show(preserveFocus),
       dispose: () => channel.dispose(),
     };
   }
@@ -78,7 +97,10 @@ export function asTransitLog(channel: HostChannel): TransitLog {
     info: (message) => channel.appendLine(formatted('INFO', message)),
     warn: (message) => channel.appendLine(formatted('WARN', message)),
     error: (message) => channel.appendLine(formatted('ERROR', message)),
-    show: (preserveFocus) => channel.show(preserveFocus),
+    show: (
+      /** When true, revealing the channel does not steal focus. */
+      preserveFocus,
+    ) => channel.show(preserveFocus),
     dispose: () => channel.dispose(),
   };
 }
@@ -88,7 +110,9 @@ type OperationLogLevel = 'info' | 'warn' | 'error';
 
 /** Drop lines below the current setting. The host channel still colors what remains. */
 export function gateOperationLog(
+  /** Output channel that receives the log. */
   channel: TransitLog,
+  /** Log level word. */
   level: () => OperationLogLevel,
 ): TransitLog {
   const rank: Record<OperationLogLevel, number> = {
@@ -98,8 +122,10 @@ export function gateOperationLog(
   };
 
   /** True when this severity is at or above the setting. */
-  const allow = (messageLevel: OperationLogLevel) =>
-    rank[messageLevel] >= rank[level()];
+  const allow = (
+    /** Severity of the line being written. */
+    messageLevel: OperationLogLevel,
+  ) => rank[messageLevel] >= rank[level()];
 
   return {
     appendLine: (value) => channel.appendLine(formatted('INFO', value)),
@@ -112,7 +138,10 @@ export function gateOperationLog(
     error: (message) => {
       if (allow('error')) channel.error(message);
     },
-    show: (preserveFocus) => channel.show(preserveFocus),
+    show: (
+      /** When true, revealing the channel does not steal focus. */
+      preserveFocus,
+    ) => channel.show(preserveFocus),
     dispose: () => channel.dispose(),
   };
 }
@@ -127,13 +156,20 @@ export function yieldToHost(): Promise<void> {
  * `channel.show` alone does not switch a visible Output tab in Cursor.
  */
 export async function revealOutput(
+  /** Output channel that receives the log. */
   channel: {
     /** Reveal the channel; Cursor ignores show() on log:true channels. */
-    show: (preserveFocus?: boolean) => void;
+    show: (
+      /** When true, revealing the channel does not steal focus. */
+      preserveFocus?: boolean,
+    ) => void;
   },
   host?: {
     /** Run a workbench command such as `workbench.view.output`. */
-    executeCommand(command: string): Thenable<unknown>;
+    executeCommand(
+      /** Command id to run. */
+      command: string,
+    ): Thenable<unknown>;
     /** Yield so the webview message turn can finish first. */
     yieldToHost?: () => Promise<void>;
   },

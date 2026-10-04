@@ -21,7 +21,9 @@ export const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
 export function encodeAttachment(
   id: string,
   bytes: Buffer,
+  /** File extension without a directory. */
   extension: string,
+  /** Basename, not a path. */
   filename?: string,
 ): AttachmentResource {
   if (!IMAGE_UUID.test(id)) fail('INVALID_RESOURCE', 'Invalid attachment id.');
@@ -50,7 +52,10 @@ export function encodeAttachment(
 }
 
 /** Validate and decode an attachment envelope. */
-export function decodeAttachment(value: AttachmentResource): Buffer {
+export function decodeAttachment(
+  /** Attachment envelope to decode. */
+  value: AttachmentResource,
+): Buffer {
   if (!IMAGE_UUID.test(value.id)) {
     fail('INVALID_RESOURCE', 'Invalid attachment id.');
   }
@@ -113,9 +118,15 @@ export function attachmentDirectory(workspace: WorkspaceEntry): string {
  * 0 = `{uuid}.ext`, 1 = `image-{uuid}.ext`, 2 = `{uuid}-{variantUuid}.ext`.
  */
 function attachmentNameRank(
+  /** Cache filename to rank against the image uuid. */
   name: string,
   uuid: string,
-): { rank: number; extension: string } | null {
+): {
+  /** 0 is an exact uuid name, 1 is `image-{uuid}`, 2 is a variant suffix. */
+  rank: number;
+  /** Lowercase image extension. */
+  extension: string;
+} | null {
   const dot = name.lastIndexOf('.');
 
   if (dot <= 0) return null;
@@ -142,7 +153,12 @@ function attachmentNameRank(
 export async function resolveAttachmentPath(
   workspace: WorkspaceEntry,
   uuid: string,
-): Promise<{ filePath: string; extension: string } | null> {
+): Promise<{
+  /** Absolute path of the cache file. */
+  filePath: string;
+  /** Lowercase image extension. */
+  extension: string;
+} | null> {
   if (!IMAGE_UUID.test(uuid))
     fail('INVALID_RESOURCE', 'Invalid attachment id.');
   const dir = attachmentDirectory(workspace);
@@ -193,7 +209,10 @@ export async function resolveAttachmentPath(
 }
 
 /** Basename Cursor should write for this envelope. */
-export function attachmentFilename(resource: AttachmentResource): string {
+export function attachmentFilename(
+  /** Resource envelope to write or check. */
+  resource: AttachmentResource,
+): string {
   return (
     resource.filename || `${resource.id.toLowerCase()}.${resource.extension}`
   );
@@ -230,7 +249,10 @@ function attachmentUuidFromBasename(name: string): string | null {
 }
 
 /** Basename of a path or file URL. Not a permission to open that path. */
-function basenameFromReference(value: string): string | null {
+function basenameFromReference(
+  /** Path or file URL. */
+  value: string,
+): string | null {
   if (!value || value.length > 4096) return null;
   let filePath = value;
 
@@ -251,6 +273,7 @@ function basenameFromReference(value: string): string | null {
 
 /** Cache basenames for `uuid` mentioned outside `text` and `rawText`. */
 export function imageBasenamesFromBubbles(
+  /** Bubble records to scan. */
   list: BubbleRecord[] | undefined,
   uuid: string,
 ): string[] {
@@ -258,7 +281,10 @@ export function imageBasenamesFromBubbles(
   const seen = new Set<string>();
 
   /** Record one basename that belongs to this image uuid. */
-  const add = (value: string) => {
+  const add = (
+    /** String that may name this image. */
+    value: string,
+  ) => {
     const base = basenameFromReference(value);
 
     if (!base || !attachmentNameRank(base, uuid) || seen.has(base)) return;
@@ -267,7 +293,12 @@ export function imageBasenamesFromBubbles(
   };
 
   /** Walk JSON. User-facing text is not a file reference. */
-  const visit = (value: unknown, depth: number) => {
+  const visit = (
+    /** Nested JSON value. */
+    value: unknown,
+    /** Current walk depth. */
+    depth: number,
+  ) => {
     if (depth > 128) return;
 
     if (typeof value === 'string') {
@@ -311,8 +342,14 @@ export function imageBasenamesFromBubbles(
 export async function collectAttachmentVariants(
   workspace: WorkspaceEntry,
   uuid: string,
+  /** Basenames the chat points at. */
   referenced: string[],
-): Promise<{ resources: AttachmentResource[]; missing: boolean }> {
+): Promise<{
+  /** Distinct byte-groups for this image. */
+  resources: AttachmentResource[];
+  /** A referenced basename is not on disk. */
+  missing: boolean;
+}> {
   if (!IMAGE_UUID.test(uuid))
     fail('INVALID_RESOURCE', 'Invalid attachment id.');
   const dir = attachmentDirectory(workspace);
@@ -365,13 +402,22 @@ export async function collectAttachmentVariants(
   }
 
   const present = new Set(files.map((file) => file.name));
+
   const missingReferenced = referenced.some((name) => !present.has(name));
 
   if (!files.length) return { resources: [], missing: true };
 
   const groups = new Map<
     string,
-    Array<{ name: string; extension: string; rank: number; bytes: Buffer }>
+    Array<{
+      /** Cache basename. */
+      name: string;
+      /** Lowercase image extension. */
+      extension: string;
+      /** How closely the basename matches the uuid. Lower is closer. */
+      rank: number;
+      bytes: Buffer;
+    }>
   >();
 
   for (const file of files) {
@@ -424,8 +470,10 @@ export async function collectAttachmentVariants(
 
 /** True when every referenced basename for this uuid is covered by the export. */
 export function imageExportCovers(
+  /** Attachment envelopes already exported. */
   attachments: AttachmentResource[],
   uuid: string,
+  /** Basenames the chat points at. */
   referenced: string[],
 ): boolean {
   const rows = attachments.filter(
@@ -447,8 +495,11 @@ export function imageExportCovers(
 
 /** Point structured image paths at the installed basename. Leave message text alone. */
 export function rewriteImageReferences(
+  /** Composer or bubble JSON to rewrite. */
   value: unknown,
+  /** Source basename to the installed path. */
   destByBasename: Map<string, string>,
+  /** Remaining recursion depth. */
   depth = 0,
 ): unknown {
   if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
@@ -479,8 +530,11 @@ export function rewriteImageReferences(
 
 /** Remap image paths inside composer and bubble JSON after files are installed. */
 export function rewriteChatImagePaths(
+  /** Composer bodies keyed by id. */
   composers: Record<string, string>,
+  /** Bubble records keyed by composer id. */
   bubbles: Record<string, BubbleRecord[]>,
+  /** Source basename to the installed path. */
   destByBasename: Map<string, string>,
 ): void {
   if (!destByBasename.size) return;
@@ -508,6 +562,7 @@ export function rewriteChatImagePaths(
 export async function readAttachmentFile(
   filePath: string,
   uuid: string,
+  /** File extension without a directory. */
   extension: string,
 ): Promise<AttachmentResource> {
   const bytes = await fs.promises.readFile(filePath);
@@ -518,6 +573,7 @@ export async function readAttachmentFile(
 /** Write an attachment; reuse identical bytes, never overwrite a different file. */
 export async function writeAttachmentFile(
   workspace: WorkspaceEntry,
+  /** Resource envelope to write or check. */
   resource: AttachmentResource,
 ): Promise<void> {
   const bytes = decodeAttachment(resource);
@@ -540,6 +596,7 @@ export async function writeAttachmentFile(
 /** Confirm a written attachment still matches the envelope. */
 export async function verifyAttachmentFile(
   workspace: WorkspaceEntry,
+  /** Resource envelope to write or check. */
   resource: AttachmentResource,
 ): Promise<void> {
   const expected = decodeAttachment(resource);

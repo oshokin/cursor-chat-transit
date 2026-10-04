@@ -8,15 +8,23 @@ import { showStatisticsPicker } from './statistics-picker';
 
 /** Add one on-demand analysis action to an ordinary native picker. */
 export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
+  /** Rows offered before analysis. */
   items: T[];
+  /** Stable identity for one row. */
   key: (item: T) => string | undefined;
+  /** Picker title. */
   title: string;
+  /** Picker placeholder. */
   placeholder: string;
+  /** When true, the caller is selecting chats rather than a workspace. */
   many?: boolean;
   /** Retain the current workspace when building the filtered list. */
   keepVisible?: (item: T) => boolean;
+  /** Tooltip for the analysis button. */
   buttonLabel: string;
+  /** Operation log for the scan. */
   operations: TransitLog;
+  /** Build the statistics job when a scan starts. */
   job: () => Promise<StatisticsJob>;
 }): Promise<T[] | undefined> {
   return showStatisticsPicker({
@@ -38,13 +46,19 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
       iconPath: new vscode.ThemeIcon('eye'),
       tooltip: 'Show all workspaces',
     },
+    hideButton: {
+      iconPath: new vscode.ThemeIcon('eye-closed'),
+      tooltip: 'Hide empty workspaces',
+    },
     cancelButton: {
       iconPath: new vscode.ThemeIcon('debug-stop'),
       tooltip: 'Stop analysis',
     },
     run: async (
       signal: AbortSignal,
+      /** Refresh the UI as results arrive. */
       update: (row: StatisticsUpdate) => void,
+      /** When true, inspect message bodies. */
       deepCheck = false,
     ) => {
       const log = startOperationLog(
@@ -64,7 +78,11 @@ export function pickWithStatistics<T extends vscode.QuickPickItem>(options: {
 
         signal.throwIfAborted();
 
-        const result = await runTransfer<{ failed: number }>(
+        /** How many items failed. */
+        const result = await runTransfer<{
+          /** How many checks failed. */
+          failed: number;
+        }>(
           { ...job, ...transferSettings(), deepCheck },
           {
             signal,

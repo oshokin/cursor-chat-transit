@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type * as vscode from 'vscode';
 import type { SidebarState } from '../src/sidebar-provider';
+import type { RecoveryPreview } from '../src/recovery-preview';
 import { TransferError } from '../src/types';
 
 /** Synthetic storage identity; no user profile or chat database is opened. */
@@ -16,6 +17,8 @@ const chats = [{ composerId: 'one', name: 'First chat' }];
 /** Dialog responses and transfer calls observed at the I/O boundaries. */
 const host = {
   /** Dialog stage to cancel, or empty to proceed. */
+  noRecovery: false,
+  recoveryPrompts: 0,
   cancel: '',
   /** When true, the export picker selects individual chats instead of all chats. */
   selected: false,
@@ -59,7 +62,10 @@ const fakeVscode = {
   workspace: { getConfiguration: () => ({ inspect: () => undefined }) },
   window: {
     /** Choose a mode or a chat selection, or cancel at that step. */
-    async showQuickPick(_items: unknown, options: { canPickMany?: boolean }) {
+    async showQuickPick(
+      _items: unknown,
+      options: { canPickMany?: boolean; ignoreFocusOut?: boolean },
+    ) {
       if (options.canPickMany) {
         waiting('chats', 'Select chats to export');
         if (host.cancel === 'chats') return undefined;
@@ -67,6 +73,7 @@ const fakeVscode = {
         return host.cancel === 'empty' ? [] : [{ id: 'one' }];
       }
 
+      assert.equal(options.ignoreFocusOut, true);
       waiting('mode', 'Choose chats to export');
       await host.onMode?.();
       if (host.cancel === 'mode') return undefined;
@@ -110,7 +117,12 @@ const fakeVscode = {
       );
     },
     showInformationMessage: async () => undefined,
-    showWarningMessage: async () => undefined,
+    showWarningMessage: async () => {
+      host.recoveryPrompts++;
+      if (host.noRecovery) return new Promise<undefined>(() => {});
+
+      return undefined;
+    },
     showErrorMessage: async () => undefined,
   },
 };
@@ -249,8 +261,34 @@ loader._load = function (id, parent, isMain) {
 
     if (id === './transfer-process')
       return {
-        async runTransfer(job: { kind: string }) {
+        async runTransfer(
+          job: { kind: string },
+          handlers: {
+            onRecovery?: (preview: RecoveryPreview) => Promise<boolean>;
+          },
+        ) {
+          if (job.kind === 'list-chats') return transfer.listWorkspaceChats();
           if (job.kind === 'export') return transfer.exportToFile();
+
+          if (host.noRecovery) {
+            assert.equal(
+              await handlers.onRecovery?.({
+                complete: 0,
+                historyOnly: 0,
+                skipped: 1,
+                alreadyImported: 0,
+                missingResources: {},
+                details: ['Missing message body'],
+              }),
+              false,
+            );
+
+            const error = new TransferError('Missing message bodies');
+
+            error.code = 'NOTHING_TO_IMPORT';
+
+            throw error;
+          }
 
           return transfer.importFromObject();
         },
@@ -280,6 +318,8 @@ try {
 
 beforeEach(() => {
   Object.assign(host, {
+    noRecovery: false,
+    recoveryPrompts: 0,
     cancel: '',
     selected: false,
     imported: 1,
@@ -307,7 +347,7 @@ beforeEach(() => {
 });
 
 /** Exercise the real lock lifecycle around a command and remove its temporary files. */
-async function run(kind: 'export' | 'import'): Promise<void> {
+async function run(kind: 'export' | 'import', allChats = false): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transit-dialogs-'));
 
   const context = {
@@ -323,7 +363,13 @@ async function run(kind: 'export' | 'import'): Promise<void> {
   try {
     await state
       .withLock(context, () =>
-        (kind === 'export' ? doExport : doImport)({ context, operations }),
+        (kind === 'export' ? doExport : doImport)({
+          context,
+          operations,
+          ...(allChats
+            ? { workspace: workspace as never, allChats: true }
+            : {}),
+        }),
       )
       .catch((error: unknown) => showFail(kind, error, operations));
 
@@ -477,3 +523,38 @@ test('cancelled import clears restart eligibility from the previous result', asy
   assert.equal(state.runtime.uiState.status, 'cancelled');
   assert.equal(state.runtime.uiState.importNeedsRestart, false);
 });
+
+test('unrecoverable archive reports missing data instead of cancellation or success', async () => {
+  host.failureCode = 'NOTHING_TO_IMPORT';
+  await run('import');
+  assert.equal(state.runtime.uiState.status, 'incomplete');
+  assert.equal(state.runtime.uiState.statusTitle, 'No recoverable chats');
+
+  assert.match(
+    state.runtime.uiState.statusDetail,
+    /Required message data is missing/,
+  );
+
+  assert.equal(state.runtime.uiState.importNeedsRestart, false);
+});
+
+test('whole-workspace export opens Save directly without a mode or chat picker', async () => {
+  await run('export', true);
+  assert.equal(host.exports, 1);
+  assert.equal(host.events.includes('mode'), false);
+  assert.equal(host.events.includes('chats'), false);
+  assert.equal(host.events.includes('save'), true);
+});
+
+test(
+  'zero-candidate import preflight returns without opening a blocking acknowledgement dialog',
+  { timeout: 3000 },
+  async () => {
+    host.noRecovery = true;
+    await run('import');
+    assert.equal(host.recoveryPrompts, 0);
+    assert.equal(state.runtime.uiState.status, 'incomplete');
+    assert.equal(state.runtime.uiState.canCancel, false);
+    assert.equal(host.imports, 0);
+  },
+);

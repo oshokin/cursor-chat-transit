@@ -29,6 +29,7 @@ export function importDialogOptions(
  * A remote file is copied by the editor; this process does not buffer the archive.
  */
 export async function localBundlePath(
+  /** URI string or parts. */
   uri: vscode.Uri,
   signal?: AbortSignal,
 ): Promise<string> {

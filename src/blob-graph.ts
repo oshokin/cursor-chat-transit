@@ -60,6 +60,7 @@ function mapValue(entry: Buffer): Buffer | null {
   const fields = tryFields(entry);
 
   if (!fields) throw new Error('Bad map entry');
+
   const value = fields.find((field) => field.field === 2 && field.wire === 2);
 
   return value ? value.bytes : null;
@@ -69,7 +70,11 @@ function mapValue(entry: Buffer): Buffer | null {
  * Blob ids named by one `ConversationStateStructure`.
  * Malformed wire data throws so the caller can fail closed.
  */
-function refsFromState(bytes: Buffer, depth = 0): Node[] {
+function refsFromState(
+  bytes: Buffer,
+  /** Remaining recursion depth. */
+  depth = 0,
+): Node[] {
   if (depth > 4) throw new Error('Nested conversation state is too deep.');
   const out: Node[] = [];
 
@@ -100,7 +105,11 @@ function refsFromState(bytes: Buffer, depth = 0): Node[] {
 }
 
 /** `file_states` / `subagent_state_refs`: the map value is the blob id. */
-function pushMapBlob(entry: Buffer, out: Node[]): void {
+function pushMapBlob(
+  entry: Buffer,
+  /** Collected blob ids. */
+  out: Node[],
+): void {
   const value = mapValue(entry);
   const digest = value ? digestOf(value) : null;
 
@@ -108,7 +117,11 @@ function pushMapBlob(entry: Buffer, out: Node[]): void {
 }
 
 /** `file_states_v2`: content and initial_content are blob ids. */
-function pushFileState(entry: Buffer, out: Node[]): void {
+function pushFileState(
+  entry: Buffer,
+  /** Collected blob ids. */
+  out: Node[],
+): void {
   const value = mapValue(entry);
 
   if (!value) return;
@@ -213,7 +226,12 @@ function looseDigests(bytes: Buffer): string[] {
   const out: string[] = [];
 
   /** Nested length-delimited fields. A 32-byte payload is recorded and not opened. */
-  const walk = (buf: Buffer, depth: number): void => {
+  const walk = (
+    /** Raw bytes of one nested field. */
+    buf: Buffer,
+    /** Current walk depth. */
+    depth: number,
+  ): void => {
     if (depth > 32) return;
     const fields = tryFields(buf);
 
@@ -244,11 +262,22 @@ export interface BlobGraph {
   /** State-level blob keys, before nested records are loaded. */
   seeds(): string[];
   /** Digests whose bytes are still needed. */
-  want(limit?: number): string[];
+  want(
+    /** Maximum number of items to return. */
+    limit?: number,
+  ): string[];
   /** Supply the current `want()` set. Null means the blob is absent. */
-  provide(found: ReadonlyMap<string, Buffer | null>): void;
+  provide(
+    /** Blobs supplied for this walk. */
+    found: ReadonlyMap<string, Buffer | null>,
+  ): void;
   /** Keys that were loaded, and required keys that were not. */
-  finish(): { keys: string[]; missing: string[] };
+  finish(): {
+    /** Blob keys whose bytes were loaded. */
+    keys: string[];
+    /** Required blob keys that were absent. */
+    missing: string[];
+  };
 }
 
 /** Empty graph for a composer that has no conversation state. */
@@ -297,7 +326,10 @@ export function openBlobGraph(state: unknown): BlobGraph {
 }
 
 /** Breadth-first walk. Required ids that are absent stay in `missing`. */
-function createGraph(seeds: Node[]): BlobGraph {
+function createGraph(
+  /** Blob ids where the walk starts. */
+  seeds: Node[],
+): BlobGraph {
   const queue: Node[] = [];
   const roles = new Set<string>();
   const required = new Set<string>();
@@ -307,7 +339,10 @@ function createGraph(seeds: Node[]): BlobGraph {
   let status: BlobGraph['status'] = 'ok';
 
   /** A digest can be encountered in several roles; parse every newly learned role. */
-  const push = (node: Node): void => {
+  const push = (
+    /** Digest and role to visit. */
+    node: Node,
+  ): void => {
     if (node.required) required.add(node.digest);
     const role = `${node.digest}:${node.kind}`;
 
@@ -326,7 +361,7 @@ function createGraph(seeds: Node[]): BlobGraph {
       return status;
     },
     seeds: () => [...new Set(seeds.map((node) => blobKey(node.digest)))],
-    want: (limit = 32) =>
+    want: (/** Maximum number of items to return. */ limit = 32) =>
       status === 'ok'
         ? [
             ...new Set(
@@ -372,9 +407,18 @@ function createGraph(seeds: Node[]): BlobGraph {
 
 /** Resolve a graph from blobs already in memory. */
 export function resolveBlobGraph(
+  /** Conversation or transfer state. */
   state: unknown,
+  /** Blob digest to the bytes already loaded. */
   blobs: ReadonlyMap<string, Buffer>,
-): { status: 'ok' | 'unsupported'; keys: string[]; missing: string[] } {
+): {
+  /** `unsupported` when the conversation state is not decodable. */
+  status: 'ok' | 'unsupported';
+  /** Blob keys whose bytes were loaded. */
+  keys: string[];
+  /** Required blob keys that were absent. */
+  missing: string[];
+} {
   const graph = openBlobGraph(state);
 
   if (graph.status !== 'ok') {
@@ -396,8 +440,14 @@ export function resolveBlobGraph(
 
 /** Resolve a graph, loading each frontier through `loadMany`. */
 export async function readBlobGraph(
+  /** Conversation or transfer state. */
   state: unknown,
-  loadMany: (digests: string[]) => Promise<ReadonlyMap<string, Buffer | null>>,
+  /** Loads one frontier of blob digests. */
+  loadMany: (
+    /** Blob digests for this call. */
+    digests: string[],
+  ) => Promise<ReadonlyMap<string, Buffer | null>>,
+  /** How many digests to load in one call. */
   batchSize = 1,
 ): Promise<{
   /** `unsupported` when conversation state cannot be decoded. */

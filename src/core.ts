@@ -7,18 +7,21 @@ import type {
 } from './types';
 
 /** Normalize a URI-like object into identity components. */
-function uriPartsFrom(uri: {
-  /** Scheme such as `file` or `vscode-remote`. */
-  scheme: string;
-  /** Host or SSH authority. */
-  authority?: string;
-  /** Decoded URI path. */
-  path: string;
-  /** Query string without `?`. */
-  query?: string;
-  /** Fragment without `#`. */
-  fragment?: string;
-}): UriParts {
+function uriPartsFrom(
+  /** URI string or parts. */
+  uri: {
+    /** Scheme such as `file` or `vscode-remote`. */
+    scheme: string;
+    /** Host or SSH authority. */
+    authority?: string;
+    /** Decoded URI path. */
+    path: string;
+    /** Query string without `?`. */
+    query?: string;
+    /** Fragment without `#`. */
+    fragment?: string;
+  },
+): UriParts {
   return {
     scheme: uri.scheme,
     authority: uri.authority || '',
@@ -31,6 +34,7 @@ function uriPartsFrom(uri: {
 /** Select chats by id. `undefined` means all; `[]` means none. */
 export function selectChats(
   chats: ComposerHeader[],
+  /** Composer ids to keep. An empty list keeps none. */
   selectedIds?: string[],
 ): ComposerHeader[] {
   if (selectedIds === undefined) return chats;
@@ -42,7 +46,11 @@ export function selectChats(
 }
 
 /** Stable workspace identity key: kind + scheme/authority/path/query/fragment. */
-export function workspaceKey(kind: WorkspaceKind, uri: UriParts): string {
+export function workspaceKey(
+  kind: WorkspaceKind,
+  /** URI string or parts. */
+  uri: UriParts,
+): string {
   if (!['folder', 'workspace'].includes(kind))
     throw new TypeError('Invalid workspace kind');
 
@@ -61,18 +69,27 @@ export function workspaceKey(kind: WorkspaceKind, uri: UriParts): string {
 }
 
 /** Percent-decode `%XX` runs once, matching vscode.Uri.parse. */
-function percentDecodeOnce(value: string): string {
-  return value.replace(/(%[0-9A-Fa-f]{2})+/g, (seq) => {
-    try {
-      return decodeURIComponent(seq);
-    } catch {
-      return seq;
-    }
-  });
+function percentDecodeOnce(
+  /** String that may contain `%XX` escapes. */
+  value: string,
+): string {
+  return value.replace(
+    /(%[0-9A-Fa-f]{2})+/g,
+    (/** Percent-encoded byte sequence. */ seq) => {
+      try {
+        return decodeURIComponent(seq);
+      } catch {
+        return seq;
+      }
+    },
+  );
 }
 
 /** Parse a URI string; decode authority and path once without lowercasing. */
-export function uriFromString(value: string): UriParts {
+export function uriFromString(
+  /** URI string to parse. */
+  value: string,
+): UriParts {
   if (typeof value !== 'string' || !value)
     throw new TypeError('Expected URI string');
   const u = new URL(value);
@@ -87,7 +104,10 @@ export function uriFromString(value: string): UriParts {
 }
 
 /** Read workspace identity from Cursor `workspace.json` (`workspace` wins over `folder`). */
-export function identityFromWorkspaceJson(meta: unknown): WorkspaceIdentity {
+export function identityFromWorkspaceJson(
+  /** Parsed workspace.json object. */
+  meta: unknown,
+): WorkspaceIdentity {
   if (!meta || typeof meta !== 'object') {
     throw new Error('Workspace metadata has neither folder nor workspace URI');
   }
@@ -107,6 +127,7 @@ export function identityFromWorkspaceJson(meta: unknown): WorkspaceIdentity {
 
 /** Current host identity: `.code-workspace` file first, else a single folder. */
 export function currentIdentity(
+  /** Multi-root workspace file, when one is open. */
   workspaceFile?:
     | {
         /** Scheme such as `file` or `vscode-remote`. */
@@ -121,6 +142,7 @@ export function currentIdentity(
         fragment?: string;
       }
     | undefined,
+  /** Folders open in the current window. */
   workspaceFolders?:
     | ReadonlyArray<{
         /** URI of one workspace folder. */
@@ -175,7 +197,10 @@ export function bubbleRange(composerId: string): {
 }
 
 /** Encode a UTF-8 string as a SQLite text literal without quoting. */
-export function sqlText(value: string): string {
+export function sqlText(
+  /** UTF-8 string to encode as a SQLite text literal. */
+  value: string,
+): string {
   if (typeof value !== 'string') throw new TypeError('Expected a string');
 
   return `CAST(X'${Buffer.from(value, 'utf8').toString('hex')}' AS TEXT)`;
@@ -183,8 +208,11 @@ export function sqlText(value: string): string {
 
 /** Rewrite string values at JSON Pointers using `idMap`; never substring-replace text. */
 export function rewriteExactPaths(
+  /** JSON value whose exact paths are rewritten. */
   value: unknown,
+  /** JSON pointers whose string values are rewritten. */
   pointers: string[],
+  /** Old id to the replacement id. */
   idMap: Map<string, string>,
 ): unknown {
   const copy = JSON.parse(JSON.stringify(value)) as Json;
@@ -244,6 +272,7 @@ export function rewriteExactPaths(
 /** Rename object keys that appear in `idMap`. */
 export function rewriteObjectKeys(
   obj: unknown,
+  /** Old id to the replacement id. */
   idMap: Map<string, string>,
 ): unknown {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
@@ -260,7 +289,9 @@ export function rewriteObjectKeys(
 
 /** Truncate a finite number; otherwise return `fallback`. */
 export function finiteInt(
+  /** Candidate number. */
   value: unknown,
+  /** Value used when the input is not finite. */
   fallback: number | null = null,
 ): number | null {
   if (value === null || value === undefined || value === '') return fallback;

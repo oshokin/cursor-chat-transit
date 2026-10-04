@@ -6,20 +6,20 @@ For setup, validation, packaging, and releases, see [Development](development.md
 
 ## Components
 
-| Area             | Modules                                                                         | Responsibility                                                                 |
-| ---------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Host integration | `extension*.ts`, `quit-cursor.ts`                                               | Commands, native dialogs, settings, and application actions                    |
-| Sidebar          | `sidebar-provider.ts`, `webview/`                                               | Themed transfer status and a restricted action interface                       |
-| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                         | Stable ordering, labels, identity, and disambiguation                          |
-| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`              | Read-only analysis, native picker lifecycle, and operation logging             |
-| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                     | Isolated work, incremental IPC events, and cancellation                        |
-| Export           | `export-transfer.ts`, `export-bundle.ts`                                        | Header resolution, consistent database reads, and archive creation             |
-| Import           | `import-bundle.ts`, `import-batches.ts`, `import-cleanup.ts`                    | Validation, preparation, bounded writes, and interrupted-import reconciliation |
-| Archive          | `bundle-*.ts`, `ndjson-io.ts`                                                   | Format validation, bounded records, indexes, and ZIP I/O                       |
-| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                      | Asynchronous SQLite processes, read views, schema checks, and SQL operations   |
-| Resources        | `dependencies.ts`, `resource-*.ts`, `attachments.ts`, `plans.ts`, `canvases.ts` | Reference discovery and byte-preserving resource transfer                      |
-| Receipts         | `journal*.ts`, `import-policy.ts`, `import-reconcile.ts`                        | Snapshot identity, pending work, and repeat-import decisions                   |
-| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`  | Structured facts, readable logs, and measured progress                         |
+| Area             | Modules                                                                           | Responsibility                                                                 |
+| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Host integration | `extension*.ts`, `quit-cursor.ts`                                                 | Commands, native dialogs, settings, and application actions                    |
+| Sidebar          | `sidebar-provider.ts`, `webview/`                                                 | Themed transfer status and a restricted action interface                       |
+| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                           | Stable ordering, labels, identity, and disambiguation                          |
+| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`                | Read-only analysis, native picker lifecycle, and operation logging             |
+| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                       | Isolated work, incremental IPC events, and cancellation                        |
+| Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts` | Header resolution, consistent database reads, and archive creation             |
+| Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                     | Validation, preparation, bounded writes, and interrupted-import reconciliation |
+| Archive          | `bundle-*.ts`, `ndjson-io.ts`                                                     | Format validation, bounded records, indexes, and ZIP I/O                       |
+| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                        | Asynchronous SQLite processes, read views, schema checks, and SQL operations   |
+| Resources        | `dependencies.ts`, `resource-*.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`   | Reference discovery and byte-preserving resource transfer                      |
+| Receipts         | `journal*.ts`, `import-policy.ts`, `import-reconcile.ts`                          | Snapshot identity, pending work, and repeat-import decisions                   |
+| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`    | Structured facts, readable logs, and measured progress                         |
 
 Sources compile from `src/` to `out/`. The sidebar client compiles from `webview/` to `resources/sidebar-client.js`. Small object-based helpers support fixtures; they do not provide an alternative monolithic JSON file-import path.
 
@@ -134,11 +134,11 @@ Format version 4 is the only file format read and written by this build. An arch
 
 A record larger than the part target occupies its own part within the record limit. The total archive can exceed 1 GiB. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.
 
-ZIP extraction validates paths and entry metadata before installation. Resource bytes are verified and existing files are reused only when their content matches. Format and safety constraints remain active in recovery mode.
+ZIP extraction validates paths and entry metadata before installation. Resource bytes are verified and existing files are reused only when their content matches. Format and safety constraints remain active during recovery. An incomplete import pauses after staging its plan and before publishing Cursor data. The worker sends only bounded counts and examples over IPC; the extension requests consent for this operation. Cancellation while waiting releases the worker and its locks. Reconciliation validates prior pending records and may update private receipts during inspection; cleanup of unpublished Cursor rows is deferred until the decision boundary has passed.
 
 ## On-demand statistics
 
-The workspace picker automatically checks history before publishing its initial list; the current workspace is retained and hidden entries can be restored without another scan. Each picker also has a metadata statistics button; the chat picker adds a checked-selection action. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
+The workspace picker automatically checks history before publishing its initial list; the current workspace is retained and the Show all / Hide empty toggle changes visibility without another scan. Each picker also has a metadata statistics button; the chat picker adds a checked-selection action. While running, that button becomes **Stop analysis**, the native busy indicator is active, and the title shows completed rows. Input remains enabled. No modal progress dialog interrupts selection.
 
 `statistics-picker.ts` preserves filter text, selected IDs, active items, scroll position, and original order when replacing row details. Updates are coalesced on a 100 ms timer. Accepting or closing the picker cancels analysis immediately and waits for worker cleanup before the caller starts its next operation. Late results cannot update a disposed picker. A repeated click while stopping does not launch another worker.
 
@@ -190,7 +190,7 @@ The extension's labels and behavior are product choices informed by these refere
 
 A chat passes source checks only when its supported conversation index references present message records, identities and message types agree, and the export reader reports no missing supported resources. Unsupported and ambiguous layouts are not automatically selected. Empty visible lists with leftover messages or nonempty state are unknown, not empty. Missing bodies with orphan messages are incomplete, not absent history. Referenced canvases without a resolvable canvas directory count as missing resources.
 
-`chat-presence.ts` implements a cheaper workspace-only check. An indexed message-existence query retains history without loading any message payload. If no message exists, a bounded composer read distinguishes proven empty/missing data from references, resources, unknown state, and unsupported layouts. The scan never walks blob graphs or opens attachment files. Every resolved chat is checked; one read view covers at most 32 chats and is then released. A workspace is hideable only when every resolved chat is confirmed empty or has neither a body nor remaining messages. An error or unknown/incomplete chat keeps it visible. Filesystem project-path existence is not a deletion or filtering criterion. These are view decisions; no storage is removed. Filter state lasts only for the current picker and can be reversed without another scan.
+`chat-presence.ts` implements a cheaper workspace-only check. An indexed message-existence query retains history without loading any message payload. If no message exists, a bounded composer read distinguishes proven empty/missing data from references, resources, unknown state, and unsupported layouts. The scan never walks blob graphs or opens attachment files. To prove a workspace empty, every resolved chat is checked; when any chat must be retained, the presence scan stops early. One read view covers at most 32 chats and is then released. A workspace is hideable only when every resolved chat is confirmed empty or has neither a body nor remaining messages. An error or unknown/incomplete chat keeps it visible. Filesystem project-path existence is not a deletion or filtering criterion. These are view decisions; no storage is removed. Filter state lasts only for the current picker and can be reversed without another scan.
 
 Filtering and bulk selection apply only after the worker finishes. Cancelled or failed runs do not apply partial changes. Per-row failures stay visible and are not selected. Checkbox state is compared with the state at the start of the scan; user changes win. Empty group separators are removed after filtering. Operations logs record both the checks and the action actually applied.
 
@@ -213,3 +213,41 @@ Import can repair a narrowly defined representation error: an existing SQLite TE
 Preflight checks every resource before applying repairs. Its repair queue holds identifiers and comparison metadata, not resource bodies. Each repair rereads one bounded value, checks it against the preflight hash, and uses a short transaction to update only the exact TEXT bytes observed. The stored BLOB is verified before commit. A changed row is preserved. This normalization can remain committed if subsequent chat preparation fails; it is not an all-or-nothing chat rollback.
 
 A preflight resource conflict skips only that chat. Write-time conflicts and infrastructure failures stop the operation. Repeat imports reuse successful receipts. Attempt numbers include skipped chats.
+
+## Partial history and management
+
+`text-recovery.ts` implements a narrow, versioned annotation for exported partial history. `export-chat.ts` streams existing bodies first, then visits ordered missing IDs. Known-role previews or explicit gaps are emitted only when readable text survives. Only private staged composer metadata is rewritten; the source SQLite connection stays read-only. Full bodies, source order and roles are retained. Unknown roles and invalid formats remain unsupported. `cctTextRecovery` records counts, survives imports and re-exports, and makes the importer classify the chat as history-only.
+
+The normal import pipeline remains responsible for integrity checks, resources, publication and receipts. Incomplete imports require per-operation consent. Recovery does not imply a usable Agent state or a verified native transcript renderer. The implementation has no Markdown writer and no separate recovery-copy command.
+
+`managed-selection.ts` stores physical workspace/chat identities. `extension-manager.ts` owns native checkboxes, search, reversible view filtering, cached headers and actions. Parent selections are expanded to exact IDs before deletion confirmation; refresh clears selection. Unchecking a child of a selected workspace expands sibling selections. Empty and unavailable rows are hidden initially, not deleted. Show/hide toggles reuse metadata. Readable unknown formats are not treated as disposable.
+
+`extension-managed-delete.ts` owns one confirmation and one ordinary operation scope. It sends a `delete-chats` job through `runTransfer`, publishes progress/results, and enables the existing Quit Cursor action after writes. It never calls Quit automatically. There is no persisted deletion queue, detached executor or process enumeration. Cancellation and notification dismissal follow the existing transfer lifecycle.
+
+`chat-deletion.ts` orchestrates deletion. `deletion-ownership.ts` reads relevant discovered workspace metadata once and retains only selected identities. `deletion-sql.ts` owns transactional schema checks, selected-index revalidation and mutations. Known shared or unresolved owners are retained. Unsupported layouts, symlink database paths, relevant triggers and foreign-key dependencies stop the affected operation. Shared resources and workspace directories are never swept.
+
+After `BEGIN IMMEDIATE`, selected global and workspace index rows are re-read and compared with preparation results. Unrelated current list data is retained when removing selected references. Global/workspace modifications use one attached transaction per workspace; attached WAL files do not provide crash atomicity as a group. The user must stop Cursor activity: index checks are not a lock on Cursor's in-memory cache or every other workspace.
+
+Selected IDs are normalized in Sets. Temporary-ID inserts and indexed composer/message deletes use batches of at most 64 IDs. Every deletion batch is verified before commit. No full KV scan, resource sweep or parallel write fan-out is added. Failures and cancellation return earlier committed outcomes and stop later workspaces. A lost COMMIT acknowledgement is explicitly uncertain; a transport failure is also shown as an unknown final outcome. Neither is labelled a clean rollback.
+
+`header-index.ts` builds storage-ID and URI-fallback buckets once per global snapshot, preserving source order and explicit-ID precedence. `WorkspaceHeaderReader` shares that index with statistics, catalogue and deletion ownership checks. The index stores metadata references, never message bodies, and is discarded at operation end. Bulk checks normalize selections, capture settings once, and use one statistics job per workspace under a shared cancellation/progress scope. An omitted chat list is resolved in that same worker; an empty list means no chats.
+
+## Native manager and search
+
+`extension-manager.ts` owns tree identity, root filtering, metadata caches, configuration invalidation, and command wiring. Read-only checks live in `extension-managed-check.ts`; deletion orchestration lives in `extension-managed-delete.ts`. Checks and deletion both use the existing operation and transfer worker. `ManagedNode` is the shared presentation model, not a separate representation of Cursor storage.
+
+`managed-search.ts` owns a native Quick Pick with incremental results, focus retention, explicit cancellation, and selection-to-tree navigation. `workspace-catalogue.ts` reads headers in the worker. `WorkspaceHeaderReader` shares the same schema and identity resolution with statistics and caches global headers only for that scan. The catalogue never reads composer/message bodies. Completed header lists are reused by search and tree expansion until Refresh or a relevant configuration change. Failed cached reads are retried by a new search. A generation signal prevents stale results from revealing or updating a refreshed tree.
+
+Search keeps compact header metadata proportional to the number of listed chats; it is not a constant-memory full-text index. One worker reads workspaces sequentially and releases each read view. Incremental UI updates are coalesced. Workspaces and chats use the same sorting functions as the transfer pickers. Concurrent clicks share one search picker.
+
+## Operation lifetime and notifications
+
+A notification Promise represents dismissal or action selection, not transfer completion. `notifications.ts` detaches result notices and catches both synchronous host failures and rejected action callbacks. Completed and no-result operations release progress and locks before notification dismissal. Import preflight with no available chats returns a negative decision immediately instead of opening an acknowledgement-only modal. A real recovery approval remains awaited before writes.
+
+The transfer scope owns cancellation subscriptions and timers. Terminal results disable Cancel, and `withLock` clears process state in a final cleanup scope even if lock release rejects. Tree focus is independent of transfer lifetime. A configuration change invalidates manager metadata; changing the source profile also clears the selected workspace. Active worker jobs use their captured settings.
+
+## Import and export boundaries
+
+`import-bundle.ts` coordinates a transfer. `import-bundle-scan.ts` validates/indexes source chats and determines recovery availability; `import-bundle-resources.ts` resolves and verifies resources; `import-bundle-publish.ts` prepares and publishes chat rows; `import-bundle-reconcile.ts` handles deferred reconciliation. Shared plan shapes and small helpers live in `import-bundle-common.ts`. All modules use the existing journal and conflict checks; there is one write path.
+
+`export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. The archive version stays unchanged; annotated partial text uses the same streamed record layout and integrity checks.

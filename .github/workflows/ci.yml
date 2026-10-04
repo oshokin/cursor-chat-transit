@@ -34,7 +34,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
-      - run: npm run test:unit
 
   sqlite-integration:
     strategy:
@@ -75,11 +74,15 @@ jobs:
           if not "%ERRORLEVEL%"=="7" exit /b 1
           call scripts\dev-node.cmd -- npm run compile
           if errorlevel 1 exit /b 1
-      - name: SQLite integration tests
-        if: runner.os == 'Linux'
-        run: npm run test:sqlite
+      - name: Stop Defender scanning each sqlite3.exe
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+          Add-MpPreference -ExclusionPath $env:TEMP
+          Add-MpPreference -ExclusionProcess node.exe
+          Add-MpPreference -ExclusionProcess sqlite3.exe
       - name: Unit and SQLite tests
-        if: runner.os != 'Linux'
         run: npm test
 
   host-smoke:

@@ -61,7 +61,14 @@ export function sshDisplayHost(authority: string): string | undefined {
 
       if (!data || typeof data !== 'object' || Array.isArray(data))
         return undefined;
-      const host = (data as { hostName?: unknown }).hostName;
+
+      /** Remote host shown in the workspace label. */
+      const host = (
+        data as {
+          /** Remote host stored on the workspace identity. */
+          hostName?: unknown;
+        }
+      ).hostName;
 
       return typeof host === 'string' && /^[\w.@:[\]-]{1,160}$/.test(host)
         ? host

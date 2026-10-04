@@ -76,8 +76,11 @@ export async function writeObjectBundle(
 
 /** Copy v3 resource rows into the v4 writer. */
 async function writeFixtureResources(
+  /** Archive writer receiving the fixture. */
   writer: BundleWriter,
+  /** Temporary directory for spilled bytes. */
   tmp: string,
+  /** In-memory export being spilled. */
   exportObj: ExportObject,
 ): Promise<void> {
   const resources = exportObj.resources;
@@ -152,7 +155,12 @@ async function writeFixtureResources(
 }
 
 /** Write bytes once under their sha256 name. */
-async function spill(dir: string, sha: string, bytes: Buffer): Promise<string> {
+async function spill(
+  /** Directory to scan. */
+  dir: string,
+  sha: string,
+  bytes: Buffer,
+): Promise<string> {
   const file = path.join(dir, sha);
 
   await writeFile(file, bytes, { flag: 'wx' }).catch(

@@ -38,7 +38,6 @@ export interface PendingImportChat {
     kind: 'kv' | 'image' | 'plan' | 'canvas';
     /** Key, image UUID, plan basename, or canvas basename. */
     id: string;
-    /** SHA-256 of the bytes that must still be present. */
     sha256: string;
   }>;
   /** Whether the pending copy is complete or history-only. */
@@ -51,7 +50,6 @@ export interface PendingImport {
   operationId: string;
   /** How far the two-database write has progressed. */
   phase: 'prepared' | 'global-written' | 'workspace-written';
-  /** Chats in this batch. */
   chats: PendingImportChat[];
   /** Backup paths created before mutation. */
   backups?: DatabaseBackupPair;
@@ -84,7 +82,12 @@ export async function targetKeyFor(workspace: WorkspaceEntry): Promise<string> {
 }
 
 /** Journal filename for this target key, hashed so paths stay short. */
-export function journalPathFor(journalDir: string, targetKey: string): string {
+export function journalPathFor(
+  /** Directory that holds the receipt database. */
+  journalDir: string,
+  /** Canonical destination identity. */
+  targetKey: string,
+): string {
   const digest = createHash('sha256').update(targetKey, 'utf8').digest('hex');
 
   return path.join(journalDir, `import-v4-${digest.slice(0, 32)}.sqlite`);
@@ -92,7 +95,9 @@ export function journalPathFor(journalDir: string, targetKey: string): string {
 
 /** Load a journal or an empty one. Corrupt / unsupported files fail closed. */
 export async function loadJournal(
+  /** Directory that holds the receipt database. */
   journalDir: string,
+  /** Canonical destination identity. */
   targetKey: string,
 ): Promise<ImportJournal> {
   const { JournalStore } = await import('./journal-db');
@@ -107,7 +112,9 @@ export async function loadJournal(
 
 /** Persist a journal through the v4 receipt database. */
 export async function saveJournal(
+  /** Directory that holds the receipt database. */
   journalDir: string,
+  /** Receipt database for this destination. */
   journal: ImportJournal,
 ): Promise<void> {
   const { JournalStore } = await import('./journal-db');
@@ -129,6 +136,7 @@ export async function saveJournal(
 /** Same-directory temp, write, fsync, rename. */
 export async function writeJsonAtomic(
   filePath: string,
+  /** JSON value written atomically. */
   value: unknown,
 ): Promise<void> {
   const dir = path.dirname(filePath);
@@ -180,6 +188,7 @@ async function canonicalPath(filePath: string): Promise<string> {
 
 /** Promote an already verified pending batch without retaining its mutable pending record. */
 export function completePendingImport(
+  /** Receipt database for this destination. */
   journal: ImportJournal,
   completedAt = new Date().toISOString(),
 ): ImportJournal {

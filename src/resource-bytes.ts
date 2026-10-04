@@ -5,7 +5,11 @@ import { TransferError } from './types';
 export const MAX_RESOURCE_BYTES = 32 * 1024 * 1024;
 
 /** Throw a TransferError with a stable code. */
-export function resourceError(code: string, message: string): never {
+export function resourceError(
+  /** Status or exit code. */
+  code: string,
+  message: string,
+): never {
   const err = new TransferError(message);
 
   err.code = code;

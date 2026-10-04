@@ -26,7 +26,9 @@ export type WorkspaceResolve =
 
 /** Reuse the selected storage pair; never substitute a different project. */
 export function resolveSelectedWorkspace(
+  /** Workspace the user already picked. */
   selected: WorkspaceEntry | undefined,
+  /** Entries to turn into picker rows. */
   entries: WorkspaceEntry[],
 ): WorkspaceResolve {
   if (!selected) return { status: 'none' };
@@ -45,7 +47,11 @@ export type TransferKind = 'export' | 'import';
 
 /** Short English reason for one incomplete export chat. */
 function issueReason(issue: ExportChatIssue): string {
+  if (issue.reason === 'recovered-text')
+    return `contains recovered previews or gaps for ${issue.missingMessages ?? 'some'} missing messages`;
   if (issue.reason === 'missing-body') return 'has no stored body';
+  if (issue.reason === 'missing-messages')
+    return `is missing ${issue.missingMessages ?? 'some'} message bodies`;
 
   if (issue.reason === 'unsupported-state') {
     return 'has an unsupported conversation state';
@@ -88,9 +94,16 @@ function issueReason(issue: ExportChatIssue): string {
 
 /** Popup and sidebar copy. Many chats are listed by name, then truncated. */
 export function formatIncompleteExportNotice(
+  /** Export problems already recorded. */
   issues: ExportChatIssue[],
+  /** How many chat names to include. */
   maxNames = 3,
-): { toast: string; detail: string } {
+): {
+  /** Short notice title. */
+  toast: string;
+  /** Second line of the notice. */
+  detail: string;
+} {
   if (!issues.length) {
     return {
       toast:
@@ -100,8 +113,10 @@ export function formatIncompleteExportNotice(
   }
 
   /** Quote a chat title for the incomplete-export toast. */
-  const title = (issue: ExportChatIssue) =>
-    JSON.stringify(chatListLabel(issue.name));
+  const title = (
+    /** Incomplete chat named in the toast. */
+    issue: ExportChatIssue,
+  ) => JSON.stringify(chatListLabel(issue.name));
 
   if (issues.length === 1) {
     const issue = issues[0]!;
@@ -128,6 +143,7 @@ export function formatIncompleteExportNotice(
 /** Human stage label for the sidebar and native progress reporter. */
 export function phaseMessage(
   phase: TransferPhase,
+  /** Progress counts for this phase. */
   metrics: TransferPhaseMetrics = {},
   kind?: TransferKind,
 ): string {
@@ -185,7 +201,6 @@ export interface ImportNotice {
   title: string;
   /** One-line explanation. */
   detail: string;
-  /** Toast text. */
   toast: string;
   /** Named chats listed under the status. */
   items: string[];
@@ -211,7 +226,10 @@ function chatItemLabel(chat: {
 }
 
 /** Calm Last-transfer copy for import results. */
-export function formatImportNotice(result: ImportResult): ImportNotice {
+export function formatImportNotice(
+  /** Terminal result of the operation. */
+  result: ImportResult,
+): ImportNotice {
   const restoredChats = result.restoredChats || [];
   const restored = result.restored ?? restoredChats.length;
 
@@ -323,13 +341,4 @@ export function formatImportNotice(result: ImportResult): ImportNotice {
     restart,
     status: 'completed',
   };
-}
-
-/** Fire a success toast without holding the transfer lock. */
-export function notifyCompletion(
-  show: () => PromiseLike<string | undefined>,
-  onChoice: (choice: string | undefined) => void,
-  onError: () => void,
-): void {
-  void Promise.resolve(show()).then(onChoice, onError);
 }

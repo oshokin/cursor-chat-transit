@@ -18,6 +18,8 @@ export const runtime: {
   busy: boolean;
   /** AbortController for the in-flight operation. */
   activeAbort?: AbortController;
+  /** Disposed when a progress scope ends or is replaced. */
+  cancelSubscription?: vscode.Disposable;
   /** Repaints elapsed time while a transfer is running. */
   progressTimer?: ReturnType<typeof setInterval>;
   /** Workspace selected as the transfer source or target. */
@@ -49,12 +51,16 @@ export function idleState(): SidebarState {
 }
 
 /** Combine progress cancellation with the sidebar Cancel action. */
-export function linkedSignal(token: vscode.CancellationToken): AbortSignal {
+export function linkedSignal(
+  /** Cancellation token or lock token. */
+  token: vscode.CancellationToken,
+): AbortSignal {
+  runtime.cancelSubscription?.dispose();
   const ac = new AbortController();
 
   runtime.activeAbort = ac;
   if (token.isCancellationRequested) ac.abort();
-  token.onCancellationRequested(() => ac.abort());
+  runtime.cancelSubscription = token.onCancellationRequested(() => ac.abort());
   setUi({ canCancel: true });
 
   return ac.signal;
@@ -62,10 +68,21 @@ export function linkedSignal(token: vscode.CancellationToken): AbortSignal {
 
 /** Drive the sidebar bar and Notification increment from transfer phases. */
 export function attachPhaseProgress(
-  vscodeProgress: vscode.Progress<{ message?: string; increment?: number }>,
+  /** Native progress notification. */
+  vscodeProgress: vscode.Progress<{
+    /** Progress text shown for this phase. */
+    message?: string;
+    /** Progress bar step, when the phase reports one. */
+    increment?: number;
+  }>,
+  /** Operation log receiving the line. */
   log: ReturnType<typeof startOperationLog>,
   kind: TransferKind,
-): (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void {
+): (
+  phase: TransferPhase,
+  /** Progress counts for this phase. */
+  metrics?: TransferPhaseMetrics,
+) => void {
   const model = new ProgressModel(kind, log.startedAt);
 
   if (runtime.progressTimer) clearInterval(runtime.progressTimer);
@@ -75,7 +92,11 @@ export function attachPhaseProgress(
       setUi(model.snapshot());
   }, 1000);
 
-  return (phase, metrics = {}) => {
+  return (
+    phase,
+    /** Progress counts for this phase. */
+    metrics = {},
+  ) => {
     log.phase(phase, metrics);
     model.update(phase, metrics);
     const message = phaseMessage(phase, metrics, kind);
@@ -87,12 +108,14 @@ export function attachPhaseProgress(
 
 /** Publish one frozen total from the log clock and remove obsolete stage details. */
 export function finishPhaseProgress(
+  /** Operation log receiving the line. */
   log: ReturnType<typeof startOperationLog>,
 ): void {
   clearInterval(runtime.progressTimer);
   runtime.progressTimer = undefined;
 
   setUi({
+    canCancel: false,
     timingLabel: `Total ${humanDuration(log.elapsedMs())}`,
     stageLabel: '',
     currentItem: '',
@@ -101,8 +124,18 @@ export function finishPhaseProgress(
 }
 
 /** Push sidebar state and refresh the view if it exists. */
-export function setUi(patch: Partial<SidebarState>): void {
+export function setUi(
+  /** Fields merged into the sidebar state. */
+  patch: Partial<SidebarState>,
+): void {
   runtime.uiState = { ...runtime.uiState, ...patch };
+  if (
+    patch.status &&
+    ['completed', 'incomplete', 'cancelled', 'failed', 'partial'].includes(
+      patch.status,
+    )
+  )
+    runtime.uiState.canCancel = false;
   runtime.sidebar?.refresh();
 }
 
@@ -133,7 +166,9 @@ export function setSource(entry: WorkspaceEntry | undefined): void {
 
 /** Run `fn` under the in-process + file lock. */
 export async function withLock<T>(
+  /** Extension storage and host state. */
   context: vscode.ExtensionContext,
+  /** Work that runs while the lock is held. */
   fn: () => Promise<T>,
 ): Promise<T | undefined> {
   if (runtime.busy) {
@@ -166,20 +201,25 @@ export async function withLock<T>(
 
     return await fn();
   } finally {
-    if (lock) await lock.release();
-    clearInterval(runtime.progressTimer);
-    runtime.progressTimer = undefined;
-    runtime.busy = false;
-    runtime.activeAbort = undefined;
+    try {
+      if (lock) await lock.release();
+    } finally {
+      clearInterval(runtime.progressTimer);
+      runtime.progressTimer = undefined;
+      runtime.busy = false;
+      runtime.activeAbort = undefined;
+      runtime.cancelSubscription?.dispose();
+      runtime.cancelSubscription = undefined;
 
-    setUi({
-      busy: false,
-      canCancel: false,
-      progress: undefined,
-      stageLabel: '',
-      currentItem: '',
-      timingLabel:
-        runtime.uiState.timingLabel?.split('\n')[0]?.split(' · ')[0] || '',
-    });
+      setUi({
+        busy: false,
+        canCancel: false,
+        progress: undefined,
+        stageLabel: '',
+        currentItem: '',
+        timingLabel:
+          runtime.uiState.timingLabel?.split('\n')[0]?.split(' · ')[0] || '',
+      });
+    }
   }
 }

@@ -42,9 +42,7 @@ export function headerWorkspaceKey(
     authority?: unknown;
     /** Decoded URI path. */
     path?: unknown;
-    /** Optional query string. */
     query?: unknown;
-    /** Optional fragment. */
     fragment?: unknown;
   };
 
@@ -145,7 +143,16 @@ export function mergeHeaders(
     source: HeaderMergeSource;
   }>,
 ): ComposerHeader[] {
-  const byId = new Map<string, { record: ComposerHeader; rank: number }>();
+  /** Record. */
+  const byId = new Map<
+    string,
+    {
+      /** Header chosen for this composer. */
+      record: ComposerHeader;
+      /** Source priority. A higher rank replaces a lower one. */
+      rank: number;
+    }
+  >();
 
   const rank: Record<HeaderMergeSource, number> = {
     table: 3,
@@ -169,7 +176,15 @@ export function mergeHeaders(
 
   // A sparse higher-priority header must not erase a known name.
   // Preserve explicit empty names; only recover an absent name.
-  const names = new Map<string, { name: string; rank: number }>();
+  const names = new Map<
+    string,
+    {
+      /** Non-empty title kept for this composer. */
+      name: string;
+      /** Source priority of that title. */
+      rank: number;
+    }
+  >();
 
   for (const { records, source } of sources) {
     for (const rec of records || []) {
@@ -182,13 +197,15 @@ export function mergeHeaders(
     }
   }
 
-  return [...byId.values()].map(({ record }) => {
-    const fallback = names.get(record.composerId);
+  return [...byId.values()].map(
+    (/** Chosen header for this composer. */ { record }) => {
+      const fallback = names.get(record.composerId);
 
-    return record.name === undefined && fallback
-      ? { ...record, name: fallback.name }
-      : record;
-  });
+      return record.name === undefined && fallback
+        ? { ...record, name: fallback.name }
+        : record;
+    },
+  );
 }
 
 /** Collect composer headers from workspace + global sources for one identity. */
@@ -210,6 +227,8 @@ export async function resolveComposers(
     globalSources?: HeaderSource[];
     /** Reject damaged metadata rather than report an empty count. */
     strictMetadata?: boolean;
+    /** Include migrated selected/focused references as ownership evidence, not display headers. */
+    includeSelectionReferences?: boolean;
   },
 ): Promise<ComposerHeader[]> {
   const { storageId, identity, layoutWs, layoutGl } = opts;
@@ -229,6 +248,23 @@ export async function resolveComposers(
     );
 
     const all = checkedHeaderList(data, opts.strictMetadata);
+
+    if (opts.includeSelectionReferences && data) {
+      for (const field of ['selectedComposerIds', 'lastFocusedComposerIds']) {
+        const ids = data[field];
+
+        if (ids === undefined) continue;
+        if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))
+          throw new Error(
+            'Unsupported selected chat list; ownership cannot be verified.',
+          );
+
+        sources.push({
+          source: 'selected',
+          records: ids.map((composerId) => ({ composerId })),
+        });
+      }
+    }
 
     if (Array.isArray(all)) {
       sources.push({
@@ -284,8 +320,11 @@ export interface HeaderSource {
 /** Read global metadata once per statistics scan, not once per workspace. */
 export async function readGlobalHeaderSources(
   conn: SqliteConn,
+  /** Database layout already inspected. */
   layout: Layout,
+  /** Read createdAt when the composer table has that column. */
   includeColumnDates = false,
+  /** Reject a row that does not match the expected shape. */
   strict = false,
 ): Promise<HeaderSource[]> {
   const sources: HeaderSource[] = [];
@@ -321,7 +360,9 @@ export async function readGlobalHeaderSources(
 
 /** Statistics must not turn a malformed list into a measured zero. */
 function checkedHeaderList(
+  /** Payload bytes or record. */
   data: Record<string, unknown> | null,
+  /** Reject a row that does not match the expected shape. */
   strict = false,
 ): unknown {
   const all = data?.allComposers;

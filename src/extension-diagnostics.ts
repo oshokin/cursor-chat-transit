@@ -35,7 +35,10 @@ export function projectKindLabel(): string {
 }
 
 /** Redact home paths and SSH authorities from a shareable string. */
-export function redact(value: string): string {
+export function redact(
+  /** Text that may contain a home path or SSH authority. */
+  value: string,
+): string {
   const home = os.homedir();
   let out = value;
 
@@ -46,8 +49,10 @@ export function redact(value: string): string {
 
 /** Run one probe with a real timeout. */
 export async function timedCheck(
+  /** Name used when the value is rejected. */
   label: string,
   run: (signal: AbortSignal) => Promise<DiagnosticCheck>,
+  /** Deadline for one SQLite request, in milliseconds. */
   timeoutMs = 8000,
 ): Promise<DiagnosticCheck> {
   const ac = new AbortController();
@@ -72,6 +77,7 @@ export async function timedCheck(
 
 /** Independent diagnostics; missing sqlite3 must not block the window. */
 export async function collectDiagnosticReport(
+  /** Extension storage and host state. */
   context: vscode.ExtensionContext,
 ): Promise<DiagnosticReport> {
   const { sqlitePath } = config();

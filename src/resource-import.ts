@@ -104,13 +104,21 @@ export async function planImportResources(opts: {
     );
   }
 
-  const closureKeys = (bodies: Record<string, string>): string[] => {
+  /** Blob keys reachable from the composer bodies. */
+  const closureKeys = (
+    /** Composer JSON keyed by composer id. */
+    bodies: Record<string, string>,
+  ): string[] => {
     const out: string[] = [];
     const seen = new Set<string>();
 
     for (const body of Object.values(bodies)) {
-      const state = (JSON.parse(body) as { conversationState?: unknown })
-        .conversationState;
+      /** Conversation state. */
+      const state = (
+        JSON.parse(body) as {
+          conversationState?: unknown;
+        }
+      ).conversationState;
 
       const closed = resolveBlobGraph(state, blobBytes);
 
@@ -132,7 +140,9 @@ export async function planImportResources(opts: {
   );
 
   const allKeys = closureKeys(opts.composers);
+
   const byKey = new Map(opts.exported.kv.map((row) => [row.key, row]));
+
   const toWrite: KvResource[] = [];
   const missingKeys: string[] = [];
 

@@ -35,18 +35,25 @@ function localPath(key: string): string {
 }
 
 /** Read local path settings without discarding a valid user value when a workspace overrides it. */
-export function config(): { userDataDir: string; sqlitePath: string } {
+export function config(): {
+  /** Local Cursor user-data directory. */
+  userDataDir: string;
+  /** Absolute path to the sqlite3 executable. */
+  sqlitePath: string;
+} {
   return {
     userDataDir: localPath('userDataDir'),
     sqlitePath: localPath('sqlitePath'),
   };
 }
 
-/** Integer seconds from Settings, clamped to the documented range. */
+/** Integer seconds from Settings, validated against the documented range. */
 function seconds(
   key: string,
+  /** Value used when the input is not finite. */
   fallback: number,
   min: number,
+  /** Maximum length after whitespace is collapsed. */
   max: number,
 ): number {
   const raw = userValue(key);
@@ -85,7 +92,9 @@ export function transferSettings(): {
 
 /** Require a local `file:` URI and return its fsPath. */
 export function requireLocalFile(
+  /** URI string or parts. */
   uri: vscode.Uri | undefined,
+  /** Name used when the value is rejected. */
   label: string,
 ): string {
   if (!uri || uri.scheme !== 'file') {
@@ -96,7 +105,10 @@ export function requireLocalFile(
 }
 
 /** Options for discovering the local Cursor user-data directory. */
-export function storageOptions(): { configuredUserDataDir?: string } {
+export function storageOptions(): {
+  /** User-data directory from settings, when set. */
+  configuredUserDataDir?: string;
+} {
   const { userDataDir } = config();
 
   return { configuredUserDataDir: userDataDir || undefined };
@@ -104,6 +116,7 @@ export function storageOptions(): { configuredUserDataDir?: string } {
 
 /** Resolve a remembered directory only while it still exists. */
 function existingDirectory(
+  /** Extension storage and host state. */
   context: vscode.ExtensionContext,
   key: string,
 ): string | undefined {
@@ -119,12 +132,18 @@ function existingDirectory(
 }
 
 /** Last successful local export directory, else home. */
-export function exportDirectory(context: vscode.ExtensionContext): string {
+export function exportDirectory(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): string {
   return existingDirectory(context, LAST_EXPORT_DIR) || os.homedir();
 }
 
 /** Last successful local import directory, else the export directory. */
-export function importDirectory(context: vscode.ExtensionContext): string {
+export function importDirectory(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): string {
   return (
     existingDirectory(context, LAST_IMPORT_DIR) || exportDirectory(context)
   );
@@ -132,6 +151,7 @@ export function importDirectory(context: vscode.ExtensionContext): string {
 
 /** Remember a successful local export folder. */
 export async function rememberExportDir(
+  /** Extension storage and host state. */
   context: vscode.ExtensionContext,
   dest: string,
 ): Promise<void> {
@@ -140,7 +160,9 @@ export async function rememberExportDir(
 
 /** Remember a local import folder only; never store a remote URI as a path. */
 export async function rememberImportDir(
+  /** Extension storage and host state. */
   context: vscode.ExtensionContext,
+  /** URI string or parts. */
   uri: vscode.Uri,
 ): Promise<void> {
   if (uri.scheme !== 'file') return;
@@ -159,11 +181,15 @@ export function operationLogLevel(): OperationLogLevel {
   return 'info';
 }
 
-/** User/application setting only; workspace cannot silently enable recovery. */
-export function importAllowPartial(): boolean {
-  const inspect = vscode.workspace
-    .getConfiguration('cursorChatTransit')
-    .inspect<boolean>('import.allowPartial');
+/** Read-only export recovery preference; repositories cannot change this policy. */
+export function recoverTextSetting(): boolean {
+  const value = userValue('export.recoverText');
 
-  return inspect?.globalValue === true;
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean')
+    throw new Error(
+      'cursorChatTransit.export.recoverText: enter true or false.',
+    );
+
+  return value;
 }

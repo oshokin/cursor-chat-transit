@@ -36,7 +36,11 @@ interface Observers {
   /** Receives each transport event. */
   event?: (event: TransferEvent) => void;
   /** Receives phase progress. */
-  phase?: (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void;
+  phase?: (
+    phase: TransferPhase,
+    /** Progress counts for this phase. */
+    metrics?: TransferPhaseMetrics,
+  ) => void;
   /** Composer id attached to nested events. */
   chatId?: string;
   /** Display name attached to nested events. */
@@ -57,7 +61,10 @@ export function inChat<T>(chatId: string, chatName: string, run: () => T): T {
 }
 
 /** Emit one bounded, structured fact. */
-export function transferEvent(event: TransferEvent): void {
+export function transferEvent(
+  /** Structured transfer event. */
+  event: TransferEvent,
+): void {
   const observers = scope.getStore();
 
   observers?.event?.({
@@ -70,6 +77,7 @@ export function transferEvent(event: TransferEvent): void {
 /** File or record progress; callers throttle byte updates before IPC. */
 export function transferProgress(
   phase: TransferPhase,
+  /** Progress counts for this phase. */
   metrics: TransferPhaseMetrics,
 ): void {
   const observers = scope.getStore();
@@ -79,7 +87,9 @@ export function transferProgress(
 
 /** Log a concrete action before it starts, including a failed action's path. */
 export async function traceIO<T>(
+  /** Which picker step is open. */
   action: string,
+  /** Composer fields without the conversation array. */
   fields: Omit<TransferEvent, 'action' | 'status'>,
   run: () => Promise<T>,
 ): Promise<T> {

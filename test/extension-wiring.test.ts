@@ -7,6 +7,10 @@ import os from 'node:os';
 import type * as vscode from 'vscode';
 import { TransferError } from '../src/types';
 
+const configurationListeners: ((event: {
+  affectsConfiguration(key: string): boolean;
+}) => void)[] = [];
+
 // A small contract stub, not a claim that the real Extension Host was launched.
 /** Commands registered through the vscode stub. */
 const commands = new Map<string, () => unknown>();
@@ -30,7 +34,19 @@ let provider: unknown;
 const fakeVscode = {
   UIKind: { Desktop: 1, Web: 2 },
   env: { uiKind: 1, appName: 'Cursor' },
+  EventEmitter: class {
+    event = () => dispose;
+    fire() {}
+    dispose() {}
+  },
   window: {
+    createTreeView() {
+      return {
+        ...dispose,
+        selection: [],
+        onDidChangeCheckboxState: () => dispose,
+      };
+    },
     /** Record the Output channel name and return inert log methods. */
     createOutputChannel(name: string) {
       channels.push(name);
@@ -80,6 +96,13 @@ const fakeVscode = {
     },
   },
   workspace: {
+    onDidChangeConfiguration(
+      listener: (event: { affectsConfiguration(key: string): boolean }) => void,
+    ) {
+      configurationListeners.push(listener);
+
+      return dispose;
+    },
     /** Return a configuration object with no stored profile. */
     getConfiguration() {
       return {
@@ -137,6 +160,18 @@ test('activation still registers all commands, one operation log and the sidebar
       'cursorChatTransit.exportCurrentWorkspace',
       'cursorChatTransit.diagnostics',
       'cursorChatTransit.showOutput',
+      ...[
+        'manageSearch',
+        'manageRefresh',
+        'manageCheck',
+        'manageSelectAll',
+        'manageClearSelection',
+        'manageShowAll',
+        'manageShowRemovable',
+        'manageCheckSelected',
+        'manageDelete',
+        'manageDeleteItem',
+      ].map((name) => `cursorChatTransit.${name}`),
     ].sort(),
   );
 
@@ -393,4 +428,14 @@ test('sidebar and operation log share the start and frozen total for every termi
     assert.equal(state.runtime.uiState.timingLabel, 'Total 1m 27s');
     state.runtime.busy = false;
   }
+});
+
+test('changing the user-data directory invalidates the old selected profile', () => {
+  state.runtime.sourceWorkspace = { storageRoot: '/old-profile' } as never;
+  for (const listener of configurationListeners)
+    listener({
+      affectsConfiguration: (key) => key === 'cursorChatTransit.userDataDir',
+    });
+  assert.equal(state.runtime.sourceWorkspace, undefined);
+  assert.equal(state.runtime.uiState.sourceAvailable, false);
 });

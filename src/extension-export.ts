@@ -1,3 +1,5 @@
+import { recoverTextSetting } from './extension-settings';
+import { notifyCompletion } from './notifications';
 import { pickWithStatistics } from './extension-statistics';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -25,10 +27,9 @@ import { hostState, pickWorkspace } from './extension-workspaces';
 import { ZIP_FILTER } from './file-dialogs';
 import { runTransfer } from './transfer-process';
 import { startOperationLog } from './operation-log';
-import { formatIncompleteExportNotice, notifyCompletion } from './operation-ui';
+import { formatIncompleteExportNotice } from './operation-ui';
 import { type TransitLog } from './output-ui';
 import * as paths from './paths';
-import { listWorkspaceChats } from './export-transfer';
 import { chatPickItems } from './picker';
 
 /** Export chats from the selected (or picked) workspace to a local JSON file. */
@@ -39,6 +40,12 @@ export async function doExport(opts: {
   operations: TransitLog;
   /** When true, start from the current window's workspace when it is listed. */
   preferCurrent?: boolean;
+  /** Workspace already chosen by Manage chats. */
+  workspace?: import('./types').WorkspaceEntry;
+  /** Chat ids already chosen by Manage chats. */
+  selectedIds?: string[];
+  /** Export the entire supplied workspace without asking for a selection. */
+  allChats?: boolean;
 }): Promise<void> {
   const log = startOperationLog(opts.operations, 'export');
 
@@ -55,7 +62,7 @@ export async function doExport(opts: {
       opts.context,
     );
 
-    let workspace = runtime.sourceWorkspace;
+    let workspace = opts.workspace || runtime.sourceWorkspace;
 
     if (opts.preferCurrent && identity) {
       workspace = paths.findWorkspaceByIdentity(userDir, identity) || workspace;
@@ -96,10 +103,16 @@ export async function doExport(opts: {
       statusDetail: 'Looking up available chats.',
     });
 
-    const listed = await listWorkspaceChats(
-      { ...sqliteCtx, signal: undefined },
-      workspace,
-      { includeColumnDates: true },
+    const listed = await runTransfer<{
+      /** Headers returned by the list. */
+      allComposers: import('./types').ComposerHeader[];
+    }>(
+      { kind: 'list-chats', ...sqliteCtx, workspace, filePath: '' },
+      {
+        signal: runtime.activeAbort?.signal,
+        onEvent: log.event,
+        onNote: log.note,
+      },
     );
 
     if (!listed.allComposers.length) {
@@ -124,13 +137,17 @@ export async function doExport(opts: {
       statusDetail: 'Export all chats or select individual conversations.',
     });
 
-    const mode = await vscode.window.showQuickPick(
-      [
-        { label: 'Export all chats', value: 'all' as const },
-        { label: 'Select chats…', value: 'select' as const },
-      ],
-      { title: 'Choose chats to export' },
-    );
+    const mode = opts.allChats
+      ? { value: 'all' as const }
+      : opts.selectedIds
+        ? { value: 'selected' as const }
+        : await vscode.window.showQuickPick(
+            [
+              { label: 'Export all chats', value: 'all' as const },
+              { label: 'Select chats…', value: 'select' as const },
+            ],
+            { title: 'Choose chats to export', ignoreFocusOut: true },
+          );
 
     if (!mode) {
       log.finish('cancelled');
@@ -144,7 +161,7 @@ export async function doExport(opts: {
       return;
     }
 
-    let selectedIds: string[] | undefined;
+    let selectedIds: string[] | undefined = opts.selectedIds;
 
     if (mode.value === 'select') {
       setUi({
@@ -164,10 +181,15 @@ export async function doExport(opts: {
           ...sqliteCtx,
           kind: 'chat-statistics',
           workspace,
-          chats: listed.allComposers.map(({ composerId, name }) => ({
-            composerId,
-            name,
-          })),
+          chats: listed.allComposers.map(
+            (
+              /** Composer id and title from one header. */
+              { composerId, name },
+            ) => ({
+              composerId,
+              name,
+            }),
+          ),
         }),
       });
 
@@ -202,11 +224,13 @@ export async function doExport(opts: {
       }
     }
 
+    const selectedSet = selectedIds && new Set(selectedIds);
+
     const selected =
       selectedIds === undefined
         ? listed.allComposers
         : listed.allComposers.filter((chat) =>
-            selectedIds.includes(chat.composerId),
+            selectedSet!.has(chat.composerId),
           );
 
     const filename = suggestExportFilename({
@@ -263,13 +287,25 @@ export async function doExport(opts: {
         title: 'Exporting chats',
         cancellable: true,
       },
-      async (progress, token) =>
+      async (
+        /** Progress reporter for this operation. */
+        progress,
+        /** Cancellation token from the progress notification. */
+        token,
+      ) =>
         runTransfer<
-          | { skipped: true; reason: string }
+          /** How many items were skipped. */
+          | {
+              /** True when export produced no archive. */
+              skipped: true;
+              /** Why the export was skipped. */
+              reason: string;
+            }
           | import('./types').ExportObject['summary']
         >(
           {
             kind: 'export',
+            recoverText: recoverTextSetting(),
             executable: sqliteCtx.executable,
             initFile: sqliteCtx.initFile,
             timeoutMs: sqliteCtx.timeoutMs,
@@ -313,11 +349,16 @@ export async function doExport(opts: {
         statusDetail: notice.detail,
       });
 
-      void vscode.window
-        .showWarningMessage(notice.toast, 'Open log')
-        .then((choice) => {
-          if (choice === 'Open log') void openLog(opts.operations);
-        });
+      notifyCompletion(
+        () => vscode.window.showWarningMessage(notice.toast, 'Open log'),
+        (choice) => {
+          if (choice === 'Open log') return openLog(opts.operations);
+        },
+        () =>
+          opts.operations.warn(
+            'Unable to show completion notification or open the operation log.',
+          ),
+      );
 
       return;
     }
@@ -337,9 +378,12 @@ export async function doExport(opts: {
           'Open log',
         ),
       (choice) => {
-        if (choice === 'Open log') void openLog(opts.operations);
+        if (choice === 'Open log') return openLog(opts.operations);
       },
-      () => opts.operations.warn('Unable to show completion notification.'),
+      () =>
+        opts.operations.warn(
+          'Unable to show completion notification or open the operation log.',
+        ),
     );
   } catch (err) {
     if (isAbort(err)) {

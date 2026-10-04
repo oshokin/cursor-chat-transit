@@ -1,24 +1,15 @@
-import { inspectChatHealth, healthLabel } from './chat-health';
-import { inspectChatPresence, type ChatPresence } from './chat-presence';
+import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { healthLabel, inspectChatHealth } from './chat-health';
+import { inspectChatPresence } from './chat-presence';
 import { sqlText } from './core';
-import { inspectDatabase, readKvText } from './db';
-import {
-  readGlobalHeaderSources,
-  resolveComposers,
-  type HeaderSource,
-} from './db-headers';
+import { readKvText } from './db';
 import { hasChatTitle } from './picker';
-import { connOf } from './transfer-context';
 import { openReadTransaction } from './read-transaction';
 import { execSql } from './sqlite';
+import { connOf } from './transfer-context';
 import { traceIO, transferEvent } from './transfer-events';
-import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
-import type {
-  ComposerHeader,
-  Layout,
-  TransferContext,
-  WorkspaceEntry,
-} from './types';
+import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
+import { WorkspaceHeaderReader } from './workspace-header-reader';
 
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
@@ -29,13 +20,20 @@ export type StatisticsJob = Pick<
   deepCheck?: boolean;
   /** Custom resource locations captured for this scan. */
   plansDir?: string;
+  /** Allowlisted canvases directory. */
   canvasesDir?: string;
 } & (
-    | { kind: 'workspace-statistics'; workspaces: WorkspaceEntry[] }
+    | {
+        /** Worker task discriminator. */
+        kind: 'workspace-statistics';
+        /** Workspaces whose headers are counted. */
+        workspaces: WorkspaceEntry[];
+      }
     | {
         kind: 'chat-statistics';
         workspace: WorkspaceEntry;
-        chats: Pick<ComposerHeader, 'composerId' | 'name'>[];
+        /** Omit for all current workspace headers; an empty list means no selection. */
+        chats?: Pick<ComposerHeader, 'composerId' | 'name'>[];
       }
   );
 
@@ -47,6 +45,8 @@ export interface StatisticsUpdate {
   detail: string;
   /** Read failed rather than a measured zero. */
   failed?: boolean;
+  /** Result of the requested deep check; unknown is not corruption. */
+  health?: import('./chat-health').ChatHealth;
   /** Confirmed complete, nonempty source data. */
   eligible?: boolean;
   /** Confirmed absence of readable chat history; view filtering only. */
@@ -130,53 +130,25 @@ export function chatStatistics(body: Record<string, unknown>): string {
   return `${messages} · ${format}`;
 }
 
-/** Read global header metadata once for each database in this run. */
-async function globalHeaders(
-  ctx: TransferContext,
-  entry: WorkspaceEntry,
-): Promise<{ layout: Layout; sources: HeaderSource[] }> {
-  const view = await openReadTransaction(connOf(ctx, entry.globalDbPath, true));
-
-  try {
-    return await traceIO(
-      'Read global chat headers',
-      { path: entry.globalDbPath },
-      async () => {
-        const { layout } = await inspectDatabase(view.conn);
-
-        if (layout.writeBlocked && !layout.cursorDiskKV)
-          throw new Error('Unsupported Cursor database schema.');
-
-        return {
-          layout,
-          sources: await readGlobalHeaderSources(
-            view.conn,
-            layout,
-            false,
-            true,
-          ),
-        };
-      },
-    );
-  } finally {
-    await view.close();
-  }
-}
-
 /** Scan sequentially, release read views between rows, and keep row failures local. */
 export async function runStatistics(
   job: StatisticsJob,
   signal: AbortSignal,
+  /** Refresh the UI as results arrive. */
   update: (row: StatisticsUpdate) => void,
-): Promise<{ failed: number }> {
+): Promise<{
+  /** How many workspace scans failed. */
+  failed: number;
+}> {
   const ctx = { ...job, signal };
 
-  const cache = new Map<
-    string,
-    Promise<Awaited<ReturnType<typeof globalHeaders>>>
-  >();
+  const reader = new WorkspaceHeaderReader(ctx);
 
-  const rows = job.kind === 'workspace-statistics' ? job.workspaces : job.chats;
+  const rows =
+    job.kind === 'workspace-statistics'
+      ? job.workspaces
+      : (job.chats ?? (await reader.read(job.workspace)));
+
   let failed = 0;
 
   for (const row of rows) {
@@ -185,8 +157,15 @@ export async function runStatistics(
     const workspace =
       'storageId' in row
         ? row
-        : (job as Extract<StatisticsJob, { kind: 'chat-statistics' }>)
-            .workspace;
+        : (
+            job as Extract<
+              StatisticsJob,
+              {
+                /** Worker task discriminator. */
+                kind: 'chat-statistics';
+              }
+            >
+          ).workspace;
 
     const key =
       'storageId' in row ? workspaceStatisticsKey(row) : row.composerId;
@@ -202,6 +181,7 @@ export async function runStatistics(
 
     try {
       let eligible: boolean | undefined;
+      let chatHealth: import('./chat-health').ChatHealth | undefined;
       let hide: boolean | undefined;
 
       const detail = await traceIO(
@@ -209,44 +189,12 @@ export async function runStatistics(
         fields,
         async () => {
           if ('storageId' in row) {
-            let global = cache.get(workspace.globalDbPath);
-
-            if (!global) {
-              global = globalHeaders(ctx, workspace);
-              cache.set(workspace.globalDbPath, global);
-            }
-
-            const metadata = await global;
-
-            const local = await openReadTransaction(
-              connOf(ctx, workspace.workspaceDbPath, true),
-            );
-
-            let headers: ComposerHeader[];
-
-            try {
-              const { layout } = await inspectDatabase(local.conn);
-
-              headers = await resolveComposers(
-                local.conn,
-                connOf(ctx, workspace.globalDbPath, true),
-                {
-                  storageId: workspace.storageId,
-                  identity: workspace.identity,
-                  layoutWs: layout,
-                  layoutGl: metadata.layout,
-                  globalSources: metadata.sources,
-                  strictMetadata: true,
-                },
-              );
-            } finally {
-              await local.close();
-            }
+            const headers = await reader.read(workspace);
 
             if (job.deepCheck) {
-              const health: ChatPresence[] = [];
+              hide = true;
 
-              for (let start = 0; start < headers.length; start += 32) {
+              for (let start = 0; hide && start < headers.length; start += 32) {
                 signal.throwIfAborted();
 
                 const view = await openReadTransaction(
@@ -268,7 +216,7 @@ export async function runStatistics(
                         () => inspectChatPresence(view.conn, header.composerId),
                       );
 
-                      health.push(status);
+                      hide = status === 'empty' || status === 'missing';
 
                       transferEvent({
                         action: {
@@ -282,10 +230,12 @@ export async function runStatistics(
                         chatId: header.composerId,
                         chatName: header.name,
                       });
+
+                      if (!hide) break;
                     } catch (error) {
                       signal.throwIfAborted();
                       failed++;
-                      health.push('unknown');
+                      hide = false;
 
                       transferEvent({
                         action: 'Chat presence check failed',
@@ -298,16 +248,14 @@ export async function runStatistics(
                             ? String(error.code)
                             : 'CHECK_FAILED',
                       });
+
+                      break;
                     }
                   }
                 } finally {
                   await view.close();
                 }
               }
-
-              hide = health.every(
-                (status) => status === 'empty' || status === 'missing',
-              );
 
               transferEvent({
                 action: hide
@@ -366,6 +314,7 @@ export async function runStatistics(
               row,
             );
 
+            chatHealth = health;
             eligible = health === 'ready';
 
             return `${detail} · ${healthLabel[health]}`;
@@ -376,7 +325,7 @@ export async function runStatistics(
       );
 
       signal.throwIfAborted();
-      update({ key, detail, eligible, hide });
+      update({ key, detail, eligible, hide, health: chatHealth });
 
       transferEvent({
         action: `Statistics: ${detail}`,

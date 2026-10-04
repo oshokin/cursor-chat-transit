@@ -22,6 +22,7 @@ const host = {
   executeCalls: [] as unknown[][],
   /** Information toasts shown to the user. */
   info: [] as string[],
+  pendingNotices: false,
   /** Error toasts shown to the user. */
   errors: [] as string[],
   /** Info lines written to the operation log. */
@@ -73,12 +74,14 @@ const fakeVscode = {
     /** Capture an information toast. */
     showInformationMessage: async (message: string) => {
       host.info.push(message);
+      if (host.pendingNotices) return new Promise<undefined>(() => {});
 
       return undefined;
     },
     /** Capture an error toast. */
     showErrorMessage: async (message: string) => {
       host.errors.push(message);
+      if (host.pendingNotices) return new Promise<undefined>(() => {});
 
       return undefined;
     },
@@ -125,6 +128,7 @@ function reset(): void {
   host.commandReads = 0;
   host.executeCalls = [];
   host.info = [];
+  host.pendingNotices = false;
   host.errors = [];
   host.logInfo = [];
   host.logError = [];
@@ -362,3 +366,27 @@ test('stale Quit after export or a no-op import has no side effects', async () =
   assert.deepEqual(host.executeCalls, []);
   assert.deepEqual(host.info, []);
 });
+
+test(
+  'undismissed manual-quit and failure notices never block another Quit request',
+  { timeout: 3000 },
+  async () => {
+    reset();
+    host.pendingNotices = true;
+    const quit = action();
+
+    host.commands = [];
+    await quit();
+    host.commands = ['workbench.action.quit'];
+
+    host.onExecute = async () => {
+      throw new Error('Host refused');
+    };
+
+    await quit();
+    assert.equal(host.errors.length, 1);
+    host.onExecute = undefined;
+    await quit();
+    assert.equal(host.executeCalls.length, 2);
+  },
+);

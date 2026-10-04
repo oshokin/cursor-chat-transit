@@ -71,7 +71,11 @@ export async function prepareImport(opts: {
   ctx.onPhase?.('prepare', {
     chats: cloned.allComposers.length,
     bubbles: Object.values(cloned.bubbles || {}).reduce(
-      (n, list) => n + (list?.length || 0),
+      (
+        n,
+        /** One list being counted. */
+        list,
+      ) => n + (list?.length || 0),
       0,
     ),
   });
@@ -135,7 +139,9 @@ export async function prepareImport(opts: {
   const destByFilename = new Map<string, string>();
 
   const suppliedPlans = new Set(
-    plan.plans.map((resource) => resource.filename),
+    plan.plans.map(
+      (/** One exported resource. */ resource) => resource.filename,
+    ),
   );
 
   for (const [id, body] of Object.entries(cloned.composers)) {
@@ -154,7 +160,9 @@ export async function prepareImport(opts: {
 
   if (canvasesDir) {
     const suppliedCanvases = new Set(
-      plan.canvases.map((resource) => resource.filename),
+      plan.canvases.map(
+        (/** One exported resource. */ resource) => resource.filename,
+      ),
     );
 
     for (const [id, body] of Object.entries(cloned.composers)) {

@@ -47,6 +47,7 @@ export async function verifyImport(opts: {
 
   ctx.onPhase?.('verify', { chats: cloned.allComposers.length });
   const verifyConn = connOf(ctx, workspace.globalDbPath, true);
+
   const verifyIds = cloned.allComposers.map((c) => c.composerId);
 
   try {
@@ -149,7 +150,9 @@ async function verifyBodies(
 /** Confirm required agentKv blobs match the export envelope. */
 async function verifyBlobs(
   verifyConn: SqliteConn,
+  /** Composer ids the operation must still see. */
   requiredComposers: Record<string, string>,
+  /** Resource rows for this chat. */
   resources: ExportResources | undefined,
 ): Promise<void> {
   const required = requiredBlobKeys(requiredComposers);
@@ -182,8 +185,12 @@ async function verifyBlobs(
     let state: unknown;
 
     try {
-      state = (JSON.parse(body) as { conversationState?: unknown })
-        .conversationState;
+      /** Conversation state. */
+      state = (
+        JSON.parse(body) as {
+          conversationState?: unknown;
+        }
+      ).conversationState;
     } catch {
       state = undefined;
     }
@@ -229,7 +236,9 @@ async function verifyBlobs(
 /** Confirm attached images exist on disk and match exported bytes when present. */
 async function verifyImages(
   workspace: WorkspaceEntry,
+  /** Bubble ids the operation must still see. */
   requiredBubbles: Record<string, BubbleRecord[]>,
+  /** Resource rows for this chat. */
   resources: ExportResources | undefined,
 ): Promise<void> {
   const neededImages = new Set<string>();
@@ -262,9 +271,13 @@ async function verifyImages(
 
 /** Confirm plan files in the allowlisted directory match the envelope. */
 async function verifyPlans(
+  /** Allowlisted plans directory. */
   plansDir: string,
+  /** Composer ids the operation must still see. */
   requiredComposers: Record<string, string>,
+  /** Bubble ids the operation must still see. */
   requiredBubbles: Record<string, BubbleRecord[]>,
+  /** Resource rows for this chat. */
   resources: ExportResources | undefined,
 ): Promise<void> {
   const neededPlans = new Set<string>();
@@ -297,9 +310,13 @@ async function verifyPlans(
 
 /** Confirm canvas files in the allowlisted directory match the envelope. */
 async function verifyCanvases(
+  /** Allowlisted canvases directory. */
   canvasesDir: string | null,
+  /** Composer ids the operation must still see. */
   requiredComposers: Record<string, string>,
+  /** Bubble ids the operation must still see. */
   requiredBubbles: Record<string, BubbleRecord[]>,
+  /** Resource rows for this chat. */
   resources: ExportResources | undefined,
 ): Promise<void> {
   const needed = new Set<string>();

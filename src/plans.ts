@@ -25,7 +25,10 @@ export function isPlanFilename(name: string): boolean {
 }
 
 /** Basename of a Cursor plan file from a file URI or path. */
-export function planFilenameFromRef(value: string): string | null {
+export function planFilenameFromRef(
+  /** Plan path or URI string. */
+  value: string,
+): string | null {
   if (typeof value !== 'string' || !value) return null;
   let filePath = value;
 
@@ -85,20 +88,29 @@ function looksLikeUriObject(rec: Record<string, unknown>): boolean {
 /** Plan basenames reachable from one chat's body and bubbles. */
 export function planFilenamesFromChat(
   bodyText: string | undefined,
+  /** Bubble records keyed by composer id. */
   bubbles: BubbleRecord[] | undefined,
 ): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
 
   /** Record a unique plan basename, ignoring empty or duplicate names. */
-  const add = (name: string | null) => {
+  const add = (
+    /** Plan basename, or null. */
+    name: string | null,
+  ) => {
     if (!name || seen.has(name)) return;
     seen.add(name);
     names.push(name);
   };
 
   /** Walk JSON looking for plan URIs; skip user-facing `text` and `rawText`. */
-  const visit = (value: unknown, depth: number) => {
+  const visit = (
+    /** Nested JSON value. */
+    value: unknown,
+    /** Current walk depth. */
+    depth: number,
+  ) => {
     if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
 
     if (Array.isArray(value)) {
@@ -141,7 +153,11 @@ export function planFilenamesFromChat(
 }
 
 /** Envelope for one plan file: basename plus canonical bytes. */
-export function encodePlan(filename: string, bytes: Buffer): PlanResource {
+export function encodePlan(
+  /** Basename, not a path. */
+  filename: string,
+  bytes: Buffer,
+): PlanResource {
   if (!isPlanFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
@@ -161,7 +177,10 @@ export function encodePlan(filename: string, bytes: Buffer): PlanResource {
 }
 
 /** Validate and decode a plan envelope; checksums must match. */
-export function decodePlan(value: PlanResource): Buffer {
+export function decodePlan(
+  /** Plan envelope to decode. */
+  value: PlanResource,
+): Buffer {
   if (!isPlanFilename(value.filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
@@ -183,7 +202,12 @@ export function decodePlan(value: PlanResource): Buffer {
 }
 
 /** Allowlisted `{plansDir}/{basename}` only. Never a path from JSON. */
-export function planFilePath(plansDir: string, filename: string): string {
+export function planFilePath(
+  /** Allowlisted plans directory. */
+  plansDir: string,
+  /** Basename, not a path. */
+  filename: string,
+): string {
   if (!isPlanFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid plan filename.');
   }
@@ -199,7 +223,9 @@ export function planFilePath(plansDir: string, filename: string): string {
 
 /** Read a plan from the allowlisted directory only. */
 export async function readPlanFile(
+  /** Allowlisted plans directory. */
   plansDir: string,
+  /** Basename, not a path. */
   filename: string,
 ): Promise<PlanResource | null> {
   const dest = planFilePath(plansDir, filename);
@@ -228,7 +254,9 @@ export async function readPlanFile(
 
 /** Write a plan; reuse identical bytes, never overwrite a different file. */
 export async function writePlanFile(
+  /** Allowlisted plans directory. */
   plansDir: string,
+  /** Resource envelope to write or check. */
   resource: PlanResource,
 ): Promise<string> {
   const bytes = decodePlan(resource);
@@ -246,7 +274,9 @@ export async function writePlanFile(
 
 /** Fail if the on-disk plan is missing or its bytes differ from the export. */
 export async function verifyPlanFile(
+  /** Allowlisted plans directory. */
   plansDir: string,
+  /** Resource envelope to write or check. */
   resource: PlanResource,
 ): Promise<void> {
   const expected = decodePlan(resource);
@@ -283,8 +313,11 @@ function applyPlanUri(rec: Record<string, unknown>, absPath: string): void {
 
 /** Rewrite structured plan URIs. Never substring-replace plan markdown. */
 export function rewritePlanReferences(
+  /** Composer or bubble JSON to rewrite. */
   value: unknown,
+  /** Source basename to the installed path. */
   destByFilename: Map<string, string>,
+  /** Remaining recursion depth. */
   depth = 0,
 ): unknown {
   if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
@@ -323,8 +356,11 @@ export function rewritePlanReferences(
 
 /** Remap plan URIs inside composer and bubble JSON after files are installed. */
 export function rewriteChatPlanUris(
+  /** Composer bodies keyed by id. */
   composers: Record<string, string>,
+  /** Bubble records keyed by composer id. */
   bubbles: Record<string, BubbleRecord[]>,
+  /** Source basename to the installed path. */
   destByFilename: Map<string, string>,
 ): void {
   if (!destByFilename.size) return;

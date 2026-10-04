@@ -100,18 +100,35 @@ test(
   async (t) => {
     const { ctx, workspace, gl } = await setup(t);
 
+    let planted = false;
+
     ctx.onPhase = (phase) => {
-      if (phase === 'write') {
-        execFileSync(ctx.executable, [
+      // Publish reports write once before the batch, then again per batch.
+      if (phase !== 'write' || planted) return;
+      planted = true;
+
+      execFileSync(
+        ctx.executable,
+        [
           workspace.globalDbPath,
           `INSERT INTO cursorDiskKV VALUES ('${key}',X'99');`,
-        ]);
-      }
+        ],
+        { stdio: 'pipe' },
+      );
     };
 
-    await assert.rejects(() =>
-      transfer.importFromObject(ctx, payload(), workspace),
+    await assert.rejects(
+      () => transfer.importFromObject(ctx, payload(), workspace),
+      (err: unknown) =>
+        Boolean(
+          err &&
+          typeof err === 'object' &&
+          'code' in err &&
+          err.code === 'RESOURCE_CONFLICT',
+        ),
     );
+
+    assert.equal(planted, true);
 
     const count = await sql.execSql({
       ...gl,
@@ -119,6 +136,13 @@ test(
     });
 
     assert.equal(count.trim(), '0');
+
+    const plantedBytes = await sql.execSql({
+      ...gl,
+      sql: `SELECT hex(value) FROM cursorDiskKV WHERE key='${key}';`,
+    });
+
+    assert.equal(plantedBytes.trim(), '99');
   },
 );
 

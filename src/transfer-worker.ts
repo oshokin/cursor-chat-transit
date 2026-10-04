@@ -1,9 +1,13 @@
+import { deleteSelectedChats } from './chat-deletion';
+import type { DeletionJob } from './deletion-types';
+import { exportToFile, listWorkspaceChats } from './export-transfer';
+import { importFromBundle } from './import-bundle';
+import type { RecoveryPreview } from './recovery-preview';
 import { runStatistics, type StatisticsJob } from './statistics';
 import { observeTransfer } from './transfer-events';
 import type { TransferJob } from './transfer-process';
-import { exportToFile } from './export-transfer';
-import { importFromBundle } from './import-bundle';
 import type { TransferContext } from './types';
+import { runCatalogue, type CatalogueJob } from './workspace-catalogue';
 
 /** Cancels the worker when the extension host disconnects. */
 const abort = new AbortController();
@@ -29,7 +33,11 @@ function sendUpdate(message: Record<string, unknown>): void {
 
 process.on(
   'message',
-  (message: { type?: string; job?: TransferJob | StatisticsJob }) => {
+  (message: {
+    /** Record type discriminant. */
+    type?: string;
+    job?: TransferJob | StatisticsJob | CatalogueJob | DeletionJob;
+  }) => {
     if (message.type === 'cancel') {
       abort.abort();
 
@@ -46,7 +54,11 @@ process.on(
         event: (event) => {
           sendUpdate({ type: 'event', event });
         },
-        phase: (phase, metrics) => {
+        phase: (
+          phase,
+          /** Progress counts for this phase. */
+          metrics,
+        ) => {
           sendUpdate({ type: 'phase', phase, metrics });
         },
       },
@@ -85,14 +97,45 @@ process.on(
 );
 
 /** Run the export or import described by one worker job. */
-async function run(job: TransferJob | StatisticsJob): Promise<unknown> {
+async function run(
+  job: TransferJob | StatisticsJob | CatalogueJob | DeletionJob,
+): Promise<unknown> {
+  if (job.kind === 'workspace-catalogue')
+    return runCatalogue(
+      job,
+      abort.signal,
+      (/** Workspace catalogue update. */ catalogue) =>
+        sendUpdate({ type: 'catalogue', catalogue }),
+    );
+
   if (job.kind === 'workspace-statistics' || job.kind === 'chat-statistics') {
-    return runStatistics(job, abort.signal, (statistics) =>
-      sendUpdate({ type: 'statistics', statistics }),
+    return runStatistics(
+      job,
+      abort.signal,
+      (/** Statistics update. */ statistics) =>
+        sendUpdate({ type: 'statistics', statistics }),
     );
   }
 
+  if (job.kind === 'delete-chats')
+    return deleteSelectedChats(
+      {
+        ...job,
+        signal: abort.signal,
+        onPhase: (
+          phase,
+          /** Progress counts for this phase. */
+          metrics,
+        ) => sendUpdate({ type: 'phase', phase, metrics }),
+        onNote: (/** Progress note. */ note) =>
+          sendUpdate({ type: 'note', note }),
+      },
+      job.workspaces,
+      job.targets,
+    );
+
   const ctx: TransferContext = {
+    recoverText: job.recoverText,
     executable: job.executable,
     initFile: job.initFile,
     timeoutMs: job.timeoutMs,
@@ -100,20 +143,73 @@ async function run(job: TransferJob | StatisticsJob): Promise<unknown> {
     plansDir: job.plansDir,
     canvasesDir: job.canvasesDir,
     signal: abort.signal,
-    onPhase: (phase, metrics) => {
+    onPhase: (
+      phase,
+      /** Progress counts for this phase. */
+      metrics,
+    ) => {
       sendUpdate({ type: 'phase', phase, metrics });
     },
-    onNote: (note) => {
+    onNote: (/** Progress note. */ note) => {
       sendUpdate({ type: 'note', note });
     },
   };
 
+  if (job.kind === 'list-chats')
+    return listWorkspaceChats(ctx, job.workspace, { includeColumnDates: true });
+
   if (job.kind === 'export') {
-    return exportToFile(ctx, job.workspace, job.filePath, job.selectedIds);
+    return exportToFile(
+      ctx,
+      job.workspace,
+      job.filePath,
+      job.selectedIds,
+      job.assessRecovery,
+    );
   }
 
   return importFromBundle(ctx, job.filePath, job.workspace, {
     allowPartial: job.allowPartial,
+    onRecovery: job.interactiveRecovery ? requestRecovery : undefined,
+    confirmCopy: job.confirmCopy,
     journalDir: job.journalDir,
+  });
+}
+
+/** Wait without holding a Cursor read transaction; cancellation also releases this wait. */
+function requestRecovery(
+  /** Counts and examples; no message bodies. */
+  preview: RecoveryPreview,
+): Promise<boolean> {
+  abort.signal.throwIfAborted();
+
+  return new Promise((resolve, reject) => {
+    /** Drop listeners after the walk settles. */
+    const cleanup = () => {
+      process.off('message', onMessage);
+      abort.signal.removeEventListener('abort', onAbort);
+    };
+
+    /** Cancel the child when the caller aborts. */
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Recovery cancelled.', 'AbortError'));
+    };
+
+    /** Handle one message from the other process. */
+    const onMessage = (message: {
+      /** Worker message kind. */
+      type?: string;
+      /** Host decision for a recovery preview. */
+      accepted?: boolean;
+    }) => {
+      if (message.type !== 'recovery-decision') return;
+      cleanup();
+      resolve(message.accepted === true);
+    };
+
+    process.on('message', onMessage);
+    abort.signal.addEventListener('abort', onAbort, { once: true });
+    sendUpdate({ type: 'recovery', preview });
   });
 }

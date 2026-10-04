@@ -72,6 +72,7 @@ export function blobKeysFromComposerBody(bodyText: string): {
 
 /** Image UUIDs referenced by `images[].uuid` on bubble bodies. */
 export function imageUuidsFromBubbles(
+  /** Bubble records to scan. */
   list: BubbleRecord[] | undefined,
 ): string[] {
   const ids: string[] = [];
@@ -118,7 +119,10 @@ export function imageUuidsFromBubbles(
 }
 
 /** Union required blob keys from composer bodies; fail closed on unknown state. */
-export function requiredBlobKeys(composers: Record<string, string>): {
+export function requiredBlobKeys(
+  /** Composer bodies keyed by id. */
+  composers: Record<string, string>,
+): {
   /** `unsupported` when any composer body cannot be read. */
   status: 'ok' | 'unsupported';
   /** Union of state-level blob keys. Empty when status is unsupported. */
@@ -146,6 +150,7 @@ export function requiredBlobKeys(composers: Record<string, string>): {
 
 /** User-facing incomplete-resource copy. Counts only when they were measured. */
 export function missingDependencyMessage(
+  /** Dependency counts already measured. */
   assessment: DependencyAssessment,
 ): string {
   const missing =

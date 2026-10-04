@@ -21,14 +21,19 @@ export interface ExtractedEntry {
   filePath: string;
   /** Uncompressed byte length. */
   bytes: number;
-  /** SHA-256 of the bytes written to disk. */
   sha256: string;
 }
 
 /** Pack files into `destPath` via a sibling partial, then rename. */
 export async function packZip(
   destPath: string,
-  files: Array<{ diskPath: string; name: string }>,
+  /** Files to pack, in archive order. */
+  files: Array<{
+    /** Absolute path of the file. */
+    diskPath: string;
+    /** Path of that file inside the archive. */
+    name: string;
+  }>,
   signal?: AbortSignal,
 ): Promise<void> {
   if (files.length > MAX_ZIP_ENTRIES) {
@@ -221,7 +226,9 @@ export async function packZip(
 /** Write one stored member with the ZIP64 extra field. */
 export async function packZip64(
   destPath: string,
+  /** Absolute path of the file to pack. */
   diskPath: string,
+  /** Archive member name. */
   name: string,
 ): Promise<void> {
   const zip = new yazl.ZipFile();
@@ -241,6 +248,7 @@ export async function packZip64(
 /** Read ZIP entries one at a time into `destDir`. The archive is not buffered. */
 export async function extractZip(
   zipPath: string,
+  /** Directory that receives extracted files. */
   destDir: string,
   signal?: AbortSignal,
 ): Promise<ExtractedEntry[]> {
@@ -267,7 +275,11 @@ export async function extractZip(
   let processed = 0;
   let lastProgress = performance.now();
 
-  const report = (file = zipPath) =>
+  /** Report progress for this step. */
+  const report = (
+    /** Archive path shown while extracting. */
+    file = zipPath,
+  ) =>
     transferProgress('extract', {
       file,
       scope: 'archive-extraction',
@@ -372,7 +384,11 @@ function openZip(zipPath: string): Promise<Yauzl.ZipFile> {
         validateEntrySizes: true,
         decodeStrings: true,
       },
-      (err, zip) => {
+      (
+        err,
+        /** Open ZIP archive. */
+        zip,
+      ) => {
         if (err || !zip) {
           reject(
             new Error(
@@ -391,26 +407,37 @@ function openZip(zipPath: string): Promise<Yauzl.ZipFile> {
 
 /** Yield ZIP entries until the archive ends. */
 async function* walkEntries(
+  /** Open ZIP archive. */
   zip: Yauzl.ZipFile,
   signal?: AbortSignal,
 ): AsyncGenerator<Yauzl.Entry> {
   for (;;) {
     const entry = await new Promise<Yauzl.Entry | null>((resolve, reject) => {
-      const onEntry = (next: Yauzl.Entry) => {
+      /** Resolve the next ZIP entry. */
+      const onEntry = (
+        /** Next ZIP entry. */
+        next: Yauzl.Entry,
+      ) => {
         cleanup();
         resolve(next);
       };
 
+      /** Resolve when the archive has no further entries. */
       const onEnd = () => {
         cleanup();
         resolve(null);
       };
 
-      const onError = (err: Error) => {
+      /** Reject the walk when the archive reader fails. */
+      const onError = (
+        /** Failure from the archive reader. */
+        err: Error,
+      ) => {
         cleanup();
         reject(err);
       };
 
+      /** Drop listeners after the walk settles. */
       const cleanup = () => {
         zip.removeListener('entry', onEntry);
         zip.removeListener('end', onEnd);
@@ -448,51 +475,71 @@ function rejectSpecialEntry(entry: Yauzl.Entry): void {
 
 /** Stream one entry to disk and return its sha256 and byte count. */
 function writeEntry(
+  /** Open ZIP archive. */
   zip: Yauzl.ZipFile,
   entry: Yauzl.Entry,
   filePath: string,
   signal?: AbortSignal,
+  /** Called with the number of bytes written. */
   onBytes?: (bytes: number) => void,
-): Promise<{ sha256: string; bytes: number }> {
+): Promise<{
+  /** SHA-256 of the entry bytes. */
+  sha256: string;
+  /** Number of bytes written. */
+  bytes: number;
+}> {
   return new Promise((resolve, reject) => {
-    zip.openReadStream(entry, (err, stream) => {
-      if (err || !stream) {
-        reject(err || new Error('Unable to read archive entry.'));
-
-        return;
-      }
-
-      const hash = createHash('sha256');
-      let bytes = 0;
-
-      const tap = new Transform({
-        /** Hash bytes without retaining the entry. */
-        transform(chunk, _enc, cb) {
-          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-
-          bytes += buf.length;
-
-          if (bytes > entry.uncompressedSize) {
-            cb(new Error(`ZIP size mismatch: ${filePath}`));
-
-            return;
-          }
-
-          onBytes?.(buf.length);
-
-          hash.update(buf);
-          cb(null, buf);
-        },
-      });
-
-      pipeline(
+    zip.openReadStream(
+      entry,
+      (
+        err,
+        /** Byte stream being consumed. */
         stream,
-        tap,
-        createWriteStream(filePath, { flags: 'wx', mode: 0o600 }),
-        { signal },
-      )
-        .then(() => resolve({ sha256: hash.digest('hex'), bytes }))
-        .catch(reject);
-    });
+      ) => {
+        if (err || !stream) {
+          reject(err || new Error('Unable to read archive entry.'));
+
+          return;
+        }
+
+        const hash = createHash('sha256');
+        let bytes = 0;
+
+        const tap = new Transform({
+          /** Hash bytes without retaining the entry. */
+          transform(
+            chunk,
+            /** Encoding ignored by this hash transform. */
+            _enc,
+            /** Callback that receives the transformed chunk. */
+            cb,
+          ) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+
+            bytes += buf.length;
+
+            if (bytes > entry.uncompressedSize) {
+              cb(new Error(`ZIP size mismatch: ${filePath}`));
+
+              return;
+            }
+
+            onBytes?.(buf.length);
+
+            hash.update(buf);
+            cb(null, buf);
+          },
+        });
+
+        pipeline(
+          stream,
+          tap,
+          createWriteStream(filePath, { flags: 'wx', mode: 0o600 }),
+          { signal },
+        )
+          .then(() => resolve({ sha256: hash.digest('hex'), bytes }))
+          .catch(reject);
+      },
+    );
   });
 }

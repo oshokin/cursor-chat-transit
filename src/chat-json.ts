@@ -8,7 +8,9 @@ import { TransferError } from './types';
 
 /** Parse a remappable JSON object; invalid or non-object payloads are errors. */
 export function parseRemappableJson(
+  /** Text to parse or log. */
   text: unknown,
+  /** Name used when the value is rejected. */
   label: string,
 ): Record<string, unknown> {
   if (typeof text !== 'string') {
@@ -50,6 +52,7 @@ export function parseRemappableJson(
 
 /** Bare bubble-id map for one composer (`composerId\0bubbleId` → new id). */
 export function bubbleIdsForComposer(
+  /** Composer and bubble id to the new bubble id. */
   bubbleMap: Map<string, string>,
   composerId: string,
 ): Map<string, string> {
@@ -67,6 +70,7 @@ export function bubbleIdsForComposer(
 /** Ordered headers must point at exported bubbles of this composer. */
 export function assertOrderedReferences(
   body: Record<string, unknown>,
+  /** Bubble ids present in the export. */
   availableBubbleIds: ReadonlySet<string>,
 ): void {
   const headers = body.fullConversationHeadersOnly;
@@ -105,7 +109,9 @@ export function assertOrderedReferences(
 /** Remap known id fields and nested bubble-keyed objects; leave user text alone. */
 export function remapJsonObject(
   obj: Record<string, unknown>,
+  /** Old id to the replacement id. */
   idMap: Map<string, string>,
+  /** Old bubble id to the new bubble id. */
   bubbleIds: Map<string, string>,
 ): Record<string, unknown> {
   let next = rewriteExactPaths(

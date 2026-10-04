@@ -22,19 +22,16 @@ export type ConversationLayout = 'absent' | 'empty' | 'ndjson';
 
 /** One resource pointer stored beside a chat. Bytes live under `blobs/`. */
 export interface BundleResourceRef {
-  /** Resource class. */
   class: 'kv' | 'image' | 'plan' | 'canvas';
   /** KV key, image id, or file basename. */
   id: string;
   /** SHA-256 of the blob bytes. */
   sha256: string;
-  /** Decoded byte length. */
   byteLength: number;
   /** SQLite storage class for kv values. */
   storageClass?: 'text' | 'blob';
   /** Image or plan basename written on import. */
   filename?: string;
-  /** Image extension. */
   extension?: string;
   /** Other basenames with these same bytes. */
   aliases?: string[];
@@ -65,6 +62,7 @@ export class BundleWriter {
   private constructor(
     /** Final archive path. Staging is created beside it. */
     private readonly destPath: string,
+    /** Directory that contains the extracted or staged archive. */
     root: string,
     /** Cancellation for packing. */
     private readonly signal: AbortSignal | undefined,
@@ -139,19 +137,28 @@ export class BundleWriter {
 
   /** Store composer fields and whether the conversation array existed. */
   async writeComposer(
+    /** Composer fields without the conversation array. */
     fields: Record<string, unknown>,
+    /** Whether the conversation array was present. */
     conversation: ConversationLayout,
   ): Promise<void> {
     this.conversationLayout = conversation;
 
-    await writeJson(path.join(this.chatDir, 'composer.json'), {
-      conversation,
-      fields,
-    });
+    await writeJson(
+      path.join(this.chatDir, 'composer.json'),
+      {
+        conversation,
+        fields,
+      },
+      true,
+    );
   }
 
   /** Append one conversation element in source order. */
-  async writeConversation(value: unknown): Promise<void> {
+  async writeConversation(
+    /** One conversation element, in source order. */
+    value: unknown,
+  ): Promise<void> {
     if (this.conversationLayout !== 'ndjson') {
       throw new Error('Conversation item written for an empty conversation.');
     }
@@ -166,7 +173,10 @@ export class BundleWriter {
   }
 
   /** Append one resource pointer. */
-  async writeResource(ref: BundleResourceRef): Promise<void> {
+  async writeResource(
+    /** Resource pointer. */
+    ref: BundleResourceRef,
+  ): Promise<void> {
     await this.resources!.write(ref);
   }
 
@@ -204,7 +214,10 @@ export class BundleWriter {
   }
 
   /** Write inventory and manifest, pack the ZIP, and delete staging. */
-  async finish(summary?: unknown): Promise<void> {
+  async finish(
+    /** Manifest fields written with the archive. */
+    summary?: unknown,
+  ): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     await this.catalog.finish();
@@ -301,26 +314,59 @@ export class BundleWriter {
 }
 
 /** Content-addressed path `blobs/xx/<sha256>.bin`. */
-function blobPath(root: string, sha256: string): string {
+function blobPath(
+  /** Directory that contains the extracted or staged archive. */
+  root: string,
+  sha256: string,
+): string {
   return path.join(root, 'blobs', sha256.slice(0, 2), `${sha256}.bin`);
 }
 
-/** Write a JSON file that must not already exist. */
-async function writeJson(filePath: string, value: unknown): Promise<void> {
+/** Write bounded JSON; only private staged composer metadata may be replaced. */
+async function writeJson(
+  filePath: string,
+  /** JSON value to write. */
+  value: unknown,
+  /** Replace an existing staged file. */
+  overwrite = false,
+): Promise<void> {
   const bytes = Buffer.from(JSON.stringify(value), 'utf8');
 
   parseBoundedJson(bytes, path.basename(filePath));
-  await writeFile(filePath, bytes, { flag: 'wx', mode: 0o600 });
+
+  await writeFile(filePath, bytes, {
+    flag: overwrite ? 'w' : 'wx',
+    mode: 0o600,
+  });
 }
 
 /** Relative paths of bundle files, except the manifest and inventory. */
 async function listFiles(
+  /** Directory that contains the extracted or staged archive. */
   root: string,
-): Promise<Array<{ diskPath: string; name: string }>> {
+): Promise<
+  Array<{
+    /** Absolute path of the file. */
+    diskPath: string;
+    /** Path of that file inside the archive. */
+    name: string;
+  }>
+> {
   const { readdir } = await import('node:fs/promises');
-  const out: Array<{ diskPath: string; name: string }> = [];
 
-  const walk = async (dir: string): Promise<void> => {
+  /** Absolute path of the file to pack. */
+  const out: Array<{
+    /** Absolute path of the file. */
+    diskPath: string;
+    /** Path of that file inside the archive. */
+    name: string;
+  }> = [];
+
+  /** Visit bundle files in sorted order. */
+  const walk = async (
+    /** Directory to list. */
+    dir: string,
+  ): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true });
 
     for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -355,3 +401,15 @@ function kindOf(name: string): string {
 
   return 'file';
 }
+
+/** Streaming chat sink shared by archive writing and read-only health inspection. */
+export type ExportChatWriter = Pick<
+  BundleWriter,
+  | 'beginChat'
+  | 'writeComposer'
+  | 'writeConversation'
+  | 'writeBubble'
+  | 'writeResource'
+  | 'addBlob'
+  | 'endChat'
+>;

@@ -13,7 +13,9 @@ This is free software. You use it at your own risk. The author is not responsibl
 - Find local, SSH, WSL, and container workspaces stored in your local Cursor profile.
 - Count titled and untitled chats, and see whether a chat looks like a legacy or Agent conversation, before you export.
 - Follow transfer stages, elapsed time, and measured progress in the sidebar.
-- Recover usable history from an incomplete export when recovery mode is on.
+- Preserve available message text in ZIP exports, including clearly labelled preview fragments and gaps when full bodies are missing.
+- Find, check, and select chat history in a persistent native manager. Bulk history deletion runs as a normal extension operation after one confirmation; quit and reopen Cursor afterward.
+- Recover usable history from an incomplete export after reviewing the missing data and confirming that import.
 
 ## Requirements and installation
 
@@ -49,6 +51,16 @@ The filename includes the workspace or selected chat name and a timestamp. If an
 **Quit Cursor** closes the application through Cursor's own quit action. Cursor still handles confirmation and unsaved-work prompts. The extension does not start Cursor again. If the button is unavailable, quit from the application menu.
 
 Imports create new local chat and message IDs and leave existing conversations in place. An import that changes nothing does not need a restart.
+
+## Manage chats
+
+Use the native **Manage chats** view to find workspaces and chats, check their data, and select history for deletion. Check a workspace to select its chats, or expand it and select individual chats. **Show all workspaces** and **Hide empty or unavailable workspaces** switch the same view without another scan. Export remains in the main transfer view.
+
+**Export: Recover Text** is on by default in User Settings. The ZIP exporter keeps existing message records and can fill absent records with labelled previews or gaps in supported ordered conversations. It never replaces an existing empty message or repairs Cursor rendering. With the option off, available source records are still exported, but no replacement messages are created. The source is unchanged. Import asks for confirmation before publishing incomplete history. Open the imported chat in Cursor to use Cursor's own **Export Transcript**; this extension does not add a Markdown exporter. Compatibility with Cursor's transcript renderer must be checked on the Cursor version you use.
+
+Use checkboxes for bulk deletion. With checked items, the trash action in either a row or the toolbar deletes the checked set. With no checked items, a row action deletes only that row; the toolbar asks for a selection. Native row highlighting does not change the checked set.
+
+Before deletion, close other Cursor windows and stop running Agent tasks. Confirm the selection, wait for the result, then use **Quit Cursor** and reopen the IDE. Deletion keeps shared or uncertain records, project files, workspace storage directories and shared resources. It has no automatic undo or automatic backup and does not shrink the database file. The operation uses the existing worker and SQLite checks; it does not inspect operating-system processes or automatically quit Cursor.
 
 ## Further reading
 

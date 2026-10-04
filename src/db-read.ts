@@ -77,7 +77,10 @@ export async function readItemTextState(
 }
 
 /** Narrow unknown JSON to a composer header with a string id. */
-export function asComposerHeader(value: unknown): ComposerHeader | null {
+export function asComposerHeader(
+  /** Untrusted header JSON. */
+  value: unknown,
+): ComposerHeader | null {
   if (
     !value ||
     typeof value !== 'object' ||
@@ -92,6 +95,7 @@ export function asComposerHeader(value: unknown): ComposerHeader | null {
 /** Run a read-only hex query and collect decoded rows. */
 export async function selectHexRows(
   conn: SqliteConn,
+  /** SQL statement to run. */
   sql: string,
   cols: number,
 ): Promise<Buffer[][]> {
@@ -111,9 +115,12 @@ export async function selectHexRows(
 }
 
 /** Detect tables/columns and map them onto a known layout. */
-export async function inspectDatabase(
-  conn: SqliteConn,
-): Promise<{ schema: Awaited<ReturnType<typeof readSchema>>; layout: Layout }> {
+export async function inspectDatabase(conn: SqliteConn): Promise<{
+  /** Tables and columns read from the database. */
+  schema: Awaited<ReturnType<typeof readSchema>>;
+  /** Known layout those tables match. */
+  layout: Layout;
+}> {
   const schema = await readSchema(conn);
   const layout = detectLayout(schema);
 
@@ -159,6 +166,7 @@ export async function readItemTextImpl(
 export async function readItemJson(
   conn: SqliteConn,
   key: string,
+  /** Reject a row that does not match the expected shape. */
   strict = false,
 ): Promise<Record<string, unknown> | null> {
   const state = strict ? await readItemTextState(conn, key) : undefined;
@@ -204,13 +212,18 @@ export async function readItemJson(
 export async function readComposerHeadersTable(
   conn: SqliteConn,
   columns?: string[],
+  /** Read createdAt when the composer table has that column. */
   includeColumnDates = false,
+  /** Reject a row that does not match the expected shape. */
   strict = false,
 ): Promise<ComposerHeader[]> {
   const hasWorkspaceId = !columns || columns.includes('workspaceId');
 
   /** Emit a hex timestamp column, or empty hex when dates stay in JSON. */
-  const timestampColumn = (name: string) =>
+  const timestampColumn = (
+    /** Composer column that may hold a timestamp. */
+    name: string,
+  ) =>
     includeColumnDates && columns?.includes(name)
       ? `hex(CAST(${name} AS TEXT))`
       : "hex('')";
@@ -222,14 +235,35 @@ export async function readComposerHeadersTable(
     sql: `SELECT hex(composerId), ${hasWorkspaceId ? "hex(COALESCE(workspaceId, ''))" : "hex('')"}, hex(value), ${timestampColumn('createdAt')}, ${timestampColumn('lastUpdatedAt')} FROM composerHeaders;`,
     cols: 5,
     readOnly: true,
-    onRow: ([, wsBuf, valueBuf, createdBuf, updatedBuf]) => {
+    onRow: (
+      /** Hex columns for one composerHeaders row. */
+      [idBuf, wsBuf, valueBuf, createdBuf, updatedBuf],
+    ) => {
       const parsed = asComposerHeader(jsonFromBuf(valueBuf));
 
       if (!parsed && strict)
         throw Object.assign(new Error('Invalid chat header metadata.'), {
           code: 'HEADER_METADATA_INVALID',
         });
-      if (!parsed || parsed.composerId === 'empty-state-draft') return;
+      if (!parsed) return;
+
+      // SQL columns and JSON describe the same row. A conflict cannot establish
+      // ownership: deleting by one identity could leave or erase the other.
+      const workspaceId = textFromBuf(wsBuf);
+      const jsonWorkspaceId = parsed.workspaceIdentifier?.id;
+
+      if (
+        strict &&
+        (textFromBuf(idBuf) !== parsed.composerId ||
+          (workspaceId && jsonWorkspaceId && workspaceId !== jsonWorkspaceId))
+      )
+        throw Object.assign(
+          new Error('Conflicting chat header identity or workspace binding.'),
+          {
+            code: 'HEADER_METADATA_INVALID',
+          },
+        );
+      if (parsed.composerId === 'empty-state-draft') return;
 
       // Some versions keep dates in columns rather than inside the JSON value.
       for (const [key, buffer] of [
@@ -240,8 +274,6 @@ export async function readComposerHeadersTable(
 
         if (!validTimestamp(parsed[key]) && stored) parsed[key] = stored;
       }
-
-      const workspaceId = textFromBuf(wsBuf);
 
       if (!parsed.workspaceIdentifier && workspaceId) {
         parsed.workspaceIdentifier = { id: workspaceId };
@@ -434,7 +466,10 @@ export async function kvExists(
 }
 
 /** Decode one `bubbleId:<composerId>:<bubbleId>` hex row. */
-export function bubbleFromFields(fields: Buffer[]): BubbleRecord | null {
+export function bubbleFromFields(
+  /** Composer fields without the conversation array. */
+  fields: Buffer[],
+): BubbleRecord | null {
   const key = textFromBuf(fields[0]);
 
   if (!key) return null;
@@ -456,6 +491,7 @@ export function bubbleFromFields(fields: Buffer[]): BubbleRecord | null {
 export async function forEachBubble(
   conn: SqliteConn,
   composerId: string,
+  /** Called after each bubble is written. */
   onBubble: (bubble: BubbleRecord) => void | Promise<void>,
 ): Promise<number> {
   const { sql } = bubbleKeySql(composerId);
@@ -491,7 +527,7 @@ export async function listBubbleIds(
     sql: `SELECT hex(key) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)};`,
     cols: 1,
     readOnly: true,
-    onRow: ([keyBuf]) => {
+    onRow: (/** Hex-encoded cursorDiskKV key. */ [keyBuf]) => {
       const key = textFromBuf(keyBuf);
 
       if (!key) return;

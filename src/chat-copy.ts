@@ -130,7 +130,13 @@ export async function cloneExportObjectForCopy(
 
   const maps = new Map<
     string,
-    { bubbles: Map<string, string>; all: Map<string, string> }
+    /** Bubble records keyed by composer id. */
+    {
+      /** Bubble id map for this composer. */
+      bubbles: Map<string, string>;
+      /** Composer ids and bubble ids together. */
+      all: Map<string, string>;
+    }
   >();
 
   for (const oldId of composerMap.keys()) {

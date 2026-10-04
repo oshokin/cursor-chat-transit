@@ -3,7 +3,12 @@ import type { ComposerHeader } from './types';
 
 /** INSERT missing cursorDiskKV rows (caller wraps BEGIN/COMMIT). */
 export function kvInsertSql(
-  pairs: Array<{ key: string; value: string }>,
+  pairs: Array<{
+    /** cursorDiskKV key. */
+    key: string;
+    /** Text stored for that key. */
+    value: string;
+  }>,
 ): string {
   let sql = '';
 
@@ -30,7 +35,14 @@ export function sqliteResourceLiteral(
 
 /** INSERT missing typed resources and conflict if the existing row differs. Same rule as classifyKvConflict: storage class or raw bytes. */
 export function kvInsertTypedSql(
-  rows: Array<{ key: string; storageClass: 'text' | 'blob'; bytes: Buffer }>,
+  /** Rows already loaded. */
+  rows: Array<{
+    /** cursorDiskKV key. */
+    key: string;
+    /** SQLite storage class to write. */
+    storageClass: 'text' | 'blob';
+    bytes: Buffer;
+  }>,
 ): string {
   let sql =
     'CREATE TEMP TABLE IF NOT EXISTS cct_resource_guard (ok INTEGER CONSTRAINT cct_resource_conflict CHECK(ok = 1));\n';
@@ -49,7 +61,11 @@ export function kvInsertTypedSql(
 }
 
 /** INSERT OR REPLACE one ItemTable JSON value. */
-export function itemReplaceSql(key: string, value: unknown): string {
+export function itemReplaceSql(
+  key: string,
+  /** Item value written into the workspace table. */
+  value: unknown,
+): string {
   return `INSERT OR REPLACE INTO ItemTable (key, value) VALUES (${sqlText(key)}, ${sqlText(JSON.stringify(value))});`;
 }
 
@@ -57,6 +73,7 @@ export function itemReplaceSql(key: string, value: unknown): string {
 export function itemCasReplaceSql(
   key: string,
   expectedRaw: string | null,
+  /** Item value compared and written. */
   value: unknown,
 ): string {
   const next = sqlText(JSON.stringify(value));
@@ -93,7 +110,19 @@ export function itemCasReplaceSql(
 export function isCasConflict(err: unknown): boolean {
   const text =
     err instanceof Error
-      ? `${err.message} ${'stderr' in err ? String((err as { stderr?: string }).stderr || '') : ''}`
+      ? /** Process stderr already captured. */
+        `${err.message} ${
+          'stderr' in err
+            ? String(
+                (
+                  err as {
+                    /** Captured process stderr, when the error has it. */
+                    stderr?: string;
+                  }
+                ).stderr || '',
+              )
+            : ''
+        }`
       : String(err);
 
   return text.includes('cas-conflict') || text.includes('cct_cas_conflict');
@@ -103,7 +132,19 @@ export function isCasConflict(err: unknown): boolean {
 export function isResourceConflict(err: unknown): boolean {
   const text =
     err instanceof Error
-      ? `${err.message} ${'stderr' in err ? String((err as { stderr?: string }).stderr || '') : ''}`
+      ? /** Process stderr already captured. */
+        `${err.message} ${
+          'stderr' in err
+            ? String(
+                (
+                  err as {
+                    /** Captured process stderr, when the error has it. */
+                    stderr?: string;
+                  }
+                ).stderr || '',
+              )
+            : ''
+        }`
       : String(err);
 
   return (
@@ -115,8 +156,10 @@ export function isResourceConflict(err: unknown): boolean {
 export function maybeCol(
   cols: string[],
   vals: string[],
+  /** Column name that may be absent. */
   name: string,
   enabled: boolean,
+  /** SQL expression for that column. */
   value: string,
 ): void {
   if (!enabled) return;
@@ -126,12 +169,17 @@ export function maybeCol(
 
 /** UPSERT composerHeaders using only columns present on this DB. */
 export function headerUpsertSql(
+  /** Composer bodies keyed by id. */
   composers: ComposerHeader[],
   workspaceId: string,
   columns: string[],
 ): string {
   /** True when this composerHeaders table actually has `name`. */
-  const has = (name: string) => columns.includes(name);
+  const has = (
+    /** Column name to test. */
+    name: string,
+  ) => columns.includes(name);
+
   let sql = '';
 
   for (const c of composers) {

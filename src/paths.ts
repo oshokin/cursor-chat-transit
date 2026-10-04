@@ -7,6 +7,7 @@ import type { WorkspaceEntry, WorkspaceIdentity } from './types';
 
 /** Default local Cursor user-data directory for this OS. */
 export function getDefaultCursorUserDir(
+  /** Operating system id used for paths. */
   platform: NodeJS.Platform = process.platform,
   home = os.homedir(),
   env: NodeJS.ProcessEnv = process.env,
@@ -70,7 +71,10 @@ function isDir(p: string): boolean {
 }
 
 /** Return whether a user-data dir has both global and workspace storage. */
-function hasPairedDbs(userDir: string): boolean {
+function hasPairedDbs(
+  /** Cursor user-data directory. */
+  userDir: string,
+): boolean {
   const globalDb = path.join(userDir, 'User', 'globalStorage', 'state.vscdb');
   const wsRoot = path.join(userDir, 'User', 'workspaceStorage');
 
@@ -78,22 +82,28 @@ function hasPairedDbs(userDir: string): boolean {
 }
 
 /** Candidate local user-data roots that contain workspaceStorage. */
-function listStorageRoots({
-  configuredUserDataDir,
-  extraCandidates = [],
-}: {
-  /** User-data directory from settings, when the user pointed at one. */
-  configuredUserDataDir?: string;
-  /** Extra candidate roots, such as isolated host fixtures. */
-  extraCandidates?: string[];
-} = {}): string[] {
+function listStorageRoots(
+  /** {
+  configured user data dir,
+  extra candidates = [],
+}. */
+  {
+    configuredUserDataDir,
+    extraCandidates = [],
+  }: {
+    /** User-data directory from settings, when the user pointed at one. */
+    configuredUserDataDir?: string;
+    /** Extra candidate roots, such as isolated host fixtures. */
+    extraCandidates?: string[];
+  } = {},
+): string[] {
   const ordered: string[] = [];
 
   if (configuredUserDataDir) ordered.push(configuredUserDataDir);
   ordered.push(...uniqueExisting([getDefaultCursorUserDir()]));
   ordered.push(...extraCandidates);
 
-  return uniqueExisting(ordered).filter((dir) =>
+  return uniqueExisting(ordered).filter((/** Directory path. */ dir) =>
     fs.existsSync(path.join(dir, 'User', 'workspaceStorage')),
   );
 }
@@ -126,12 +136,18 @@ export function preferStorageRoot(
 }
 
 /** Path to `User/globalStorage/state.vscdb`. */
-function globalDbPath(userDir: string): string {
+function globalDbPath(
+  /** Cursor user-data directory. */
+  userDir: string,
+): string {
   return path.join(userDir, 'User', 'globalStorage', 'state.vscdb');
 }
 
 /** Path to `User/workspaceStorage`. */
-function workspaceStorageRoot(userDir: string): string {
+function workspaceStorageRoot(
+  /** Cursor user-data directory. */
+  userDir: string,
+): string {
   return path.join(userDir, 'User', 'workspaceStorage');
 }
 
@@ -161,7 +177,10 @@ function storageActivity(dbPath: string, mainMtime: number): number {
 }
 
 /** List workspaceStorage entries, using DB + WAL activity without opening SQLite. */
-export function listWorkspaceEntries(userDir: string): WorkspaceEntry[] {
+export function listWorkspaceEntries(
+  /** Cursor user-data directory. */
+  userDir: string,
+): WorkspaceEntry[] {
   const root = workspaceStorageRoot(userDir);
   const results: WorkspaceEntry[] = [];
 
@@ -201,6 +220,7 @@ export function listWorkspaceEntries(userDir: string): WorkspaceEntry[] {
 
 /** Find storage whose identity matches kind+URI. */
 export function findWorkspaceByIdentity(
+  /** Cursor user-data directory. */
   userDir: string,
   identity: WorkspaceIdentity | undefined,
 ): WorkspaceEntry | undefined {

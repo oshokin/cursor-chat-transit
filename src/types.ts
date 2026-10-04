@@ -56,7 +56,6 @@ export interface ComposerHeader {
   lastUpdatedAt?: number;
   /** Whether Cursor marked the chat archived. */
   isArchived?: boolean;
-  /** Whether this header is a Best-of-N subcomposer. */
   isBestOfNSubcomposer?: boolean;
   /** Checkpoint timestamp when Cursor stored one. */
   conversationCheckpointLastUpdatedAt?: number;
@@ -72,7 +71,6 @@ export interface BubbleRecord {
   key: string;
   /** JSON text of the bubble body. */
   value: string;
-  /** Bubble id parsed from the key. */
   bubbleId: string;
 }
 
@@ -160,6 +158,8 @@ export interface TransferPhaseMetrics {
 
 /** Shared sqlite3, timeout, cancellation, and UI hooks for one transfer. */
 export interface TransferContext {
+  /** Preserve known preview fragments and labelled message gaps during export. */
+  recoverText?: boolean;
   /** Absolute path of the sqlite3 executable. */
   executable: string;
   /** sqlite3 `-init` file that sets timeouts and modes. */
@@ -171,7 +171,11 @@ export interface TransferContext {
   /** SQLite busy timeout applied through the init file. */
   busyTimeoutMs?: number;
   /** Progress callback for named phases. */
-  onPhase?: (phase: TransferPhase, metrics?: TransferPhaseMetrics) => void;
+  onPhase?: (
+    phase: TransferPhase,
+    /** Progress counts for this phase. */
+    metrics?: TransferPhaseMetrics,
+  ) => void;
   /** Bounded chat-level facts for the operation log (id + name, not SQL). */
   onNote?: (message: string) => void;
   /** Local plans directory; default `~/.cursor/plans`. */
@@ -219,9 +223,7 @@ export interface SqliteBytes {
   storageClass: 'text' | 'blob';
   /** Canonical base64 of the decoded bytes. */
   base64: string;
-  /** Decoded byte length. */
   byteLength: number;
-  /** SHA-256 of the decoded bytes. */
   sha256: string;
 }
 
@@ -239,9 +241,7 @@ export interface AttachmentResource {
   id: string;
   /** Canonical base64 of the image bytes. */
   base64: string;
-  /** Decoded byte length. */
   byteLength: number;
-  /** SHA-256 of the decoded bytes. */
   sha256: string;
   /** File extension Cursor used beside the workspace database. */
   extension: string;
@@ -263,9 +263,7 @@ export interface PlanResource {
   filename: string;
   /** Canonical base64 of the markdown bytes. */
   base64: string;
-  /** Decoded byte length. */
   byteLength: number;
-  /** SHA-256 of the decoded bytes. */
   sha256: string;
 }
 
@@ -275,9 +273,7 @@ export interface CanvasResource {
   filename: string;
   /** Canonical base64 of the canvas source. */
   base64: string;
-  /** Decoded byte length. */
   byteLength: number;
-  /** SHA-256 of the decoded bytes. */
   sha256: string;
 }
 
@@ -299,7 +295,6 @@ export interface DependencyAssessment {
 export interface ExportResources {
   /** Allowlisted kv rows. */
   kv: KvResource[];
-  /** Image attachments. */
   attachments: AttachmentResource[];
   /** Plan files. */
   plans: PlanResource[];
@@ -315,10 +310,14 @@ export interface ExportChatIssue {
   name?: string;
   /** Classifier for the incomplete export. */
   reason:
+    | 'recovered-text'
     | 'missing-body'
+    | 'missing-messages'
     | 'missing-dependencies'
     | 'unsupported-state'
     | 'invalid-attachment-id';
+  /** Referenced messages with no stored body. */
+  missingMessages?: number;
   /** Missing blob count when that is the reason. */
   missingBlobs?: number;
   /** Missing image count when that is the reason. */
@@ -350,7 +349,6 @@ export interface DatabaseBackupPair {
 
 /** Named skip: which composer was refused, and why. */
 export interface SkippedChatRef {
-  /** Source composer id. */
   composerId: string;
   /** Display name when the bundle recorded one. */
   name?: string;
@@ -387,6 +385,8 @@ export interface ExportObject {
     selected: number;
     /** How many chats were written. */
     exported: number;
+    /** Source chats with available ordered messages; destination checks still apply. */
+    recoveryCandidates?: number;
     /** Dependency assessment for the selection. */
     dependencies?: DependencyAssessment;
     /** Per-chat incomplete reasons. */

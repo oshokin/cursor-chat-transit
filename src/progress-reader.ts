@@ -5,13 +5,19 @@ import type { TransferContext } from './types';
 /** Measure a bounded NDJSON part while its consumer validates records. */
 export async function* readMeasuredNdjson(
   file: string,
+  /** Name used when the value is rejected. */
   label: string,
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
 ): AsyncGenerator<NdjsonRecord> {
   const total = (await stat(file)).size;
   let last = performance.now();
 
-  const report = (processed: number) =>
+  /** Report progress for this step. */
+  const report = (
+    /** Bytes validated so far. */
+    processed: number,
+  ) =>
     ctx.onPhase?.('validate', {
       scope: file,
       file,

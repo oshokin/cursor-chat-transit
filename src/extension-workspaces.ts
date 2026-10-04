@@ -18,7 +18,10 @@ import type { WorkspaceEntry, WorkspaceIdentity } from './types';
 import { workspacePresentation } from './workspace-presentation';
 
 /** Resolve sqlite3 and an empty `-init` file in globalStorage. */
-export async function prepareSqlite(context: vscode.ExtensionContext): Promise<{
+export async function prepareSqlite(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): Promise<{
   /** sqlite3 executable. */
   executable: string;
   /** sqlite3 `-init` file in globalStorage. */
@@ -63,9 +66,18 @@ export function listHostEntries(): {
 }
 
 /** Load sqlite, storage root, workspace entries, and current identity. */
-export async function hostState(context: vscode.ExtensionContext): Promise<{
+export async function hostState(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): Promise<{
   /** sqlite3 executable and init file. */
-  sqlite: { executable: string; initFile: string };
+  /** Path of the sqlite3 executable. */
+  sqlite: {
+    /** sqlite3 executable chosen for this host. */
+    executable: string;
+    /** SQLite init file passed to that executable. */
+    initFile: string;
+  };
   /** Cursor user-data directory that was searched. */
   userDir: string;
   /** Discovered workspace storage pairs. */
@@ -78,16 +90,35 @@ export async function hostState(context: vscode.ExtensionContext): Promise<{
   return { sqlite, ...listHostEntries() };
 }
 
+/** Local physical workspace database reported by the host, including profile isolation. */
+export function currentWorkspaceDatabase(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): string | undefined {
+  return context.storageUri?.scheme === 'file'
+    ? path.join(path.dirname(context.storageUri.fsPath), 'state.vscdb')
+    : undefined;
+}
+
 /** QuickPick a workspaceStorage entry; current identity is listed first. */
 export async function pickWorkspace(
+  /** Entries to turn into picker rows. */
   entries: WorkspaceEntry[],
+  /** Identity of the workspace that is open now. */
   current: WorkspaceIdentity | undefined,
+  /** Which picker step is open. */
   action: WorkspacePickAction,
-  analysis: { context: vscode.ExtensionContext; operations: TransitLog },
+  /** Extension storage and host state. */
+  analysis: {
+    /** Extension storage passed into the picker. */
+    context: vscode.ExtensionContext;
+    /** Output channel that receives picker notes. */
+    operations: TransitLog;
+  },
 ): Promise<WorkspaceEntry | undefined> {
   if (!entries.length) {
     throw new Error(
-      'No Cursor workspaceStorage databases found in the selected local user-data directory.',
+      'No Cursor workspaces found. Check the user-data directory.',
     );
   }
 
@@ -95,40 +126,49 @@ export async function pickWorkspace(
     items: workspacePickItems(
       entries,
       current,
-      analysis.context.storageUri?.scheme === 'file'
-        ? path.join(
-            path.dirname(analysis.context.storageUri.fsPath),
-            'state.vscdb',
-          )
-        : undefined,
-    ).flatMap((item, index, items) => {
-      const previous = items[index - 1];
+      currentWorkspaceDatabase(analysis.context),
+    ).flatMap(
+      (
+        item,
+        index,
+        /** Full list being walked. */
+        items,
+      ) => {
+        const previous = items[index - 1];
 
-      const group = item.isCurrent
-        ? 'Current workspace'
-        : workspacePresentation(item.entry).group;
-
-      const previousGroup =
-        previous &&
-        (previous.isCurrent
+        const group = item.isCurrent
           ? 'Current workspace'
-          : workspacePresentation(previous.entry).group);
+          : workspacePresentation(item.entry).group;
 
-      return group === previousGroup
-        ? [item]
-        : [
-            {
-              label: group,
-              kind: vscode.QuickPickItemKind.Separator,
-            } as vscode.QuickPickItem,
-            item,
-          ];
-    }),
+        const previousGroup =
+          previous &&
+          (previous.isCurrent
+            ? 'Current workspace'
+            : workspacePresentation(previous.entry).group);
+
+        return group === previousGroup
+          ? [item]
+          : [
+              {
+                label: group,
+                kind: vscode.QuickPickItemKind.Separator,
+              } as vscode.QuickPickItem,
+              item,
+            ];
+      },
+    ),
     title: workspacePickTitle(action),
     placeholder: workspacePickPlaceholder(),
     key: (item) =>
       'entry' in item
-        ? workspaceStatisticsKey((item as { entry: WorkspaceEntry }).entry)
+        ? workspaceStatisticsKey(
+            (
+              item as {
+                /** Workspace the user picked. */
+                entry: WorkspaceEntry;
+              }
+            ).entry,
+          )
         : undefined,
     keepVisible: (item) => 'isCurrent' in item && item.isCurrent === true,
     buttonLabel: 'Count chats in each workspace',
@@ -143,6 +183,11 @@ export async function pickWorkspace(
   const pick = picked?.[0];
 
   return pick && 'entry' in pick
-    ? (pick as { entry: WorkspaceEntry }).entry
+    ? (
+        pick as {
+          /** Workspace the user picked. */
+          entry: WorkspaceEntry;
+        }
+      ).entry
     : undefined;
 }

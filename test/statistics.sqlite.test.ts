@@ -682,3 +682,187 @@ test(
     }
   },
 );
+
+test(
+  'workspace filter stops at the first retained chat and releases its read view',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const retained = healthId('retained');
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${retained}:one','{}');`,
+    });
+
+    const headers = [
+      { composerId: retained },
+      ...Array.from({ length: 64 }, (_, i) => ({ composerId: `unused-${i}` })),
+    ];
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.workspaceDbPath,
+      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
+    });
+
+    const events: TransferEvent[] = [];
+    const rows: StatisticsUpdate[] = [];
+
+    await observeTransfer({ event: (e) => events.push(e) }, () =>
+      runStatistics(
+        {
+          ...ctx,
+          kind: 'workspace-statistics',
+          deepCheck: true,
+          workspaces: [workspace],
+        },
+        new AbortController().signal,
+        (row) => rows.push(row),
+      ),
+    );
+
+    assert.equal(rows[0].hide, false);
+
+    assert.equal(
+      events.filter(
+        (e) =>
+          e.action === 'Check chat history presence' &&
+          e.status === 'completed',
+      ).length,
+      1,
+    );
+
+    assert.match(rows[0].detail, /65/);
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: 'BEGIN EXCLUSIVE; COMMIT;',
+    });
+  },
+);
+
+test(
+  'search catalogue shares global headers across physical workspaces and never reads message bodies',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, headers, root } = await fixture(t);
+
+    const other = {
+      ...workspace,
+      storageId: 'other',
+      workspaceDbPath: path.join(root, 'other.vscdb'),
+    };
+
+    await execSqlScript({
+      ...ctx,
+      database: other.workspaceDbPath,
+      sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: 'other-chat', name: 'Other workspace' }] }))});`,
+    });
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: "INSERT INTO cursorDiskKV VALUES('bubbleId:unrelated:huge',zeroblob(33554433));",
+    });
+
+    const events: TransferEvent[] = [];
+    const updates: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
+    const { runCatalogue } = await import('../src/workspace-catalogue');
+
+    const missing = {
+      ...workspace,
+      storageId: 'missing',
+      workspaceDbPath: path.join(root, 'missing.vscdb'),
+    };
+
+    const result = await observeTransfer(
+      { event: (event) => events.push(event) },
+      () =>
+        runCatalogue(
+          {
+            ...ctx,
+            kind: 'workspace-catalogue',
+            workspaces: [workspace, other, missing],
+          },
+          new AbortController().signal,
+          (row) => updates.push(row),
+        ),
+    );
+
+    assert.equal(result.failed, 1);
+
+    assert.deepEqual(
+      updates[0].headers?.map((h) => h.composerId).sort(),
+      headers.map((h) => h.composerId).sort(),
+    );
+
+    assert.deepEqual(
+      updates[1].headers?.map((h) => h.composerId),
+      ['other-chat'],
+    );
+
+    assert.ok(updates[2].error);
+
+    assert.equal(
+      events.filter(
+        (e) =>
+          e.action === 'Read global chat headers' && e.status === 'started',
+      ).length,
+      1,
+    );
+
+    assert.equal(
+      events.some((e) => /bubble|resource|chat data/i.test(e.action)),
+      false,
+    );
+
+    await assert.rejects(fs.stat(missing.workspaceDbPath), { code: 'ENOENT' });
+    const ipc: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
+
+    await runTransfer(
+      { ...ctx, kind: 'workspace-catalogue', workspaces: [workspace] },
+      { onCatalogue: (row) => ipc.push(row) },
+    );
+
+    assert.equal(ipc.length, 1);
+    assert.equal(ipc[0].headers?.length, headers.length);
+  },
+);
+
+test(
+  'search catalogue cancellation stops before the next workspace and releases read connections',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const { runCatalogue } = await import('../src/workspace-catalogue');
+    const abort = new AbortController();
+    let updates = 0;
+
+    await assert.rejects(
+      runCatalogue(
+        {
+          ...ctx,
+          kind: 'workspace-catalogue',
+          workspaces: [workspace, workspace],
+        },
+        abort.signal,
+        () => {
+          updates++;
+          abort.abort();
+        },
+      ),
+      /abort/i,
+    );
+
+    assert.equal(updates, 1);
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: 'BEGIN EXCLUSIVE; COMMIT;',
+    });
+  },
+);

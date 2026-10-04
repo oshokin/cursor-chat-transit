@@ -6,12 +6,23 @@ import { runSqlite } from './sqlite-process';
 import type { SqliteConn } from './types';
 
 /** Collect stdout into a string. */
-function collectText(): { output: Writable; text: () => string } {
+function collectText(): {
+  /** Writable that collects stdout chunks. */
+  output: Writable;
+  /** Decoded stdout collected so far. */
+  text: () => string;
+} {
   const chunks: Buffer[] = [];
 
   const output = new Writable({
     /** Append one stdout chunk; decoding happens in `text()`. */
-    write(chunk, _enc, cb) {
+    write(
+      chunk,
+      /** Encoding ignored by this hash transform. */
+      _enc,
+      /** Callback that receives the transformed chunk. */
+      cb,
+    ) {
       chunks.push(Buffer.from(chunk));
       cb();
     },
@@ -28,7 +39,10 @@ function collectText(): { output: Writable; text: () => string } {
 }
 
 /** Ordered sqlite3 paths: configured, PATH, then platform fallbacks. */
-function candidateExecutables(configured?: string): string[] {
+function candidateExecutables(
+  /** sqlite3 path from settings. Empty searches PATH. */
+  configured?: string,
+): string[] {
   const out: string[] = [];
 
   if (configured) return path.isAbsolute(configured) ? [configured] : [];
@@ -68,7 +82,11 @@ function candidateExecutables(configured?: string): string[] {
 
 /** Pump SQL through runSqlite and return collected stdout. */
 async function runAndCollect(
-  opts: SqliteConn & { sql: string; readOnly?: boolean },
+  opts: SqliteConn & {
+    /** SQL text to run. */
+    sql: string;
+    readOnly?: boolean;
+  },
 ): Promise<string> {
   if (opts.session) return opts.session.exec(opts.sql);
   const sink = collectText();
@@ -88,7 +106,10 @@ async function runAndCollect(
 }
 
 /** Locate a local sqlite3 executable. */
-export function findSqliteExecutable(configured?: string): string | null {
+export function findSqliteExecutable(
+  /** sqlite3 path from settings. Empty searches PATH. */
+  configured?: string,
+): string | null {
   for (const p of candidateExecutables(configured)) {
     try {
       if (fs.statSync(p).isFile()) {
@@ -108,7 +129,10 @@ export function findSqliteExecutable(configured?: string): string | null {
 }
 
 /** Write an empty `-init` file so sqlite3 does not read `~/.sqliterc`. */
-export async function ensureInitFile(dir: string): Promise<string> {
+export async function ensureInitFile(
+  /** Directory to scan. */
+  dir: string,
+): Promise<string> {
   const initFile = path.join(dir, 'empty-sqliterc');
 
   await fs.promises.writeFile(initFile, '', { flag: 'w' });
@@ -118,7 +142,11 @@ export async function ensureInitFile(dir: string): Promise<string> {
 
 /** Run a read query in list/tab mode. */
 export async function execSql(
-  opts: SqliteConn & { sql: string; readOnly?: boolean },
+  opts: SqliteConn & {
+    /** SQL text to run. */
+    sql: string;
+    readOnly?: boolean;
+  },
 ): Promise<string> {
   const preamble = [
     busyTimeoutCommand(opts.busyTimeoutMs),
@@ -133,7 +161,10 @@ export async function execSql(
 
 /** Run a mutating SQL script (no `-readonly`). */
 export async function execSqlScript(
-  opts: SqliteConn & { sql: string },
+  opts: SqliteConn & {
+    /** SQL text to run. */
+    sql: string;
+  },
 ): Promise<string> {
   return runAndCollect({
     ...opts,
@@ -143,7 +174,10 @@ export async function execSqlScript(
 }
 
 /** Validate before embedding a value in a CLI command. Applies to every connection. */
-export function busyTimeoutCommand(value = 5000): string {
+export function busyTimeoutCommand(
+  /** Busy-timeout seconds sent to sqlite3. */
+  value = 5000,
+): string {
   if (!Number.isInteger(value) || value < 0 || value > 30000) {
     throw new TypeError(
       'SQLite busy timeout must be an integer from 0 ms (0 ms) to 30000 ms (30s)',
@@ -155,7 +189,9 @@ export function busyTimeoutCommand(value = 5000): string {
 
 /** `SELECT sqlite_version()` via a throwaway temp database. */
 export async function sqliteVersion(
+  /** Path of the sqlite3 executable. */
   executable: string,
+  /** SQLite init file passed to the executable. */
   initFile: string,
   signal?: AbortSignal,
 ): Promise<string> {
@@ -237,13 +273,17 @@ export function parseHexRowLine(line: Buffer, cols: number): Buffer[] {
 /** Writable that hex-decodes sqlite3 list rows as they arrive (never one giant string). */
 export function createHexRowParser(
   cols: number,
+  /** Called once for each row. */
   onRow: (fields: Buffer[]) => void | Promise<void>,
 ): Writable {
   const parts: Buffer[] = [];
   let partsLen = 0;
 
   /** Join buffered fragments with `suffix` into one sqlite3 list line. */
-  const takeLine = (suffix: Buffer): Buffer => {
+  const takeLine = (
+    /** Bytes that finish the current list line. */
+    suffix: Buffer,
+  ): Buffer => {
     if (!partsLen) return suffix;
     const line = Buffer.concat([...parts, suffix], partsLen + suffix.length);
 
@@ -254,7 +294,10 @@ export function createHexRowParser(
   };
 
   /** Strip a trailing CR and decode one complete hex row. */
-  const flushLine = async (line: Buffer) => {
+  const flushLine = async (
+    /** One complete sqlite3 list line. */
+    line: Buffer,
+  ) => {
     if (line.length && line[line.length - 1] === CR) {
       line = line.subarray(0, line.length - 1);
     }
@@ -265,7 +308,13 @@ export function createHexRowParser(
 
   return new Writable({
     /** Hex-decode complete lines; keep a partial line in `parts`. */
-    write(chunk, _enc, cb) {
+    write(
+      chunk,
+      /** Encoding ignored by this hash transform. */
+      _enc,
+      /** Callback that receives the transformed chunk. */
+      cb,
+    ) {
       void (async () => {
         let buf = Buffer.from(chunk);
 
@@ -287,7 +336,10 @@ export function createHexRowParser(
       );
     },
     /** Decode a trailing fragment that was not terminated by a newline. */
-    final(cb) {
+    final(
+      /** Callback that receives the transformed chunk. */
+      cb,
+    ) {
       void (async () => {
         if (partsLen) await flushLine(takeLine(Buffer.alloc(0)));
       })().then(

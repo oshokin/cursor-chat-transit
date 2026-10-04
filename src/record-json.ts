@@ -5,7 +5,11 @@ import {
 } from './bundle-limits';
 
 /** Parse one bounded JSON value and refuse oversized or too-wide objects. */
-export function parseBoundedJson(bytes: Buffer, label: string): unknown {
+export function parseBoundedJson(
+  bytes: Buffer,
+  /** Name used when the value is rejected. */
+  label: string,
+): unknown {
   if (bytes.length > MAX_JSON_RECORD_BYTES) {
     throw new Error(
       `${label} is ${bytes.length} bytes; the limit is ${MAX_JSON_RECORD_BYTES}.`,
@@ -36,11 +40,21 @@ export function parseBoundedJson(bytes: Buffer, label: string): unknown {
 }
 
 /** Walk one already-parsed value. Callers must bound the source bytes first. */
-export function assertJsonLimits(value: unknown, label: string): void {
+export function assertJsonLimits(
+  /** JSON value whose size is checked. */
+  value: unknown,
+  /** Name used when the value is rejected. */
+  label: string,
+): void {
   let keys = 0;
 
   /** Depth-first walk that counts own properties and rejects hostile keys. */
-  const visit = (node: unknown, depth: number): void => {
+  const visit = (
+    /** JSON value at this depth. */
+    node: unknown,
+    /** Current walk depth. */
+    depth: number,
+  ): void => {
     if (depth > MAX_JSON_DEPTH) {
       throw new Error(`${label} is nested deeper than ${MAX_JSON_DEPTH}.`);
     }

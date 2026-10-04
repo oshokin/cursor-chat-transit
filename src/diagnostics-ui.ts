@@ -16,6 +16,7 @@ export {
 
 /** Show a native modal on explicit request; keep the operation output free of diagnostics. */
 export async function showDiagnosticsDialog(
+  /** Progress callback. */
   report: DiagnosticReport,
 ): Promise<void> {
   const text = formatDiagnosticReport(report);

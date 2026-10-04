@@ -23,6 +23,9 @@ export async function run(): Promise<void> {
     'cursorChatTransit.exportCurrentWorkspace',
     'cursorChatTransit.diagnostics',
     'cursorChatTransit.showOutput',
+    'cursorChatTransit.manageSearch',
+    'cursorChatTransit.manageCheck',
+    'cursorChatTransit.manageDelete',
   ]) {
     assert.ok(commands.includes(command), `missing ${command}`);
   }
@@ -35,6 +38,7 @@ export async function run(): Promise<void> {
   );
 
   await vscode.commands.executeCommand('cursorChatTransit.view.focus');
+  await vscode.commands.executeCommand('cursorChatTransit.manage.focus');
 
   const html = fs.readFileSync(
     path.join(extension.extensionPath, 'resources', 'sidebar.html'),

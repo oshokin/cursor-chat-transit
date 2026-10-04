@@ -29,7 +29,13 @@ export async function hashFile(
       createReadStream(filePath, { signal }),
       new Transform({
         /** Hash each chunk and count bytes. */
-        transform(chunk, _enc, cb) {
+        transform(
+          chunk,
+          /** Encoding ignored by this hash transform. */
+          _enc,
+          /** Callback that receives the transformed chunk. */
+          cb,
+        ) {
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 
           bytes += buf.length;
@@ -60,6 +66,7 @@ export async function hashFile(
 
 /** Write lowercase hex of `source` without building one giant hex string. */
 export async function writeHexFile(
+  /** Source path inside the archive or on disk. */
   source: string,
   dest: string,
 ): Promise<void> {

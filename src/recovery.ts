@@ -30,7 +30,6 @@ export type ChatInspection =
       composerId: string;
       /** Missing `agentKv:blob:*` values. */
       missingBlobs: number;
-      /** Missing image files. */
       missingImages: number;
       /** Missing plan files. */
       missingPlans: number;
@@ -59,6 +58,7 @@ export interface RecoveryPlan {
 /** Never treats DB failures, conflicts, unsafe paths, or invalid envelopes as recoverable. */
 export function planRecovery(
   chats: ChatInspection[],
+  /** Keep readable history when optional resources are missing. */
   allowPartial: boolean,
 ): RecoveryPlan {
   const plan: RecoveryPlan = { complete: [], historyOnly: [], skipped: [] };
@@ -228,7 +228,11 @@ export async function inspectComposer(opts: {
         };
       }
 
-      const bubbleId = (header as { bubbleId?: unknown }).bubbleId;
+      const bubbleId = (
+        header as {
+          bubbleId?: unknown;
+        }
+      ).bubbleId;
 
       if (typeof bubbleId !== 'string' || !available.has(bubbleId)) {
         return {
@@ -343,7 +347,11 @@ export async function inspectExportChats(opts: {
   /** Canvas directory used to confirm canvas files. */
   canvasesDir?: string | null;
   /** Coarse progress while chats are inspected. */
-  onProgress?: (processed: number, total: number) => void;
+  onProgress?: (
+    processed: number,
+    /** Total items in this operation. */
+    total: number,
+  ) => void;
 }): Promise<ChatInspection[]> {
   const resourceKeys = new Set(opts.resources.kv.map((row) => row.key));
 
@@ -392,8 +400,10 @@ export async function inspectExportChats(opts: {
 
 /** Keep only chats the recovery plan will write. */
 export function filterExportForPlan(
+  /** In-memory export being spilled. */
   exportObj: ExportObject,
   plan: RecoveryPlan,
+  /** Resource rows for this chat. */
   resources: ExportResources,
 ): ExportObject {
   const keep = new Set([...plan.complete, ...plan.historyOnly]);

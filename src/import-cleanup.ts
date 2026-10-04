@@ -25,7 +25,11 @@ export async function cleanUnpublishedBubbles(opts: {
   await opts.journal.forEachBubble(
     opts.operationId,
     opts.chat.targetComposerId,
-    (id, hash) => {
+    (
+      id,
+      /** Content hash. */
+      hash,
+    ) => {
       expected.set(id, hash);
     },
   );
@@ -34,6 +38,7 @@ export async function cleanUnpublishedBubbles(opts: {
 
   if (!present.size) return;
 
+  /** Build the error used when an unpublished chat changed. */
   const problem = () => {
     const error = new TransferError(
       'An unfinished chat changed. Its rows were preserved; inspect the operation log.',
@@ -51,14 +56,20 @@ export async function cleanUnpublishedBubbles(opts: {
   const composerKey = `composerData:${opts.chat.targetComposerId}`;
   const id = sqlText(opts.chat.targetComposerId);
 
+  /** Insert the queued bubble rows. */
   const flush = async () => {
     if (!batch.length) return;
 
     const values = batch
-      .map(([key, text]) => `(${sqlText(key)},${sqlText(text)})`)
+      .map(
+        (/** KV key and the text stored for it. */ [key, text]) =>
+          `(${sqlText(key)},${sqlText(text)})`,
+      )
       .join(',');
 
-    const keys = batch.map(([key]) => sqlText(key)).join(',');
+    const keys = batch
+      .map((/** KV key from the queued batch. */ [key]) => sqlText(key))
+      .join(',');
 
     const headers = [
       opts.layout.composerHeaders

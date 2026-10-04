@@ -27,7 +27,10 @@ export function isCanvasFilename(name: string): boolean {
  * Cursor project-directory slug.
  * Matches workbench `zOi`: non-alphanumerics become `-`, runs collapse, ends trim.
  */
-export function cursorProjectSlug(fsPath: string): string | null {
+export function cursorProjectSlug(
+  /** Filesystem path used to build the project slug. */
+  fsPath: string,
+): string | null {
   if (!fsPath || fsPath.includes('\0')) return null;
 
   const slug = fsPath
@@ -53,7 +56,10 @@ export function canvasesDirectoryForWorkspace(
 }
 
 /** Basename of a canvas under a `canvases` directory. Other paths are ignored. */
-export function canvasFilenameFromRef(value: string): string | null {
+export function canvasFilenameFromRef(
+  /** Canvas path or URI string. */
+  value: string,
+): string | null {
   if (typeof value !== 'string' || !value) return null;
   let filePath = value;
 
@@ -117,20 +123,29 @@ function looksLikeUriObject(rec: Record<string, unknown>): boolean {
 /** Canvas basenames reachable from one chat. Paths in JSON are never opened. */
 export function canvasFilenamesFromChat(
   bodyText: string | undefined,
+  /** Bubble records keyed by composer id. */
   bubbles: BubbleRecord[] | undefined,
 ): string[] {
   const names: string[] = [];
   const seen = new Set<string>();
 
   /** Record a unique canvas basename. */
-  const add = (name: string | null) => {
+  const add = (
+    /** Canvas basename, or null. */
+    name: string | null,
+  ) => {
     if (!name || seen.has(name)) return;
     seen.add(name);
     names.push(name);
   };
 
   /** Walk JSON for canvas URIs. Skip user-facing `text` and `rawText`. */
-  const visit = (value: unknown, depth: number) => {
+  const visit = (
+    /** Nested JSON value. */
+    value: unknown,
+    /** Current walk depth. */
+    depth: number,
+  ) => {
     if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
 
     if (Array.isArray(value)) {
@@ -176,7 +191,11 @@ export function canvasFilenamesFromChat(
 }
 
 /** Envelope for one canvas file. */
-export function encodeCanvas(filename: string, bytes: Buffer): CanvasResource {
+export function encodeCanvas(
+  /** Basename, not a path. */
+  filename: string,
+  bytes: Buffer,
+): CanvasResource {
   if (!isCanvasFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid canvas filename.');
   }
@@ -196,7 +215,10 @@ export function encodeCanvas(filename: string, bytes: Buffer): CanvasResource {
 }
 
 /** Validate and decode a canvas envelope. */
-export function decodeCanvas(value: CanvasResource): Buffer {
+export function decodeCanvas(
+  /** Canvas envelope to decode. */
+  value: CanvasResource,
+): Buffer {
   if (!isCanvasFilename(value.filename)) {
     fail('INVALID_RESOURCE', 'Invalid canvas filename.');
   }
@@ -218,7 +240,12 @@ export function decodeCanvas(value: CanvasResource): Buffer {
 }
 
 /** Allowlisted `{canvasesDir}/{basename}` only. */
-export function canvasFilePath(canvasesDir: string, filename: string): string {
+export function canvasFilePath(
+  /** Allowlisted canvases directory. */
+  canvasesDir: string,
+  /** Basename, not a path. */
+  filename: string,
+): string {
   if (!isCanvasFilename(filename)) {
     fail('INVALID_RESOURCE', 'Invalid canvas filename.');
   }
@@ -234,7 +261,9 @@ export function canvasFilePath(canvasesDir: string, filename: string): string {
 
 /** Read a canvas from the allowlisted directory only. */
 export async function readCanvasFile(
+  /** Allowlisted canvases directory. */
   canvasesDir: string,
+  /** Basename, not a path. */
   filename: string,
 ): Promise<CanvasResource | null> {
   const dest = canvasFilePath(canvasesDir, filename);
@@ -263,7 +292,9 @@ export async function readCanvasFile(
 
 /** Write a canvas; reuse identical bytes, never overwrite a different file. */
 export async function writeCanvasFile(
+  /** Allowlisted canvases directory. */
   canvasesDir: string,
+  /** Resource envelope to write or check. */
   resource: CanvasResource,
 ): Promise<string> {
   const bytes = decodeCanvas(resource);
@@ -281,7 +312,9 @@ export async function writeCanvasFile(
 
 /** Fail if the on-disk canvas is missing or its bytes differ. */
 export async function verifyCanvasFile(
+  /** Allowlisted canvases directory. */
   canvasesDir: string,
+  /** Resource envelope to write or check. */
   resource: CanvasResource,
 ): Promise<void> {
   const expected = decodeCanvas(resource);
@@ -318,8 +351,11 @@ function applyCanvasUri(rec: Record<string, unknown>, absPath: string): void {
 
 /** Rewrite structured canvas URIs. Leave `text` and `rawText` unchanged. */
 export function rewriteCanvasReferences(
+  /** Composer or bubble JSON to rewrite. */
   value: unknown,
+  /** Source basename to the installed path. */
   destByFilename: Map<string, string>,
+  /** Remaining recursion depth. */
   depth = 0,
 ): unknown {
   if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
@@ -358,8 +394,11 @@ export function rewriteCanvasReferences(
 
 /** Remap canvas URIs inside composer and bubble JSON after files are installed. */
 export function rewriteChatCanvasUris(
+  /** Composer bodies keyed by id. */
   composers: Record<string, string>,
+  /** Bubble records keyed by composer id. */
   bubbles: Record<string, BubbleRecord[]>,
+  /** Source basename to the installed path. */
   destByFilename: Map<string, string>,
 ): void {
   if (!destByFilename.size) return;

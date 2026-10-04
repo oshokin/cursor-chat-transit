@@ -2,7 +2,9 @@ import type { UriParts } from './types';
 
 /** Format local filesystem metadata without losing UNC hosts or URI escaping. */
 export function fileUriMetadata(
+  /** URI string or parts. */
   uri: UriParts,
+  /** Operating system id used for paths. */
   platform: NodeJS.Platform = process.platform,
 ): {
   /** `file://` URI with encoded path segments. */
@@ -18,7 +20,12 @@ export function fileUriMetadata(
 }
 
 /** Drive letters and UNC shares use the platform separator. Other file paths stay URI paths. */
-function nativeFsPath(uri: UriParts, platform: NodeJS.Platform): string {
+function nativeFsPath(
+  /** URI string or parts. */
+  uri: UriParts,
+  /** Operating system id used for paths. */
+  platform: NodeJS.Platform,
+): string {
   if (platform !== 'win32')
     return (uri.authority ? `//${uri.authority}` : '') + uri.path;
   if (uri.authority)

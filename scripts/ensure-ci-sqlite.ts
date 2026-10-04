@@ -91,6 +91,21 @@ if (!exe) {
 }
 
 if (!exe) throw new Error('sqlite3 CLI is required for CI integration tests');
+
+// The Chocolatey bin entry is a shim that starts the real sqlite3.exe.
+// Every test pays for that extra process on Windows.
+if (process.platform === 'win32') {
+  const real = path.join(
+    process.env.ChocolateyInstall || 'C:\\ProgramData\\chocolatey',
+    'lib',
+    'sqlite',
+    'tools',
+    'sqlite3.exe',
+  );
+
+  if (fs.existsSync(real)) exe = real;
+}
+
 /** `sqlite3 --version` probe used to prove the binary runs. */
 const ver = spawnSync(exe, ['--version'], { encoding: 'utf8', shell: false });
 

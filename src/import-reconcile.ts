@@ -37,7 +37,9 @@ import { TransferError } from './types';
 
 /** Fail closed so a half-finished import is never treated as a new copy. */
 export function needsAttention(
+  /** Text written to the operation log. */
   message: string,
+  /** Second line of a notice. */
   detail?: string,
 ): TransferError {
   const err = new TransferError(message);
@@ -104,7 +106,9 @@ export function pendingChatsFromClone(opts: {
 /** Resource checksums the pending record must still find on disk after commit. */
 export function expectedResourcesFromChat(
   body: string,
+  /** Bubble records keyed by composer id. */
   bubbles: BubbleRecord[] | undefined,
+  /** Resource rows for this chat. */
   resources: ExportResources,
 ): NonNullable<PendingImportChat['expectedResources']> {
   const out: NonNullable<PendingImportChat['expectedResources']> = [];
@@ -112,8 +116,11 @@ export function expectedResourcesFromChat(
 
   /** Record one unique kv, image, or plan checksum the pending row must keep. */
   const add = (
+    /** Resource class the pending row must keep. */
     kind: 'kv' | 'image' | 'plan' | 'canvas',
+    /** Resource id the pending row must keep. */
     id: string,
+    /** SHA-256 the pending row must keep. */
     sha256: string,
   ) => {
     const key = `${kind}\0${id}`;
@@ -124,6 +131,7 @@ export function expectedResourcesFromChat(
   };
 
   const kvByKey = new Map(resources.kv.map((row) => [row.key, row]));
+
   const blobs = blobKeysFromComposerBody(body);
 
   if (blobs.status === 'ok') {
@@ -141,8 +149,12 @@ export function expectedResourcesFromChat(
     let state: unknown;
 
     try {
-      state = (JSON.parse(body) as { conversationState?: unknown })
-        .conversationState;
+      /** Conversation state. */
+      state = (
+        JSON.parse(body) as {
+          conversationState?: unknown;
+        }
+      ).conversationState;
     } catch {
       state = undefined;
     }
@@ -202,13 +214,12 @@ export function expectedResourcesFromChat(
 
 /** Drop a vanished pending batch, complete an exact one, or stop for inspection. */
 export async function reconcilePending(
+  /** Receipt database for this destination. */
   journal: ImportJournal,
   opts: {
     /** Destination workspace whose databases are being reconciled. */
     workspace: WorkspaceEntry;
-    /** Open workspace database connection. */
     connWs: SqliteConn;
-    /** Open global database connection. */
     connGl: SqliteConn;
     /** Detected workspace schema. */
     wsInfo: Layout;
@@ -260,9 +271,7 @@ export async function pendingChatMatch(
   opts: {
     /** Destination workspace whose databases are being compared. */
     workspace: WorkspaceEntry;
-    /** Open workspace database connection. */
     connWs: SqliteConn;
-    /** Open global database connection. */
     connGl: SqliteConn;
     /** Detected workspace schema. */
     wsInfo: Layout;
@@ -321,7 +330,6 @@ export async function pendingResourceMatches(
   opts: {
     /** Destination workspace used to resolve attachment files. */
     workspace: WorkspaceEntry;
-    /** Open global database connection. */
     connGl: SqliteConn;
     /** Directory that should still hold pending plan files. */
     plansDir: string;
@@ -373,13 +381,21 @@ export async function pendingResourceMatches(
 }
 
 /** True when a header object is explicitly marked archived. */
-function headerIsArchived(header: { isArchived?: unknown } | null): boolean {
+function headerIsArchived(
+  header: {
+    /** Archived flag stored on the composer, when present. */
+    isArchived?: unknown;
+  } | null,
+): boolean {
   return Boolean(header && header.isArchived === true);
 }
 
 /** Explicit JSON archive flag when the header states one; otherwise undefined. */
 function explicitArchive(
-  headers: Array<{ isArchived?: unknown }>,
+  headers: Array<{
+    /** Archived flag stored on the composer, when present. */
+    isArchived?: unknown;
+  }>,
 ): boolean | undefined {
   let seen = false;
   let value = false;
@@ -395,7 +411,11 @@ function explicitArchive(
 }
 
 /** True when `list` contains this composer id as a string or `{ composerId }`. */
-function listHasComposer(list: unknown, composerId: string): boolean {
+function listHasComposer(
+  /** Bubble records to scan. */
+  list: unknown,
+  composerId: string,
+): boolean {
   if (!Array.isArray(list)) return false;
 
   for (const item of list) {
@@ -404,7 +424,12 @@ function listHasComposer(list: unknown, composerId: string): boolean {
     if (
       item &&
       typeof item === 'object' &&
-      (item as { composerId?: unknown }).composerId === composerId
+      (
+        item as {
+          /** Composer id when the value has one. */
+          composerId?: unknown;
+        }
+      ).composerId === composerId
     ) {
       return true;
     }
@@ -414,15 +439,30 @@ function listHasComposer(list: unknown, composerId: string): boolean {
 }
 
 /** True when a list entry for this composer is marked archived. */
-function listHasArchived(list: unknown, composerId: string): boolean {
+function listHasArchived(
+  /** Bubble records to scan. */
+  list: unknown,
+  composerId: string,
+): boolean {
   if (!Array.isArray(list)) return false;
 
   for (const item of list) {
     if (
       item &&
       typeof item === 'object' &&
-      (item as { composerId?: unknown }).composerId === composerId &&
-      headerIsArchived(item as { isArchived?: unknown })
+      (
+        item as {
+          /** Composer id when the value has one. */
+          composerId?: unknown;
+        }
+      ).composerId === composerId &&
+      /** Is archived. */
+      headerIsArchived(
+        item as {
+          /** Archived flag stored on the composer, when present. */
+          isArchived?: unknown;
+        },
+      )
     ) {
       return true;
     }
@@ -468,8 +508,17 @@ function isHeaderEntry(item: unknown): boolean {
     !!item &&
     typeof item === 'object' &&
     !Array.isArray(item) &&
-    typeof (item as { composerId?: unknown }).composerId === 'string' &&
-    (item as { composerId: string }).composerId.length > 0
+    typeof (
+      item as {
+        /** Composer id when the value has one. */
+        composerId?: unknown;
+      }
+    ).composerId === 'string' &&
+    (
+      item as {
+        composerId: string;
+      }
+    ).composerId.length > 0
   );
 }
 
@@ -545,9 +594,7 @@ async function readItemRecord(
  * key and missing optional fields are allowed.
  */
 export async function assertStoredListsReadable(opts: {
-  /** Open workspace database connection. */
   connWs: SqliteConn;
-  /** Open global database connection. */
   connGl: SqliteConn;
   /** Detected workspace schema. */
   wsInfo: Layout;
@@ -605,6 +652,7 @@ export async function assertStoredListsReadable(opts: {
 /** Whether a composer body is absent, a JSON object, or damaged. */
 function assessBody(
   raw: string | null,
+  /** Old bubble id to the new bubble id. */
   bubbleIds: ReadonlySet<string>,
 ): {
   /** Absent, a JSON object, or damaged. */
@@ -625,8 +673,13 @@ function assessBody(
     return { shape: 'invalid', references: 'satisfied' };
   }
 
-  const headers = (parsed as { fullConversationHeadersOnly?: unknown })
-    .fullConversationHeadersOnly;
+  /** Full conversation headers only. */
+  const headers = (
+    parsed as {
+      /** Ordered message headers on the composer. */
+      fullConversationHeadersOnly?: unknown;
+    }
+  ).fullConversationHeadersOnly;
 
   if (headers === undefined) return { shape: 'valid', references: 'satisfied' };
 
@@ -639,7 +692,11 @@ function assessBody(
       return { shape: 'invalid', references: 'satisfied' };
     }
 
-    const bubbleId = (item as { bubbleId?: unknown }).bubbleId;
+    const bubbleId = (
+      item as {
+        bubbleId?: unknown;
+      }
+    ).bubbleId;
 
     if (typeof bubbleId !== 'string' || !bubbleId) {
       return { shape: 'invalid', references: 'satisfied' };
@@ -658,7 +715,11 @@ function mergeArchive(
   jsonArchived: boolean,
   jsonExplicit: boolean | undefined,
   column: Awaited<ReturnType<typeof db.composerHeaderArchiveColumn>>,
-): { archived: boolean; conflict: boolean } {
+): {
+  archived: boolean;
+  /** The column and the JSON flag disagree. */
+  conflict: boolean;
+} {
   if (column === 'invalid') return { archived: jsonArchived, conflict: true };
 
   if (column === 'archived' && jsonExplicit === false) {
@@ -684,7 +745,6 @@ function presence(value: boolean): TargetFacts['body'] {
 export async function composerMentioned(
   composerId: string,
   opts: {
-    /** Open workspace database connection. */
     connWs: SqliteConn;
     /** Detected workspace schema. */
     wsInfo: Layout;
@@ -734,15 +794,17 @@ export async function observeTargetComposer(opts: {
   targetComposerId: string;
   /** Destination workspace; kept so callers share the probe argument shape. */
   workspace: WorkspaceEntry;
-  /** Open workspace database connection. */
   connWs: SqliteConn;
-  /** Open global database connection. */
   connGl: SqliteConn;
   /** Detected workspace schema. */
   wsInfo: Layout;
   /** Detected global schema. */
   glInfo: Layout;
-}): Promise<TargetFacts & { targetComposerId: string }> {
+}): Promise<
+  TargetFacts & {
+    targetComposerId: string;
+  }
+> {
   const id = opts.targetComposerId;
   const body = await db.readKvText(opts.connGl, `composerData:${id}`);
   const bubbleIds = await db.listBubbleIds(opts.connGl, id);
@@ -900,9 +962,7 @@ export async function probeTargetComposer(opts: {
   targetComposerId: string;
   /** Destination workspace; kept so callers share the observation argument shape. */
   workspace: WorkspaceEntry;
-  /** Open workspace database connection. */
   connWs: SqliteConn;
-  /** Open global database connection. */
   connGl: SqliteConn;
   /** Detected workspace schema. */
   wsInfo: Layout;
@@ -914,7 +974,9 @@ export async function probeTargetComposer(opts: {
 
 /** Compact facts for the operation log, including the classified verdict. */
 export function formatTargetObservation(
-  observation: TargetFacts & { targetComposerId: string },
+  observation: TargetFacts & {
+    targetComposerId: string;
+  },
 ): string {
   return formatTargetFacts(observation.targetComposerId, observation);
 }

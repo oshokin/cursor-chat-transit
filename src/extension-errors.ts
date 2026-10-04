@@ -1,3 +1,4 @@
+import { notifyCompletion } from './notifications';
 import { formatLogLine } from './log-format';
 import * as vscode from 'vscode';
 import { setUi } from './extension-state';
@@ -9,7 +10,10 @@ import type { TransferError } from './types';
 let staleLock: StaleLock | undefined;
 
 /** User-requested recovery revalidates the owner immediately before removal. */
-export async function recoverStaleTransfer(log: TransitLog): Promise<void> {
+export async function recoverStaleTransfer(
+  /** Operation log receiving the line. */
+  log: TransitLog,
+): Promise<void> {
   if (!staleLock) return;
   await clearStaleLock(staleLock);
 
@@ -30,6 +34,9 @@ export async function recoverStaleTransfer(log: TransitLog): Promise<void> {
 /** Toast text for a known transfer error. Details stay in the operation log. */
 export function userFacingError(err: unknown): string {
   const code = codeOf(err);
+
+  if (code === 'MISSING_MESSAGE' || code === 'NOTHING_TO_IMPORT')
+    return 'Required message data is missing. No recovery copy can be created from this archive.';
 
   if (code === 'MISSING_DEPENDENCY') {
     return 'Some chat data is missing. Export again from the original Cursor.';
@@ -79,7 +86,13 @@ export function userFacingError(err: unknown): string {
 }
 
 /** Show a failure in the UI. Recovery details for leftover locks go to the operation log. */
-export function showFail(action: string, err: unknown, log?: TransitLog): void {
+export function showFail(
+  /** Which picker step is open. */
+  action: string,
+  err: unknown,
+  /** Operation log receiving the line. */
+  log?: TransitLog,
+): void {
   const message = userFacingError(err);
   const failure = `${action} failed: ${message}`;
 
@@ -145,13 +158,18 @@ export function showFail(action: string, err: unknown, log?: TransitLog): void {
   });
 
   if (staleLock && log) {
-    void vscode.window
-      .showErrorMessage(message, 'Clear stale lock', 'Open log')
-      .then(async (choice) => {
+    notifyCompletion(
+      () =>
+        vscode.window.showErrorMessage(message, 'Clear stale lock', 'Open log'),
+      async (choice) => {
         if (choice === 'Clear stale lock') await recoverStaleTransfer(log);
         if (choice === 'Open log') await openLog(log);
-      })
-      .then(undefined, (error) => showFail('Lock recovery', error, log));
+      },
+      (error) =>
+        log.error(
+          `Lock recovery action failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+    );
 
     return;
   }
@@ -159,14 +177,21 @@ export function showFail(action: string, err: unknown, log?: TransitLog): void {
   const offerLog = recovery || code === 'PARTIAL' || code === 'NEEDS_ATTENTION';
 
   if (offerLog && log) {
-    void vscode.window.showErrorMessage(message, 'Open log').then((choice) => {
-      if (choice === 'Open log') void openLog(log);
-    });
+    notifyCompletion(
+      () => vscode.window.showErrorMessage(message, 'Open log'),
+      (choice) => {
+        if (choice === 'Open log') return openLog(log);
+      },
+      () =>
+        log.warn(
+          'Unable to show failure notification or open the operation log.',
+        ),
+    );
 
     return;
   }
 
-  vscode.window.showErrorMessage(message);
+  notifyCompletion(() => vscode.window.showErrorMessage(message));
 }
 
 /** TransferError.code when present. */
@@ -183,14 +208,23 @@ export function isAbort(err: unknown): boolean {
     (typeof err === 'object' &&
       err !== null &&
       'name' in err &&
-      (err as { name?: string }).name === 'AbortError')
+      (
+        err as {
+          /** Error name. `AbortError` means cancellation. */
+          name?: string;
+        }
+      ).name === 'AbortError')
   );
 }
 
 /** Select this extension's Output channel; LogOutputChannel.show is a no-op in Cursor. */
-export function openLog(channel: TransitLog): Promise<void> {
+export function openLog(
+  /** Output channel that receives the log. */
+  channel: TransitLog,
+): Promise<void> {
   return revealOutput(channel, {
-    executeCommand: (command) => vscode.commands.executeCommand(command),
+    executeCommand: (/** Command id to run. */ command) =>
+      vscode.commands.executeCommand(command),
     yieldToHost,
   });
 }

@@ -66,8 +66,11 @@ export async function selectImportChats(opts: {
     signal: ctx.signal,
     plansDir: plansDirOf(ctx),
     canvasesDir: canvasesDirOf(ctx, workspace),
-    onProgress: (processed, total) =>
-      ctx.onPhase?.('collect', { processed, total }),
+    onProgress: (
+      processed,
+      /** Total items in this operation. */
+      total,
+    ) => ctx.onPhase?.('collect', { processed, total }),
   });
 
   const byId = new Map(
@@ -150,7 +153,10 @@ export async function selectImportChats(opts: {
   >();
 
   /** Read-only probe: workspace list or header-table binding plus body. */
-  const probe = async (targetComposerId: string) => {
+  const probe = async (
+    /** Destination composer id to probe. */
+    targetComposerId: string,
+  ) => {
     const observation = await observeTargetComposer({
       targetComposerId,
       workspace,

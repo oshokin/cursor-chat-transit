@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { registerManager } from './extension-manager';
 import { openLog, showFail, recoverStaleTransfer } from './extension-errors';
 import { operationLogLevel } from './extension-settings';
 import { runtime, setSource, setUi, withLock } from './extension-state';
@@ -25,7 +26,10 @@ function register(
 }
 
 /** Register commands, the sidebar view, and the operation log channel. */
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): void {
   /** Plain channel: Cursor does not reveal a `{ log: true }` channel. */
   const operationChannel = vscode.window.createOutputChannel(
     'Cursor Chat Transit — Operations',
@@ -45,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   void canQuitCursor()
-    .then((ok) => {
+    .then((/** Whether the step succeeded. */ ok) => {
       runtime.canQuit = ok;
       setUi({ canQuitCursor: ok });
     })
@@ -55,7 +59,16 @@ export function activate(context: vscode.ExtensionContext): void {
     });
 
   /** Dispatch one sidebar or command-palette action through the shared lock. */
-  const runAction = async (action: SidebarAction): Promise<void> => {
+  const runAction = async (
+    /** Sidebar or command action. */
+    action: SidebarAction,
+  ): Promise<void> => {
+    if (action === 'manage') {
+      await vscode.commands.executeCommand('cursorChatTransit.manage.focus');
+
+      return;
+    }
+
     if (action === 'logs') {
       await openLog(operations);
 
@@ -175,6 +188,16 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('cursorChatTransit.showOutput', () =>
       openLog(operations),
     ),
+  );
+
+  registerManager(context, operations);
+
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      // A selected entry belongs to the previous profile; the next operation must choose anew.
+      if (event.affectsConfiguration('cursorChatTransit.userDataDir'))
+        setSource(undefined);
+    }),
   );
 
   setImmediate(() => {

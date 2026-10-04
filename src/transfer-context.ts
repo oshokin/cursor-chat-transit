@@ -20,10 +20,15 @@ export function chatLogLabel(header: ComposerHeader): string {
 /** Export issue row with composer id, optional name, and a typed reason. */
 export function chatIssue(
   header: ComposerHeader,
+  /** Why the item was skipped or refused. */
   reason: ExportChatIssue['reason'],
   extra?: Pick<
     ExportChatIssue,
-    'missingBlobs' | 'missingImages' | 'missingPlans' | 'missingCanvases'
+    | 'missingBlobs'
+    | 'missingImages'
+    | 'missingPlans'
+    | 'missingCanvases'
+    | 'missingMessages'
   >,
 ): ExportChatIssue {
   const issue: ExportChatIssue = {
@@ -40,7 +45,10 @@ export function chatIssue(
 }
 
 /** Plans directory for this transfer, or `~/.cursor/plans`. */
-export function plansDirOf(ctx: TransferContext): string {
+export function plansDirOf(
+  /** Transfer hooks, timeouts, and cancellation. */
+  ctx: TransferContext,
+): string {
   return ctx.plansDir || defaultPlansDirectory();
 }
 
@@ -49,6 +57,7 @@ export function plansDirOf(ctx: TransferContext): string {
  * An explicit context path wins; otherwise the workspace project slug is used.
  */
 export function canvasesDirOf(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   workspace: WorkspaceEntry,
 ): string | null {
@@ -59,8 +68,10 @@ export function canvasesDirOf(
 
 /** Bind a TransferContext to one database file. */
 export function connOf(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   dbPath: string,
+  /** Open the database without writing. */
   readOnly: boolean,
 ): SqliteConn {
   return {
@@ -76,6 +87,7 @@ export function connOf(
 
 /** Inspect workspace and global DBs for the same storage pair. */
 export async function inspectPair(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   workspace: WorkspaceEntry,
 ): Promise<{
@@ -99,5 +111,6 @@ export async function inspectPair(
 /** Let the host handle Cancel between large JSON remaps. */
 export async function yieldToHost(signal?: AbortSignal): Promise<void> {
   signal?.throwIfAborted();
+
   await new Promise<void>((resolve) => setImmediate(resolve));
 }

@@ -30,8 +30,20 @@ export const KV_ROW_MISMATCH_SQL =
 
 /** Compare class and content hash. Matching rows return null. */
 export function classifyKvConflict(
-  existing: { storageClass: string; bytes: Buffer },
-  incoming: { storageClass: string; sha256: string; byteLength: number },
+  /** SQLite storage class of the value. */
+  existing: {
+    storageClass: string;
+    bytes: Buffer;
+  },
+  /** SQLite storage class of the value. */
+  incoming: {
+    /** SQLite storage class of the incoming value. */
+    storageClass: string;
+    /** SHA-256 of the incoming bytes. */
+    sha256: string;
+    /** Decoded byte length of the incoming value. */
+    byteLength: number;
+  },
 ): KvConflictFacts | null {
   const existingSha256 = sha256Hex(existing.bytes);
   const incomingClass = incoming.storageClass || 'blob';
@@ -61,8 +73,20 @@ export function classifyKvConflict(
  * Any other mismatch returns null. The caller keeps the original row.
  */
 export function hexTextOfAddressedBlob(
-  existing: { storageClass: string; bytes: Buffer },
-  incoming: { storageClass: string; sha256: string; byteLength: number },
+  /** SQLite storage class of the value. */
+  existing: {
+    storageClass: string;
+    bytes: Buffer;
+  },
+  /** SQLite storage class of the value. */
+  incoming: {
+    /** SQLite storage class of the incoming value. */
+    storageClass: string;
+    /** SHA-256 of the incoming bytes. */
+    sha256: string;
+    /** Decoded byte length of the incoming value. */
+    byteLength: number;
+  },
   key: string,
 ): Buffer | null {
   const incomingClass = incoming.storageClass || 'blob';

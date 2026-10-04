@@ -72,7 +72,7 @@ The public Cursor repository does not provide the full editor implementation, an
 
 ## Next feature: a persistent Storage view
 
-This is a proposal, not implemented deletion functionality. Keep the workspace picker focused on choosing a transfer source or destination. Add one **Manage storage** action that opens a persistent editor panel with Workspace and Chat views.
+Historical proposal: the current implementation uses a native Manage chats tree with selection, checks, reversible filtering and confirmed history deletion (see [Usage](usage.md#manage-chats)). Physical deletion below remains unimplemented. Keep the workspace picker focused on choosing a transfer source or destination. Add one **Manage storage** action that opens a persistent editor panel with Workspace and Chat views.
 
 The first small release should provide:
 

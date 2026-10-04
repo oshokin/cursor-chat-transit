@@ -43,7 +43,10 @@ export function encodeSqliteBytes(
 }
 
 /** Validate and decode a SQLite resource envelope. */
-export function decodeSqliteBytes(value: SqliteBytes): Buffer {
+export function decodeSqliteBytes(
+  /** SQLite hex or text bytes to decode. */
+  value: SqliteBytes,
+): Buffer {
   if (value.storageClass !== 'text' && value.storageClass !== 'blob') {
     fail('INVALID_RESOURCE', 'Unsupported SQLite storage class.');
   }
@@ -66,6 +69,7 @@ export function decodeSqliteBytes(value: SqliteBytes): Buffer {
 
 /** Validate a resources object from an export file. */
 export function parseExportResources(
+  /** Export resource list to parse. */
   value: unknown,
   opts?: {
     /** When true, skip malformed resource payloads instead of failing the whole envelope. */

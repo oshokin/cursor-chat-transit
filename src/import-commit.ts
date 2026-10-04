@@ -19,7 +19,10 @@ import { TransferError } from './types';
 export const CAS_ATTEMPTS = 5;
 
 /** Copy a string-id list. A missing field is empty; any other shape is refused. */
-function stringList(value: unknown): string[] {
+function stringList(
+  /** Value that must be a list of strings. */
+  value: unknown,
+): string[] {
   if (value === undefined) return [];
 
   if (
@@ -34,6 +37,7 @@ function stringList(value: unknown): string[] {
 
 /** Append headers that are not already in `current`. A non-array is refused. */
 export function mergeComposerList(
+  /** Identity of the workspace that is open now. */
   current: unknown,
   extra: ComposerHeader[],
 ): ComposerHeader[] {
@@ -73,6 +77,7 @@ export function parseItemObject(raw: string | null): Record<string, unknown> {
 
 /** Retry a write transaction when CAS sees a concurrent metadata change. */
 export async function commitWithCas(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   writeConn: SqliteConn,
   _readConn: SqliteConn,
@@ -212,7 +217,12 @@ export async function commitImport(opts: {
     bytes: decodeSqliteBytes(row.value),
   }));
 
-  const kvPairs: Array<{ key: string; value: string }> = [];
+  const kvPairs: Array<{
+    /** cursorDiskKV key. */
+    key: string;
+    /** Text stored for that key. */
+    value: string;
+  }> = [];
 
   for (const [id, value] of Object.entries(cloned.composers)) {
     kvPairs.push({ key: `composerData:${id}`, value });

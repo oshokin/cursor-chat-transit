@@ -8,7 +8,6 @@ import { TransferError } from './types';
 
 /** Pending batch stored in the v4 journal database. */
 export interface PendingHead {
-  /** Operation id. */
   operationId: string;
   /** How far the write progressed. */
   phase: 'prepared' | 'global-written' | 'workspace-written';
@@ -23,11 +22,8 @@ export interface PendingHead {
 
 /** One chat row inside a pending batch, without message bodies. */
 export interface PendingChatRow {
-  /** Source composer id. */
   sourceComposerId: string;
-  /** Snapshot hash. */
   snapshotHash: string;
-  /** Destination composer id. */
   targetComposerId: string;
   /** Expected SHA-256 of the rewritten composer JSON. */
   expectedComposerHash: string;
@@ -231,7 +227,10 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
   }
 
   /** Chat rows for the pending batch. */
-  async pendingChats(operationId: string): Promise<PendingChatRow[]> {
+  async pendingChats(
+    /** Journal operation id. */
+    operationId: string,
+  ): Promise<PendingChatRow[]> {
     const rows: PendingChatRow[] = [];
 
     await this.session.queryLines(
@@ -250,6 +249,7 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
           target_composer_id: string;
           expected_composer_hash: string;
           bubble_count: number;
+          /** complete or history-only. */
           quality: string;
         };
 
@@ -269,8 +269,10 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
 
   /** Stream expected bubble hashes for one pending chat. */
   async forEachBubble(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
+    /** Called once for each row. */
     onRow: (bubbleId: string, sha256: string) => void,
   ): Promise<void> {
     await this.session.queryLines(
@@ -303,6 +305,7 @@ INSERT INTO pending(operation_id, phase, backups_json) VALUES (
 
   /** Update the phase of the open batch. */
   async setPhase(
+    /** Journal operation id. */
     operationId: string,
     phase: PendingHead['phase'],
   ): Promise<void> {
@@ -313,6 +316,7 @@ INSERT INTO pending(operation_id, phase, backups_json) VALUES (
 
   /** Record one chat that is about to be written. */
   async addPendingChat(
+    /** Journal operation id. */
     operationId: string,
     chat: PendingChatRow,
   ): Promise<void> {
@@ -337,6 +341,7 @@ INSERT INTO pending(operation_id, phase, backups_json) VALUES (
 
   /** Record the hash of one rewritten bubble. */
   async addPendingBubble(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
     targetBubbleId: string,
@@ -375,8 +380,10 @@ DELETE FROM pending;`);
 
   /** Remember how many rewritten bubbles were recorded. */
   async setBubbleCount(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
+    /** How many items were seen. */
     count: number,
   ): Promise<void> {
     await this.session.exec(
@@ -388,6 +395,7 @@ DELETE FROM pending;`);
 
   /** Record one resource checksum the pending chat must still match. */
   async addPendingResource(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
     kind: string,
@@ -402,6 +410,7 @@ DELETE FROM pending;`);
 
   /** Whether resource checksums were recorded for this pending chat. */
   async resourcesKnown(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
   ): Promise<boolean> {
@@ -418,8 +427,10 @@ DELETE FROM pending;`);
 
   /** Stream expected resource checksums. */
   async forEachResource(
+    /** Journal operation id. */
     operationId: string,
     targetComposerId: string,
+    /** Called once for each row. */
     onRow: (kind: string, id: string, sha256: string) => void,
   ): Promise<void> {
     await this.session.queryLines(
@@ -455,6 +466,7 @@ DELETE FROM pending;`);
           source_composer_id: string;
           snapshot_hash: string;
           target_composer_id: string;
+          /** complete or history-only. */
           quality: 'complete' | 'history-only';
           completed_at: string;
         };
@@ -536,7 +548,10 @@ DELETE FROM pending;`);
   }
 
   /** Replace receipts and the pending batch. */
-  async replaceJournal(journal: ImportJournal): Promise<void> {
+  async replaceJournal(
+    /** Receipt database for this destination. */
+    journal: ImportJournal,
+  ): Promise<void> {
     await this.session.exec(`DELETE FROM receipts;`);
     await this.clearPending();
 
@@ -588,11 +603,9 @@ DELETE FROM pending;`);
 
   /** Record one verified chat immediately. */
   async addReceipt(input: {
-    /** Source composer id. */
     sourceComposerId: string;
     /** Canonical hash of the imported snapshot. */
     snapshotHash: string;
-    /** Destination composer id. */
     targetComposerId: string;
     /** complete or history-only. */
     quality: 'complete' | 'history-only';

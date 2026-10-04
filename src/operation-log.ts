@@ -7,15 +7,25 @@ import type { TransferPhase, TransferPhaseMetrics } from './types';
 
 /** Which transfer this log instance describes. */
 type OperationKind =
-  'export' | 'import' | 'workspace statistics' | 'chat statistics';
+  | 'export'
+  | 'import'
+  | 'workspace statistics'
+  | 'chat statistics'
+  | 'load managed chats'
+  | 'search managed chats'
+  | 'prepare managed workspaces'
+  | 'check managed chats'
+  | 'delete managed chats';
 
 /** Terminal outcome written once at finish. */
 type Result = 'completed' | 'incomplete' | 'cancelled' | 'failed' | 'partial';
 
 /** Log bounded structured operation facts, never SQL, payloads, prompts, or raw stderr. */
 export function startOperationLog(
+  /** Output channel that receives the log. */
   channel: TransitLog,
   kind: OperationKind,
+  /** Clock reading used instead of the current time. */
   now = () => performance.now(),
 ) {
   const id = randomUUID().slice(0, 8);
@@ -28,7 +38,11 @@ export function startOperationLog(
   line('INFO', `${kind} started`);
 
   /** One operation-log line. The level word is in the text; Cursor will not color a log channel. */
-  function line(level: 'INFO' | 'WARN' | 'ERROR', text: string) {
+  function line(
+    /** Log level word. */
+    level: 'INFO' | 'WARN' | 'ERROR',
+    text: string,
+  ) {
     const formatted = formatLogLine(level, `${text} operation=${id}`);
 
     if (level === 'ERROR') channel.error(formatted);
@@ -37,7 +51,11 @@ export function startOperationLog(
   }
 
   /** Collapse whitespace and cap a free-text field. */
-  function clip(message: string, max = 300): string {
+  function clip(
+    message: string,
+    /** Maximum length after whitespace is collapsed. */
+    max = 300,
+  ): string {
     return message.replace(/[\r\n\t]/g, ' ').slice(0, max);
   }
 
@@ -48,15 +66,18 @@ export function startOperationLog(
     /** Final duration is frozen at finish, including no-op, failed and cancelled runs. */
     elapsedMs: () => finalElapsed ?? Math.max(0, Math.round(now() - started)),
     /** Concrete file/chat action with duration and byte units; no payloads. */
-    event(event: TransferEvent) {
+    event(
+      /** Structured transfer event. */
+      event: TransferEvent,
+    ) {
       if (finished) return;
 
       const fields = Object.entries(event)
         .filter(
-          ([key, value]) =>
+          (/** KV key from the queued batch. */ [key, value]) =>
             value !== undefined && key !== 'action' && key !== 'status',
         )
-        .map(([key, value]) =>
+        .map((/** KV key from the queued batch. */ [key, value]) =>
           key === 'bytes' && typeof value === 'number'
             ? `bytes=${value} (${humanBytes(value)})`
             : (key === 'elapsedMs' || key === 'timeoutMs') &&
@@ -71,7 +92,11 @@ export function startOperationLog(
       );
     },
     /** Emit coarse phase progress; skip per-item ticks that belong on the progress bar. */
-    phase(phase: TransferPhase, metrics: TransferPhaseMetrics = {}) {
+    phase(
+      phase: TransferPhase,
+      /** Progress counts for this phase. */
+      metrics: TransferPhaseMetrics = {},
+    ) {
       if (finished) return;
       const { processed, total } = metrics;
 
@@ -156,7 +181,13 @@ export function startOperationLog(
       line('WARN', text);
     },
     /** Record a terminal result exactly once. Partial commit is distinct from cancellation. */
-    finish(result: Result, errorCode?: string, err?: unknown) {
+    finish(
+      /** Terminal result of the operation. */
+      result: Result,
+      /** Stable error code, when the operation failed. */
+      errorCode?: string,
+      err?: unknown,
+    ) {
       if (finished) return;
       finished = true;
       finalElapsed = Math.max(0, Math.round(now() - started));

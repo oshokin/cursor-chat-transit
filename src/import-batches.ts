@@ -90,6 +90,7 @@ COMMIT;`),
       after = end;
       processed += count;
       opts.ctx.onPhase?.('write', { processed, total, unit: 'records' });
+
       // Yield between transactions so cancellation and competing writers can run.
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
@@ -122,6 +123,7 @@ async function rejectChangedBatch(
     /** Temporary database that holds the prepared rows. */
     stagedPath: string;
   },
+  /** Workspace the user already picked. */
   selected: string,
 ): Promise<void> {
   const line = (
@@ -131,7 +133,15 @@ async function rejectChangedBatch(
   ).trim();
 
   if (!line) return;
-  const key = String((JSON.parse(line) as { key?: string }).key || '');
+
+  const key = String(
+    (
+      JSON.parse(line) as {
+        /** cursorDiskKV key named by the conflict. */
+        key?: string;
+      }
+    ).key || '',
+  );
 
   if (!key) return;
   const existing = await readSessionKv(session, key);
@@ -183,7 +193,19 @@ async function rejectChangedBatch(
 function guardFailure(err: unknown): boolean {
   const text =
     err instanceof Error
-      ? `${err.message} ${'stderr' in err ? String((err as { stderr?: string }).stderr || '') : ''}`
+      ? /** Process stderr already captured. */
+        `${err.message} ${
+          'stderr' in err
+            ? String(
+                (
+                  err as {
+                    /** Captured process stderr. */
+                    stderr?: string;
+                  }
+                ).stderr || '',
+              )
+            : ''
+        }`
       : String(err);
 
   return text.includes('cct_batch_guard');

@@ -16,6 +16,7 @@ import {
  * `importFromBundle`.
  */
 export async function importFromObject(
+  /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
   obj: unknown,
   workspace: WorkspaceEntry,
@@ -44,6 +45,7 @@ export async function importFromObject(
 async function writeFixtureBundle(
   zipPath: string,
   obj: unknown,
+  /** Keep readable history when optional resources are missing. */
   allowPartial: boolean,
 ): Promise<void> {
   try {

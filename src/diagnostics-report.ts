@@ -23,12 +23,19 @@ export interface DiagnosticReport {
 }
 
 /** Keep diagnostics display bounded, plain text, and on one line per check. */
-export function displayLine(value: string, maxLength = 150): string {
+export function displayLine(
+  /** Diagnostic value to print. */
+  value: string,
+  maxLength = 150,
+): string {
   return value.replace(/[\r\n\t]/g, ' ').slice(0, maxLength);
 }
 
 /** Render a shareable report. The collector must already have redacted paths. */
-export function formatDiagnosticReport(report: DiagnosticReport): string {
+export function formatDiagnosticReport(
+  /** Progress callback. */
+  report: DiagnosticReport,
+): string {
   return [
     'Cursor Chat Transit — Diagnostics',
     `Checked: ${report.generatedAt}`,
@@ -46,7 +53,10 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
 }
 
 /** Overall title from the actual check results. */
-export function diagnosticTitle(report: DiagnosticReport): string {
+export function diagnosticTitle(
+  /** Progress callback. */
+  report: DiagnosticReport,
+): string {
   if (report.checks.some((check) => check.status === 'error')) {
     return report.checks.every(
       (check) => check.status === 'error' || check.status === 'unknown',
@@ -71,7 +81,9 @@ export async function collectChecks(
     run(): Promise<DiagnosticCheck>;
   }>,
 ): Promise<DiagnosticCheck[]> {
-  const results = await Promise.allSettled(probes.map((probe) => probe.run()));
+  const results = await Promise.allSettled(
+    probes.map((/** One diagnostic probe. */ probe) => probe.run()),
+  );
 
   return results.map((result, index) =>
     result.status === 'fulfilled'

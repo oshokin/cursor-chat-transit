@@ -2,7 +2,10 @@ import path from 'node:path';
 import { ORDINAL_WIDTH } from './bundle-limits';
 
 /** Zero-padded ordinal used for generated archive paths. */
-export function ordinalName(value: number): string {
+export function ordinalName(
+  /** Ordinal to pad. */
+  value: number,
+): string {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error('Archive ordinal must be a positive integer.');
   }
@@ -11,7 +14,12 @@ export function ordinalName(value: number): string {
 }
 
 /** `directory/000001.ndjson`. */
-export function partPath(directory: string, part: number): string {
+export function partPath(
+  /** Directory that receives the part. */
+  directory: string,
+  /** One-based part number. */
+  part: number,
+): string {
   return path.join(directory, `${ordinalName(part)}.ndjson`);
 }
 
@@ -40,7 +48,8 @@ export function assertArchivePath(name: string): void {
 
   if (
     parts.some(
-      (part) => !part || part === '.' || part === '..' || part !== part.trim(),
+      (/** One path segment. */ part) =>
+        !part || part === '.' || part === '..' || part !== part.trim(),
     )
   ) {
     throw new Error('Archive entry path is not a safe relative path.');

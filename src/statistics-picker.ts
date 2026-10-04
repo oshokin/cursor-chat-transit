@@ -3,33 +3,54 @@ import type { StatisticsUpdate } from './statistics';
 
 /** Show a native picker whose optional scan never disables selection or filtering. */
 export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
+  /** Native quick pick this scan updates. */
   picker: vscode.QuickPick<T>;
+  /** Rows shown before any filter. */
   items: T[];
+  /** Stable identity for one row. Undefined keys are never hidden. */
   key: (item: T) => string | undefined;
+  /** Title restored when the view filter is cleared. */
   title: string;
+  /** Placeholder restored when the view filter is cleared. */
   placeholder: string;
+  /** When true, the picker selects many rows. */
   many?: boolean;
   /** Build a filtered workspace list once on opening; metadata scans remain explicit. */
   autoFilter?: boolean;
   /** Keep the current workspace available even if it is empty. */
   keepVisible?: (item: T) => boolean;
+  /** Starts an explicit metadata scan. */
   analyzeButton: vscode.QuickInputButton;
+  /** Stops the scan and becomes the visible button while it runs. */
   cancelButton: vscode.QuickInputButton;
   /** Optional second action; filter for workspaces, checked selection for chats. */
   actionButton?: vscode.QuickInputButton;
+  /** Show rows hidden by the last filter without scanning again. */
   restoreButton?: vscode.QuickInputButton;
+  /** Reverse the view filter without another database scan. */
+  hideButton?: vscode.QuickInputButton;
+  /** Filter hides empty workspaces. Select checks chats and replaces the selection. */
   action?: 'filter' | 'select';
+  /** Run one scan. Deep check is the workspace filter; metadata scans stay shallow. */
   run: (
     signal: AbortSignal,
+    /** Refresh the UI as results arrive. */
     update: (row: StatisticsUpdate) => void,
+    /** When true, inspect message bodies. */
     deepCheck?: boolean,
-  ) => Promise<{ failed: number }>;
+    /** How many items failed. */
+  ) => Promise<{
+    /** How many workspace scans failed. */
+    failed: number;
+  }>;
+  /** Surface a scan failure without closing the picker. */
   onError: (error: unknown) => void;
   /** Record view actions after they are actually applied. */
   onAction?: (message: string) => void;
 }): Promise<T[] | undefined> {
   const { picker, items } = options;
 
+  picker.ignoreFocusOut = true;
   picker.title = options.title;
   picker.placeholder = options.placeholder;
   picker.canSelectMany = !!options.many;
@@ -58,16 +79,25 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let selection: T[] | undefined;
   let hidden = new Set<string>();
+  let showAll = false;
   const updates = new Map<string, StatisticsUpdate>();
 
+  /** Identity of the current selection, used to restore it after a repaint. */
   const selectionKey = () =>
     JSON.stringify(picker.selectedItems.map(options.key).sort());
 
+  /** Show analysis, and either the filter action or the show/hide toggle. */
   const buttons = () => {
     picker.buttons = [
       options.analyzeButton,
       ...(hidden.size && options.restoreButton
-        ? [options.restoreButton]
+        ? [
+            showAll
+              ? options.hideButton ||
+                options.actionButton ||
+                options.restoreButton
+              : options.restoreButton,
+          ]
         : options.actionButton && !options.autoFilter
           ? [options.actionButton]
           : []),
@@ -85,7 +115,7 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
     const visible = items.filter((item) => {
       const key = options.key(item);
 
-      return key === undefined || !hidden.has(key);
+      return key === undefined || showAll || !hidden.has(key);
     });
 
     const rows = visible
@@ -121,6 +151,7 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   };
 
   return new Promise((resolve) => {
+    /** Apply one toolbar button after the picker reports it. */
     const trigger = (button: vscode.QuickInputButton) => {
       if (running) {
         abort?.abort();
@@ -129,15 +160,21 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
         return;
       }
 
-      if (button === options.restoreButton && hidden.size) {
+      if (
+        hidden.size &&
+        (button === options.restoreButton ||
+          (showAll && button === (options.hideButton || options.actionButton)))
+      ) {
+        showAll = !showAll;
+
         options.onAction?.(
-          `Show all workspaces; restored ${hidden.size} hidden entries`,
+          `${showAll ? 'Show all workspaces' : 'Hide empty workspaces'}; ${hidden.size} entries; no storage deleted`,
         );
 
-        hidden.clear();
         render();
         buttons();
-        picker.title = options.title;
+        picker.ignoreFocusOut = true;
+        picker.title = `${options.title}${showAll ? ' — All workspaces' : ` — ${hidden.size} empty hidden`}`;
         picker.placeholder = options.placeholder;
 
         return;
@@ -195,6 +232,8 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
           if (!(deepCheck && options.action === 'filter')) render();
 
           if (deepCheck && options.action === 'filter') {
+            showAll = false;
+
             hidden = new Set(
               [...updates.values()]
                 .filter(

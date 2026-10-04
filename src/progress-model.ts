@@ -18,7 +18,10 @@ const steps = {
 };
 
 /** User-facing duration with stable minute/second units. */
-export function duration(ms: number): string {
+export function duration(
+  /** Duration in milliseconds. */
+  ms: number,
+): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
 
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`;
@@ -54,7 +57,9 @@ export class ProgressModel {
   /** Reset rate only when the measured scope, unit or chat changes. */
   update(
     phase: TransferPhase,
+    /** Progress counts for this phase. */
     metrics: TransferPhaseMetrics = {},
+    /** Clock reading used instead of the current time. */
     now = performance.now(),
   ): void {
     const scope = `${phase}:${metrics.scope || metrics.file || ''}:${metrics.chatIndex || ''}:${metrics.chatName || ''}:${metrics.unit || ''}`;
@@ -76,7 +81,10 @@ export class ProgressModel {
     this.metrics = metrics;
   }
   /** Timing and percentage describe this scope; stalled or unknown totals show no ETA. */
-  snapshot(now = performance.now()) {
+  snapshot(
+    /** Clock reading used instead of the current time. */
+    now = performance.now(),
+  ) {
     const m = this.metrics;
 
     const index = steps[this.kind].findIndex((group) =>

@@ -1,9 +1,9 @@
+import { notifyCompletion } from '../src/notifications';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatImportNotice,
   formatIncompleteExportNotice,
-  notifyCompletion,
   phaseMessage,
   resolveSelectedWorkspace,
 } from '../src/operation-ui';
@@ -253,4 +253,37 @@ test('incomplete export copy does not tell the user to reread chats', () => {
 
   assert.doesNotMatch(notice.toast, /Quit and reopen/);
   assert.doesNotMatch(notice.toast, /Restart/);
+});
+
+test('notification failures cannot reject a completed operation or leave an unhandled action rejection', async () => {
+  const errors: string[] = [];
+
+  const onError = (error: unknown) => {
+    errors.push(String(error));
+  };
+
+  notifyCompletion(
+    () => {
+      throw new Error('synchronous host failure');
+    },
+    undefined,
+    onError,
+  );
+
+  notifyCompletion(
+    () => Promise.reject(new Error('async host failure')),
+    undefined,
+    onError,
+  );
+
+  notifyCompletion(
+    () => Promise.resolve('Open log'),
+    async () => {
+      throw new Error('action failure');
+    },
+    onError,
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(errors.length, 3);
 });

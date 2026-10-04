@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { findSqliteExecutable } from '../src/sqlite';
 import { spawnSync } from 'node:child_process';
 
@@ -52,18 +54,88 @@ if (sqliteOnly) selected = files.filter(isSqliteFile);
 if (unitOnly) selected = files.filter((file) => !isSqliteFile(file));
 if (!selected.length) throw new Error('No test files found');
 
-/** node:test process; its exit status is this script's exit status. */
-const result = spawnSync(
-  process.execPath,
-  [
-    '--import',
-    'tsx',
-    '--test',
-    ...(watch ? ['--watch'] : []),
-    ...selected.sort(),
-  ],
-  { cwd: root, stdio: 'inherit', shell: false },
-);
+/**
+ * Tests inside one file normally run one at a time, so a long SQLite file
+ * becomes the whole run. These files use a private temp directory per test,
+ * so several may run at once.
+ * Windows process creation is already the slow part: extra sqlite3.exe
+ * processes make every test slower, so those files stay serial there.
+ * Files that patch process-wide hooks stay serial on every OS.
+ */
+const sqliteTestConcurrency = 4;
+/** Intra-file parallelism. Off on Windows, where each sqlite3.exe is expensive. */
+const parallelSqlite = process.platform !== 'win32';
 
-if (result.error) throw result.error;
-process.exitCode = result.status ?? 1;
+/** SQLite files whose tests share module-level hooks. */
+const serialSqliteFiles = new Set([
+  'read-transaction.sqlite.test.ts',
+  'transfer.sqlite.test.ts',
+]);
+
+/** Load a SQLite test file inside a concurrent suite. */
+function concurrentSqliteWrapper(
+  dir: string,
+  file: string,
+  index: number,
+): string {
+  const wrapper = path.join(dir, `${index}-${path.basename(file)}.mjs`);
+
+  fs.writeFileSync(
+    wrapper,
+    `import { describe } from 'node:test';
+describe(${JSON.stringify(path.basename(file, '.ts'))}, { concurrency: ${sqliteTestConcurrency} }, async () => {
+  await import(${JSON.stringify(pathToFileURL(file).href)});
+});
+`,
+  );
+
+  return wrapper;
+}
+
+/** Scratch directory for generated suites; absent in watch mode. */
+let scratch: string | undefined;
+/** Files passed to `node --test`. */
+let entrypoints = selected.sort();
+
+if (!watch) {
+  scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'cct-test-'));
+
+  entrypoints = entrypoints.map((file, index) =>
+    parallelSqlite &&
+    isSqliteFile(file) &&
+    !serialSqliteFiles.has(path.basename(file))
+      ? concurrentSqliteWrapper(scratch!, file, index)
+      : file,
+  );
+}
+
+/**
+ * Past the CPU count, more workers only pay off when a test is waiting on
+ * sqlite3. On Windows that wait is the process start itself.
+ */
+const cpuCount = os.availableParallelism();
+const workers = String(parallelSqlite ? Math.max(cpuCount, 8) : cpuCount);
+
+/** node:test process; its exit status is this script's exit status. */
+try {
+  const result = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      '--test',
+      // A paused sqlite pipe keeps the worker alive after the last test.
+      // Exit once every test and hook has finished.
+      ...(watch
+        ? ['--watch']
+        : ['--test-force-exit', '--test-concurrency', workers]),
+      ...entrypoints,
+    ],
+    { cwd: root, stdio: 'inherit', shell: false },
+  );
+
+  if (result.error) throw result.error;
+  process.exitCode = result.status ?? 1;
+} finally {
+  if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+}

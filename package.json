@@ -55,12 +55,6 @@
           "scope": "machine",
           "description": "Absolute path to the local sqlite3 executable."
         },
-        "cursorChatTransit.import.allowPartial": {
-          "type": "boolean",
-          "default": false,
-          "scope": "application",
-          "markdownDescription": "Attempt to recover usable chats from incomplete exports. Missing chat data or images may prevent continuing a recovered conversation. Invalid JSON, unsafe paths and database conflicts are still rejected."
-        },
         "cursorChatTransit.plansDirectory": {
           "type": "string",
           "default": "",
@@ -93,6 +87,12 @@
           "default": "info",
           "scope": "application",
           "markdownDescription": "Minimum level written to the operation log. `info` shows progress, warnings, and errors. `warn` shows warnings and errors. `error` shows failures only. Each line is marked INFO, WARN, or ERROR."
+        },
+        "cursorChatTransit.export.recoverText": {
+          "type": "boolean",
+          "default": true,
+          "scope": "application",
+          "description": "Fill missing message records in ZIP exports with labelled preview fragments or gap markers. Existing records, including empty messages, are kept. Does not restore missing full text or repair Cursor. Source data is unchanged."
         }
       }
     },
@@ -112,6 +112,12 @@
           "id": "cursorChatTransit.view",
           "name": "Chat Transit",
           "icon": "resources/icons/activity-bar.svg"
+        },
+        {
+          "id": "cursorChatTransit.manage",
+          "name": "Manage chats",
+          "icon": "resources/icons/activity-bar.svg",
+          "visibility": "collapsed"
         }
       ]
     },
@@ -152,8 +158,171 @@
         "command": "cursorChatTransit.showOutput",
         "title": "Open Operation Log",
         "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.manageRefresh",
+        "title": "Refresh",
+        "category": "Cursor Chat Transit",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cursorChatTransit.manageCheck",
+        "title": "Check selected item",
+        "category": "Cursor Chat Transit",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "cursorChatTransit.manageSearch",
+        "title": "Find chats and workspaces\u2026",
+        "category": "Cursor Chat Transit",
+        "icon": "$(search)"
+      },
+      {
+        "command": "cursorChatTransit.manageSelectAll",
+        "title": "Select all visible workspaces",
+        "category": "Cursor Chat Transit",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "cursorChatTransit.manageClearSelection",
+        "title": "Clear selection",
+        "category": "Cursor Chat Transit",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "cursorChatTransit.manageShowAll",
+        "title": "Show all workspaces",
+        "category": "Cursor Chat Transit",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "cursorChatTransit.manageShowRemovable",
+        "title": "Hide empty or unavailable workspaces",
+        "category": "Cursor Chat Transit",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "cursorChatTransit.manageCheckSelected",
+        "title": "Check selected",
+        "category": "Cursor Chat Transit",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "cursorChatTransit.manageDelete",
+        "title": "Delete checked history\u2026",
+        "category": "Cursor Chat Transit",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cursorChatTransit.manageDeleteItem",
+        "title": "Delete this history\u2026",
+        "category": "Cursor Chat Transit",
+        "icon": "$(trash)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cursorChatTransit.manageSearch",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cursorChatTransit.manageRefresh",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectAll",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@4"
+        },
+        {
+          "command": "cursorChatTransit.manageClearSelection",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@5"
+        },
+        {
+          "command": "cursorChatTransit.manageShowAll",
+          "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageShowAll",
+          "group": "navigation@3"
+        },
+        {
+          "command": "cursorChatTransit.manageShowRemovable",
+          "when": "view == cursorChatTransit.manage && cursorChatTransit.manageShowAll",
+          "group": "navigation@3"
+        },
+        {
+          "command": "cursorChatTransit.manageCheckSelected",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@6"
+        },
+        {
+          "command": "cursorChatTransit.manageDelete",
+          "when": "view == cursorChatTransit.manage",
+          "group": "navigation@7"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cursorChatTransit.manageCheck",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|ReadOnlyChat)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cursorChatTransit.manageDelete",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^(managedChat|managedWorkspace)$/ && cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@3"
+        },
+        {
+          "command": "cursorChatTransit.manageDeleteItem",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^(managedChat|managedWorkspace)$/ && !cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "cursorChatTransit.manageRefresh",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageCheck",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSearch",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectAll",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageClearSelection",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageShowAll",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageShowRemovable",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageCheckSelected",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageDelete",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageDeleteItem",
+          "when": "false"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "tsc -p tsconfig.json && tsc -p tsconfig.webview.json",
@@ -185,7 +354,7 @@
     "@eslint/js": "^10.0.1",
     "@release-it/conventional-changelog": "12.0.2",
     "@stylistic/eslint-plugin": "^5.10.0",
-    "@types/node": "24.13.6",
+    "@types/node": "24.19.1",
     "@types/semver": "7.8.0",
     "@types/vscode": "1.125.0",
     "@types/yauzl": "3.4.0",
@@ -193,6 +362,7 @@
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^4.0.0",
     "eslint": "^10.11.0",
+    "eslint-plugin-jsdoc": "65.1.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.9",
     "release-it": "21.1.0",
@@ -204,7 +374,7 @@
     "yazl": "3.3.1"
   },
   "overrides": {
-    "basic-ftp": "6.2.1",
+    "basic-ftp": "6.2.2",
     "qs": "6.16.0",
     "undici": "7.30.0"
   },

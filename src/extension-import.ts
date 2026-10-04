@@ -1,10 +1,12 @@
+import { notifyCompletion } from './notifications';
+import { recoveryDetail } from './recovery-preview';
+import { workspacePresentation } from './workspace-presentation';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { codeOf, isAbort, openLog } from './extension-errors';
 import {
   transferSettings,
-  importAllowPartial,
   importDirectory,
   rememberImportDir,
 } from './extension-settings';
@@ -20,11 +22,7 @@ import { hostState, pickWorkspace } from './extension-workspaces';
 import { importDialogOptions, localBundlePath } from './file-dialogs';
 import { runTransfer } from './transfer-process';
 import { startOperationLog } from './operation-log';
-import {
-  formatImportNotice,
-  notifyCompletion,
-  resolveSelectedWorkspace,
-} from './operation-ui';
+import { formatImportNotice, resolveSelectedWorkspace } from './operation-ui';
 import { type TransitLog } from './output-ui';
 import type { WorkspaceEntry } from './types';
 
@@ -34,6 +32,8 @@ export async function doImport(opts: {
   context: vscode.ExtensionContext;
   /** Operation log that records import progress and failures. */
   operations: TransitLog;
+  /** Optional explicitly selected destination. */
+  destination?: WorkspaceEntry;
 }): Promise<void> {
   const log = startOperationLog(opts.operations, 'import');
 
@@ -70,7 +70,12 @@ export async function doImport(opts: {
 
     const src = open[0];
     const { sqlite, entries, identity } = await hostState(opts.context);
-    const resolved = resolveSelectedWorkspace(runtime.sourceWorkspace, entries);
+
+    const resolved = resolveSelectedWorkspace(
+      opts.destination || runtime.sourceWorkspace,
+      entries,
+    );
+
     let workspace: WorkspaceEntry | undefined;
 
     if (resolved.status === 'ok') workspace = resolved.workspace;
@@ -125,7 +130,12 @@ export async function doImport(opts: {
         title: 'Importing chats',
         cancellable: true,
       },
-      async (progress, token) => {
+      async (
+        /** Progress reporter for this operation. */
+        progress,
+        /** Cancellation token from the progress notification. */
+        token,
+      ) => {
         const signal = linkedSignal(token);
         const onPhase = attachPhaseProgress(progress, log, 'import');
 
@@ -160,7 +170,7 @@ export async function doImport(opts: {
               plansDir: settings.plansDir,
               workspace: destination,
               filePath: zipPath,
-              allowPartial: importAllowPartial(),
+              interactiveRecovery: true,
               journalDir: path.join(
                 opts.context.globalStorageUri.fsPath,
                 'import-journals',
@@ -169,6 +179,40 @@ export async function doImport(opts: {
             {
               signal,
               onPhase,
+              onRecovery: async (
+                /** Counts and examples; no message bodies. */
+                preview,
+              ) => {
+                const place = workspacePresentation(destination);
+                const detail = `${recoveryDetail(preview)}\n\nDestination: ${place.name} · ${place.location}\n${place.path}`;
+
+                log.note(`Recovery inspection: ${detail}`);
+                signal.throwIfAborted();
+
+                setUi({
+                  status: 'waiting',
+                  statusTitle: 'Review incomplete archive',
+                  statusDetail: 'Choose whether to import the available chats.',
+                });
+
+                const available = preview.complete + preview.historyOnly;
+
+                // A no-result notice must never hold the worker or transfer lock.
+                if (!available) return false;
+
+                const action = 'Import available history';
+
+                const choice = await vscode.window.showWarningMessage(
+                  'This archive is incomplete.',
+                  { modal: true, detail },
+                  action,
+                );
+
+                signal.throwIfAborted();
+                setUi({ status: 'running', statusTitle: 'Importing…' });
+
+                return !!action && choice === action;
+              },
               onNote: (message) => log.note(message),
               onEvent: (event) => log.event(event),
             },
@@ -223,9 +267,12 @@ export async function doImport(opts: {
     notifyCompletion(
       () => vscode.window.showInformationMessage(notice.toast, 'Open log'),
       (choice) => {
-        if (choice === 'Open log') void openLog(opts.operations);
+        if (choice === 'Open log') return openLog(opts.operations);
       },
-      () => opts.operations.warn('Unable to show completion notification.'),
+      () =>
+        opts.operations.warn(
+          'Unable to show completion notification or open the operation log.',
+        ),
     );
   } catch (err) {
     if (isAbort(err)) {
@@ -242,9 +289,30 @@ export async function doImport(opts: {
 
     const code = codeOf(err);
 
+    if (code === 'NOTHING_TO_IMPORT') {
+      log.finish('incomplete', code, err);
+
+      setUi({
+        status: 'incomplete',
+        statusTitle: 'No recoverable chats',
+        statusDetail:
+          'Required message data is missing. Existing chats were kept. See the operation log.',
+      });
+
+      return;
+    }
+
     const detail =
       err && typeof err === 'object' && 'detail' in err
-        ? String((err as { detail?: unknown }).detail || '')
+        ? /** Second line of a notice. */
+          String(
+            (
+              err as {
+                /** Extra diagnostic stored on the error. */
+                detail?: unknown;
+              }
+            ).detail || '',
+          )
         : '';
 
     if (detail) log.note(detail);

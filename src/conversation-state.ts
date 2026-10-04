@@ -4,7 +4,6 @@
 export interface WireField {
   /** Protobuf field number. */
   field: number;
-  /** Wire type. */
   wire: number;
   /** Byte offset of the payload. */
   offset: number;

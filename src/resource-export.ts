@@ -42,7 +42,11 @@ export async function collectExportResources(opts: {
   /** Cancellation for this collection. */
   signal?: AbortSignal;
   /** Coarse progress while resources are read. */
-  onProgress?: (processed: number, total: number) => void;
+  onProgress?: (
+    processed: number,
+    /** Total items in this operation. */
+    total: number,
+  ) => void;
   /** Local plans directory used to copy referenced plan files. */
   plansDir?: string;
   /** Canvas directory for this workspace. Null when the project slug is unknown. */
@@ -80,14 +84,17 @@ export async function collectExportResources(opts: {
   const cache = new Map<string, Awaited<ReturnType<typeof db.readKvBytes>>>();
 
   for (const body of Object.values(opts.composers)) {
-    const parsed = JSON.parse(body) as { conversationState?: unknown };
+    /** Conversation state. */
+    const parsed = JSON.parse(body) as {
+      conversationState?: unknown;
+    };
 
     const closed = await readBlobGraph(
       parsed.conversationState,
-      async (digests) => {
+      async (/** Blob digests for this call. */ digests) => {
         const rows = await db.readKvBlobs(
           opts.conn,
-          digests.map((digest) => `agentKv:blob:${digest}`),
+          digests.map((/** Blob digest. */ digest) => `agentKv:blob:${digest}`),
         );
 
         const batch = new Map<string, Buffer | null>();

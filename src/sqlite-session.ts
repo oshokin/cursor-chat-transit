@@ -1,3 +1,4 @@
+import { killSqliteChild } from './sqlite-process';
 import { sqliteTimeoutError } from './sqlite-timeout';
 import { randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -78,12 +79,15 @@ export class SqliteSession {
         this.failure ??= error;
         this.waiter?.reject(this.failure);
         this.waiter = undefined;
+        this.releaseStdio();
         resolve();
       }),
     );
 
     child.on('error', (error) => this.stop(error));
+
     child.stdin.on('error', (error) => this.stop(error));
+
     child.stdout.setEncoding('utf8');
 
     child.stdout.on('data', (chunk: string) => {
@@ -95,7 +99,9 @@ export class SqliteSession {
           this.stop(error instanceof Error ? error : new Error(String(error)));
         })
         .finally(() => {
-          if (!this.closed && !this.failure) child.stdout.resume();
+          // A paused stdout never observes EOF. Node then keeps the pipe
+          // referenced after sqlite exits, and the test process never ends.
+          if (!child.stdout.destroyed) child.stdout.resume();
         });
     });
 
@@ -111,7 +117,6 @@ export class SqliteSession {
   static async open(opts: {
     /** sqlite3 executable. */
     executable: string;
-    /** Database file to open. */
     database: string;
     /** When true, open the database read-only. */
     readOnly?: boolean;
@@ -149,8 +154,13 @@ export class SqliteSession {
     );
 
     try {
+      // SQLite 3.53 uses boxed output when it decides the session is a console.
+      // Windows pipes sometimes look like a console, and -batch is not enough.
+      // Keep the default "|" column separator: checkpoint rows are parsed as 0|0|0.
       await session.exec(
-        `${busyTimeoutCommand(opts.busyTimeoutMs ?? 5000)}\nPRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
+        `${busyTimeoutCommand(opts.busyTimeoutMs ?? 5000)}
+.mode list
+PRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
       );
 
       return session;
@@ -162,12 +172,16 @@ export class SqliteSession {
   }
 
   /** Serialize a statement and collect its bounded result. */
-  exec(sql: string): Promise<string> {
+  exec(
+    /** SQL statement to run. */
+    sql: string,
+  ): Promise<string> {
     return this.enqueue(sql);
   }
 
   /** Consume result rows without retaining the whole result. */
   queryLines(
+    /** SQL statement to run. */
     sql: string,
     onLine: (line: string) => unknown | Promise<unknown>,
   ): Promise<void> {
@@ -183,12 +197,34 @@ export class SqliteSession {
   /** Wait for child exit; never return while it can still hold a database lock. */
   async close(): Promise<void> {
     if (!this.closed) {
+      this.child.stdout.resume();
+      this.child.stderr.resume();
       this.child.stdin.end();
-      this.killTimer ??= setTimeout(() => this.child.kill('SIGKILL'), 2000);
+
+      this.killTimer ??= setTimeout(
+        () => killSqliteChild(this.child, true),
+        2000,
+      );
     }
 
     await this.exited;
     await this.consuming;
+    this.releaseStdio();
+  }
+
+  /** Drop stdio handles so a finished sqlite child cannot keep Node alive. */
+  private releaseStdio(): void {
+    for (const stream of [
+      this.child.stdin,
+      this.child.stdout,
+      this.child.stderr,
+    ]) {
+      stream.removeAllListeners('error');
+      stream.on('error', () => undefined);
+      if (!stream.destroyed) stream.destroy();
+    }
+
+    this.child.unref();
   }
 
   /** Fail the current query and kill the sqlite child. */
@@ -200,12 +236,17 @@ export class SqliteSession {
     if (this.closed) return;
     // Drain discarded stdout so child close is not held by paused pipe buffers.
     this.child.stdout.resume();
-    this.child.kill();
-    this.killTimer ??= setTimeout(() => this.child.kill('SIGKILL'), 2000);
+    killSqliteChild(this.child);
+
+    this.killTimer ??= setTimeout(
+      () => killSqliteChild(this.child, true),
+      2000,
+    );
   }
 
   /** Run SQL after the previous statement on this connection. */
   private enqueue(
+    /** SQL statement to run. */
     sql: string,
     onLine?: (line: string) => unknown | Promise<unknown>,
   ): Promise<string> {

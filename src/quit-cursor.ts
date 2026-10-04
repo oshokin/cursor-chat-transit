@@ -1,3 +1,4 @@
+import { notifyCompletion } from './notifications';
 import * as vscode from 'vscode';
 
 /** Native desktop command used to quit this Cursor instance. Presence is checked at runtime. */
@@ -19,7 +20,7 @@ export async function canQuitCursor(): Promise<boolean> {
 export function createQuitCursorAction(
   /** True while export or import still holds the transfer lock. */
   isBusy: () => boolean,
-  /** True only when the last completed import wrote chats that Cursor must reload. */
+  /** True only when a modifying operation wrote data that Cursor must reload. */
   importNeedsRestart: () => boolean,
   /** Operation log that records a requested quit and any failure to invoke it. */
   log: {
@@ -36,8 +37,10 @@ export function createQuitCursorAction(
     if (requestingQuit || !importNeedsRestart()) return;
 
     if (isBusy()) {
-      await vscode.window.showInformationMessage(
-        'Wait for the current transfer to finish before quitting Cursor.',
+      notifyCompletion(() =>
+        vscode.window.showInformationMessage(
+          'Wait for the current transfer to finish before quitting Cursor.',
+        ),
       );
 
       return;
@@ -47,8 +50,10 @@ export function createQuitCursorAction(
 
     try {
       if (!(await canQuitCursor())) {
-        await vscode.window.showInformationMessage(
-          'Quit Cursor from its application menu, then reopen it manually.',
+        notifyCompletion(() =>
+          vscode.window.showInformationMessage(
+            'Quit Cursor from its application menu, then reopen it manually.',
+          ),
         );
 
         return;
@@ -57,8 +62,10 @@ export function createQuitCursorAction(
       if (!importNeedsRestart()) return;
 
       if (isBusy()) {
-        await vscode.window.showInformationMessage(
-          'Wait for the current transfer to finish before quitting Cursor.',
+        notifyCompletion(() =>
+          vscode.window.showInformationMessage(
+            'Wait for the current transfer to finish before quitting Cursor.',
+          ),
         );
 
         return;
@@ -73,8 +80,10 @@ export function createQuitCursorAction(
         }`,
       );
 
-      await vscode.window.showErrorMessage(
-        'Unable to quit Cursor. Use the application menu to quit it manually.',
+      notifyCompletion(() =>
+        vscode.window.showErrorMessage(
+          'Unable to quit Cursor. Use the application menu to quit it manually.',
+        ),
       );
     } finally {
       requestingQuit = false;

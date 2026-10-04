@@ -5,9 +5,11 @@ export const FILE_READ_CONCURRENCY = Math.min(4, availableParallelism());
 
 /** Preserve order and drain every started task before failure or cleanup. */
 export async function* mapInBatches<T, R>(
+  /** Items processed in order. */
   items: readonly T[],
   run: (item: T) => Promise<R>,
   signal?: AbortSignal,
+  /** Maximum number of tasks started at once. */
   concurrency = FILE_READ_CONCURRENCY,
 ): AsyncGenerator<R[]> {
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4)

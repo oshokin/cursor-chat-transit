@@ -30,13 +30,11 @@ export interface SnapshotInput {
   bubbles: SnapshotBubble[];
   /** Reachable kv, image, and plan bytes. */
   dependencies: Array<{
-    /** Resource class. */
     kind: 'kv' | 'image' | 'plan' | 'canvas';
     /** Key, image UUID, plan basename, or canvas basename. */
     id: string;
     /** SQLite storage class when this is a kv value. */
     storageClass?: 'text' | 'blob';
-    /** SHA-256 of the bytes, or null when the resource is missing. */
     sha256: string | null;
     /** Decoded byte length when known. */
     byteLength?: number;
@@ -48,7 +46,12 @@ export interface SnapshotInput {
 }
 
 /** JSON semantics: object order ignored, array order preserved. Not RFC 8785. */
-export function canonicalJson(value: unknown, depth = 0): string {
+export function canonicalJson(
+  /** JSON value to canonicalize. */
+  value: unknown,
+  /** Remaining recursion depth. */
+  depth = 0,
+): string {
   if (depth > 128) throw new Error('Snapshot nesting limit');
   if (value === null) return 'null';
 
@@ -87,7 +90,10 @@ export function canonicalJson(value: unknown, depth = 0): string {
 }
 
 /** SHA-256 of UTF-8 text as lowercase hex. */
-export function sha256Text(value: string): string {
+export function sha256Text(
+  /** Text whose SHA-256 is recorded. */
+  value: string,
+): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
@@ -134,7 +140,9 @@ function unique(values: string[]): void {
  */
 export function snapshotFingerprint(input: SnapshotInput): string {
   unique(input.bubbles.map((b) => b.bubbleId));
+
   unique(input.dependencies.map((d) => JSON.stringify([d.kind, d.id])));
+
   const split = splitConversation(input.body);
   const hasher = new SnapshotHasher();
 
@@ -330,7 +338,6 @@ export interface Receipt {
   sourceComposerId: string;
   /** Canonical hash of that source snapshot. */
   snapshotHash: string;
-  /** Composer id on this target. */
   targetComposerId: string;
   /** Pending write versus verified mapping. */
   state: 'pending' | 'verified';

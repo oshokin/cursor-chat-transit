@@ -1,3 +1,4 @@
+const jsdoc = require('eslint-plugin-jsdoc').default;
 const js = require('@eslint/js');
 const stylistic = require('@stylistic/eslint-plugin');
 const globals = require('globals');
@@ -110,8 +111,30 @@ module.exports = tseslint.config(
     },
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'webview/**/*.ts'],
+    plugins: { jsdoc },
+    settings: { jsdoc: { mode: 'typescript' } },
     rules: {
+      'jsdoc/require-jsdoc': [
+        'error',
+        {
+          publicOnly: true,
+          enableFixer: false,
+          require: {
+            FunctionDeclaration: true,
+            ClassDeclaration: true,
+            ArrowFunctionExpression: true,
+            FunctionExpression: true,
+          },
+          contexts: [
+            'TSInterfaceDeclaration',
+            'TSTypeAliasDeclaration',
+            'TSEnumDeclaration',
+            'ExportNamedDeclaration > VariableDeclaration',
+          ],
+        },
+      ],
+      'jsdoc/no-types': 'error',
       'no-restricted-syntax': [
         'error',
         {

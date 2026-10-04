@@ -21,7 +21,9 @@ export function logSentence(text: string): string {
 
 /** One format for operation events and messages emitted outside a transfer. */
 export function formatLogLine(
+  /** Log level word. */
   level: 'INFO' | 'WARN' | 'ERROR',
+  /** Text to parse or log. */
   text: string,
   date = new Date(),
 ): string {

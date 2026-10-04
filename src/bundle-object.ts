@@ -36,6 +36,7 @@ export async function readBundleObject(
     for (const file of await ndjsonFiles(path.join(bundle.root, 'catalog'))) {
       for await (const row of readNdjson(file, 'catalog', signal)) {
         const rec = row.value as {
+          /** Catalog ordinal of this chat. */
           ordinal?: number;
           sourceComposerId?: string;
         };
@@ -54,7 +55,13 @@ export async function readBundleObject(
         const composer = parseBoundedJson(
           await readFile(path.join(dir, 'composer.json')),
           'composer',
-        ) as { conversation: string; fields: Record<string, unknown> };
+          /** Whether the conversation array was present. */
+        ) as {
+          /** Recorded conversation layout, such as `empty` or `ndjson`. */
+          conversation: string;
+          /** Composer fields without the conversation array. */
+          fields: Record<string, unknown>;
+        };
 
         const fields = { ...composer.fields };
 
@@ -81,7 +88,11 @@ export async function readBundleObject(
 
         for (const part of await ndjsonFiles(path.join(dir, 'bubbles'))) {
           for await (const item of readNdjson(part, 'bubble', signal)) {
-            const bubble = item.value as { bubbleId: string; payload: unknown };
+            const bubble = item.value as {
+              bubbleId: string;
+              /** Bubble body stored under that id. */
+              payload: unknown;
+            };
 
             bubbles[id].push({
               key: `bubbleId:${id}:${bubble.bubbleId}`,
@@ -169,7 +180,10 @@ export async function readBundleObject(
 }
 
 /** Sorted `.ndjson` paths, or none when the directory is missing. */
-async function ndjsonFiles(dir: string): Promise<string[]> {
+async function ndjsonFiles(
+  /** Directory to scan. */
+  dir: string,
+): Promise<string[]> {
   try {
     return (await readdir(dir))
       .filter((name) => name.endsWith('.ndjson'))

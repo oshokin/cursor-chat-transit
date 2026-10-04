@@ -31,7 +31,9 @@ export async function readSessionKvBatch(
   const sizes = new Map<number, number>();
 
   await session.queryLines(
-    `WITH requested(idx,key) AS (VALUES ${keys.map((key, i) => `(${i},${sqlText(key)})`).join(',')})
+    `WITH requested(idx,key) AS (VALUES ${keys
+      .map((key, i) => `(${i},${sqlText(key)})`)
+      .join(',')})
     SELECT idx || '|' || CASE WHEN kv.key IS NULL THEN -1 ELSE coalesce(length(CAST(kv.value AS BLOB)), 0) END
     FROM requested LEFT JOIN cursorDiskKV kv ON kv.key=requested.key ORDER BY idx;`,
     (line) => {

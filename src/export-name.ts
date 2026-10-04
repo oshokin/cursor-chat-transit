@@ -41,7 +41,11 @@ const SUFFIX = '.cursor-chat.zip';
 const RESERVED = /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/iu;
 
 /** Truncate without splitting a Unicode code point or exceeding a UTF-8 byte budget. */
-function truncateUtf8(value: string, maxBytes: number): string {
+function truncateUtf8(
+  /** Filename text to shorten. */
+  value: string,
+  maxBytes: number,
+): string {
   let result = '';
   let bytes = 0;
 
@@ -58,7 +62,9 @@ function truncateUtf8(value: string, maxBytes: number): string {
 
 /** Build a readable filename component, never a path; preserve Unicode and case. */
 export function cleanFilenamePart(
+  /** Filename fragment to sanitize. */
   value: string,
+  /** Value used when the input is not finite. */
   fallback: string,
   maxBytes = 72,
 ): string {
@@ -107,7 +113,10 @@ export function workspaceNameFromIdentity(
 /** Filename selection from the chats that will actually be written. */
 export function selectionForFilename(
   mode: 'all' | 'selected',
-  chats: Array<{ name?: string }>,
+  chats: Array<{
+    /** Chat title, when the header has one. */
+    name?: string;
+  }>,
 ): ExportNameInput['selection'] {
   if (!Number.isSafeInteger(chats.length) || chats.length < 1) {
     throw new RangeError('An export must contain at least one selected chat');

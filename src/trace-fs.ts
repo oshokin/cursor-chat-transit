@@ -21,6 +21,7 @@ export function readFile(
 /** Write a bounded record; no payload is copied into logs. */
 export function writeFile(
   file: string,
+  /** Payload bytes or record. */
   data: string | Uint8Array,
   options?: WriteFileOptions,
 ): Promise<void> {

@@ -70,7 +70,7 @@ test('Transit settings use documented defaults and only the new namespace', () =
     plansDir: undefined,
   });
 
-  assert.equal(settings.importAllowPartial(), false);
+  assert.equal('importAllowPartial' in settings, false);
   assert.equal(settings.operationLogLevel(), 'info');
   assert.ok(namespaces.every((namespace) => namespace === 'cursorChatTransit'));
 });
@@ -103,7 +103,7 @@ test('workspace overrides cannot redirect a valid user path or silently enable r
   values.set('import.allowPartial', { workspaceValue: true });
   values.set('sqlite.operationTimeoutSeconds', { workspaceValue: 999 });
   assert.deepEqual(settings.config(), { userDataDir: userDir, sqlitePath: '' });
-  assert.equal(settings.importAllowPartial(), false);
+  assert.equal('importAllowPartial' in settings, false);
   assert.equal(settings.transferSettings().timeoutMs, 600000);
 });
 
@@ -143,10 +143,7 @@ test('all contributed settings use Transit prefix and retain appropriate scopes'
     ),
   );
 
-  assert.equal(
-    properties['cursorChatTransit.import.allowPartial'].scope,
-    'application',
-  );
+  assert.equal(properties['cursorChatTransit.import.allowPartial'], undefined);
 
   assert.equal(
     properties['cursorChatTransit.sqlite.operationTimeoutSeconds'].default,
@@ -178,4 +175,90 @@ test('removed backup timeout is neither exposed nor consumed', () => {
     ],
     undefined,
   );
+});
+
+test('every declared setting has a working user value and defaults consistent with the manifest', () => {
+  values.clear();
+
+  const paths = {
+    userDataDir: path.resolve('profile'),
+    sqlitePath: path.resolve('bin/sqlite3'),
+    plansDirectory: path.resolve('plans'),
+  };
+
+  for (const [key, value] of Object.entries(paths))
+    values.set(key, { globalValue: value, workspaceValue: 'ignored' });
+  values.set('sqlite.operationTimeoutSeconds', { globalValue: 3600 });
+  values.set('sqlite.busyTimeoutSeconds', { globalValue: 30 });
+  values.set('logLevel', { globalValue: 'error' });
+
+  assert.deepEqual(settings.config(), {
+    userDataDir: paths.userDataDir,
+    sqlitePath: paths.sqlitePath,
+  });
+
+  assert.deepEqual(settings.storageOptions(), {
+    configuredUserDataDir: paths.userDataDir,
+  });
+
+  assert.deepEqual(settings.transferSettings(), {
+    plansDir: paths.plansDirectory,
+    timeoutMs: 3600000,
+    busyTimeoutMs: 30000,
+  });
+
+  assert.equal(settings.operationLogLevel(), 'error');
+  const snapshot = settings.transferSettings();
+
+  values.set('sqlite.operationTimeoutSeconds', { globalValue: 30 });
+  values.set('sqlite.busyTimeoutSeconds', { globalValue: 0 });
+  assert.equal(snapshot.timeoutMs, 3600000);
+  assert.equal(settings.transferSettings().timeoutMs, 30000);
+  assert.equal(settings.transferSettings().busyTimeoutMs, 0);
+});
+
+test('all path settings reject relative paths and control characters; both deadlines reject invalid values', () => {
+  for (const key of ['userDataDir', 'sqlitePath', 'plansDirectory'])
+    for (const bad of [
+      'relative',
+      path.resolve('bad') + '\n',
+      path.resolve('bad') + '\0',
+      42,
+      null,
+    ]) {
+      values.clear();
+      values.set(key, { globalValue: bad });
+
+      assert.throws(
+        () =>
+          key === 'plansDirectory'
+            ? settings.transferSettings()
+            : settings.config(),
+        /absolute path/,
+      );
+    }
+
+  for (const [key, invalid] of [
+    ['sqlite.busyTimeoutSeconds', [-1, 31, 0.5, '5', null, NaN]],
+    ['sqlite.operationTimeoutSeconds', [0, 29, 3601, Infinity, '600']],
+  ] as const)
+    for (const bad of invalid) {
+      values.clear();
+      values.set(key, { globalValue: bad });
+      assert.throws(() => settings.transferSettings(), /whole number/);
+    }
+
+  values.clear();
+});
+
+test('text recovery defaults on and only accepts an explicit user boolean', () => {
+  values.clear();
+  assert.equal(settings.recoverTextSetting(), true);
+  values.set('export.recoverText', { workspaceValue: false });
+  assert.equal(settings.recoverTextSetting(), true);
+  values.set('export.recoverText', { globalValue: false });
+  assert.equal(settings.recoverTextSetting(), false);
+  values.set('export.recoverText', { globalValue: 'true' });
+  assert.throws(() => settings.recoverTextSetting(), /true or false/);
+  values.clear();
 });

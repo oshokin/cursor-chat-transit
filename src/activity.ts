@@ -1,7 +1,10 @@
 import type { ComposerHeader } from './types';
 
 /** Cursor header times are milliseconds. Do not guess units or derive dates from IDs. */
-export function validTimestamp(value: unknown): number {
+export function validTimestamp(
+  /** Header time field. */
+  value: unknown,
+): number {
   return typeof value === 'number' &&
     Number.isFinite(value) &&
     value > 0 &&
@@ -32,19 +35,22 @@ export function recentChats(headers: ComposerHeader[]): ComposerHeader[] {
   );
 }
 
+/** Reuse Intl formatting across large header lists. Locale is fixed for this host session. */
+const activityFormatter = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
 /** Absolute local dates remain unambiguous across midnight and long sessions. */
 export function chatActivityLabel(header: ComposerHeader): string {
   const timestamp = chatActivity(header);
 
   if (!timestamp) return 'Date unavailable';
 
-  const date = new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(timestamp);
+  const date = activityFormatter.format(timestamp);
 
   return `${validTimestamp(header.lastUpdatedAt) ? 'Updated' : 'Created'} ${date}`;
 }

@@ -7,7 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { resourceError } from './resource-bytes';
 
 /** True when the resolved path stays under `root`. */
-export function pathInside(root: string, candidate: string): boolean {
+export function pathInside(
+  /** Directory that contains the extracted or staged archive. */
+  root: string,
+  candidate: string,
+): boolean {
   const resolvedRoot = path.resolve(root);
   const resolved = path.resolve(candidate);
 
@@ -19,7 +23,11 @@ export function pathInside(root: string, candidate: string): boolean {
 }
 
 /** True when an existing path does not symlink out of `root`. */
-export function staysInRoot(root: string, candidate: string): boolean {
+export function staysInRoot(
+  /** Directory that contains the extracted or staged archive. */
+  root: string,
+  candidate: string,
+): boolean {
   if (!pathInside(root, candidate)) return false;
 
   try {
@@ -38,8 +46,10 @@ export function staysInRoot(root: string, candidate: string): boolean {
 
 /** Copy `source` onto `dest` without overwriting different bytes. */
 export async function installBlobFile(
+  /** Directory that contains the extracted or staged archive. */
   root: string,
   dest: string,
+  /** Source path inside the archive or on disk. */
   source: string,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -68,6 +78,7 @@ export async function installBlobFile(
           'Resource directory is not a regular directory.',
         );
 
+      /** Refuse a destination that is not the same regular file. */
       const verifyExisting = async () => {
         const entry = await fs.promises.lstat(dest);
 
@@ -139,6 +150,7 @@ export async function installBlobFile(
 
 /** Shared image/plan install primitive; wrappers own filenames and formats. */
 export async function writeFileNoClobber(
+  /** Directory that contains the extracted or staged archive. */
   root: string,
   dest: string,
   bytes: Buffer,

@@ -42,14 +42,16 @@ export interface ChatPickItem {
   description: string;
   /** Secondary line; never an unconditional UUID dump. */
   detail: string;
-  /** Composer id. */
   id: string;
   /** Whether the row starts selected. */
   picked: boolean;
 }
 
 /** QuickPick title for the workspace step. */
-export function workspacePickTitle(action: WorkspacePickAction): string {
+export function workspacePickTitle(
+  /** Which picker step is open. */
+  action: WorkspacePickAction,
+): string {
   if (action === 'select') return 'Choose workspace';
 
   return action === 'export'
@@ -74,8 +76,11 @@ export function chatListLabel(name: unknown): string {
 
 /** Native QuickPick rows for workspaceStorage entries. Current only when identity matches. */
 export function workspacePickItems(
+  /** Entries to turn into picker rows. */
   entries: WorkspaceEntry[],
+  /** Identity of the workspace that is open now. */
   current: WorkspaceIdentity | undefined,
+  /** Database path of the workspace that is open now. */
   currentDatabase?: string,
 ): WorkspacePickItem[] {
   const currentKey = current ? workspaceKey(current.kind, current.uri) : null;
@@ -87,7 +92,11 @@ export function workspacePickItems(
       workspaceKey(entry.identity.kind, entry.identity.uri) === currentKey,
   );
 
-  const normalize = (file: string) =>
+  /** Compare database paths independent of platform case. */
+  const normalize = (
+    /** Database path to compare. */
+    file: string,
+  ) =>
     process.platform === 'win32'
       ? path.resolve(file).toLowerCase()
       : path.resolve(file);
@@ -132,14 +141,25 @@ export function workspacePickItems(
   return items;
 }
 
-/** Most recently updated chats first. Untitled names stay last, still by recency. */
-export function chatPickItems(composers: ComposerHeader[]): ChatPickItem[] {
+/** Shared order for native chat pickers, the management tree, and search. */
+export function orderedChatHeaders(
+  /** Composer bodies keyed by id. */
+  composers: ComposerHeader[],
+): ComposerHeader[] {
   const ordered = recentChats(composers);
 
-  const rows = [
-    ...ordered.filter((composer) => hasChatTitle(composer.name)),
-    ...ordered.filter((composer) => !hasChatTitle(composer.name)),
-  ].map((composer) => {
+  return [
+    ...ordered.filter((chat) => hasChatTitle(chat.name)),
+    ...ordered.filter((chat) => !hasChatTitle(chat.name)),
+  ];
+}
+
+/** Most recently updated chats first. Untitled names stay last, still by recency. */
+export function chatPickItems(
+  /** Composer bodies keyed by id. */
+  composers: ComposerHeader[],
+): ChatPickItem[] {
+  const rows = orderedChatHeaders(composers).map((composer) => {
     return {
       label: chatListLabel(composer.name),
       description: chatActivityLabel(composer),
@@ -165,8 +185,17 @@ export function chatPickItems(composers: ComposerHeader[]): ChatPickItem[] {
 
 /** Add a short identity only inside groups that would otherwise look identical. */
 function disambiguateRows<
-  T extends { label: string; description: string; detail: string },
+  /** Name used when the value is rejected. */
+  T extends {
+    /** Row title. */
+    label: string;
+    /** Secondary line. */
+    description: string;
+    /** Third line. */
+    detail: string;
+  },
 >(
+  /** Rows already loaded. */
   rows: T[],
   idOf: (row: T) => string,
   annotate: (row: T, id: string) => void,

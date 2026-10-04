@@ -67,13 +67,26 @@ export function assertExportShape(obj: unknown): ExportObject {
     if (
       !c ||
       typeof c !== 'object' ||
-      typeof (c as { composerId?: unknown }).composerId !== 'string' ||
-      !(c as { composerId: string }).composerId
+      typeof (
+        c as {
+          /** Composer id when the value has one. */
+          composerId?: unknown;
+        }
+      ).composerId !== 'string' ||
+      !(
+        c as {
+          composerId: string;
+        }
+      ).composerId
     ) {
       throw new Error('Invalid export: composer metadata missing composerId.');
     }
 
-    const composerId = (c as { composerId: string }).composerId;
+    const composerId = (
+      c as {
+        composerId: string;
+      }
+    ).composerId;
 
     if (ids.has(composerId))
       throw new Error(`Invalid export: duplicate composerId ${composerId}`);
@@ -101,6 +114,7 @@ export function incompleteComposers(obj: ExportObject): string[] {
 /** Write JSON via a unique temp file, fsync, then rename. */
 export async function writeJsonAtomic(
   destPath: string,
+  /** JSON value written atomically. */
   value: unknown,
 ): Promise<void> {
   const dir = path.dirname(destPath);
@@ -132,6 +146,7 @@ export async function writeJsonAtomic(
 /** Write UTF-8 in bounded chunks; every call waits for the bytes to be accepted. */
 async function writeChunk(
   file: FileHandle,
+  /** Text to parse or log. */
   text: string,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -235,7 +250,11 @@ export class ExportFileWriter {
   }
 
   /** Append one composer's bubbles without stringifying the whole array at once. */
-  async writeBubbleGroup(id: string, list: BubbleRecord[]): Promise<void> {
+  async writeBubbleGroup(
+    id: string,
+    /** Bubble records to scan. */
+    list: BubbleRecord[],
+  ): Promise<void> {
     await this.beginBubbleGroup(id);
     for (const bubble of list) await this.writeBubble(bubble);
     await this.endBubbleGroup();
@@ -263,7 +282,9 @@ export class ExportFileWriter {
 
   /** Close bubbles, write resources and summary, fsync, and rename into place. */
   async finish(
+    /** Manifest summary written beside the archive. */
     summary: NonNullable<ExportObject['summary']>,
+    /** Resource rows for this chat. */
     resources?: ExportResources,
   ): Promise<void> {
     await this.write('\n  }');

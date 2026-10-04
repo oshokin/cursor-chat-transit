@@ -43,13 +43,25 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
   if (
     !message ||
     typeof message !== 'object' ||
-    (message as { type?: unknown }).type !== 'state'
+    /** Record type discriminant. */
+    (
+      message as {
+        /** Message kind posted by the extension host. */
+        type?: unknown;
+      }
+    ).type !== 'state'
   ) {
     return;
   }
 
   /** Compact sidebar model posted by the extension host. */
-  const state = (message as { state?: unknown }).state;
+  /** Conversation or transfer state. */
+  const state = (
+    message as {
+      /** Sidebar model posted by the extension host. */
+      state?: unknown;
+    }
+  ).state;
 
   if (!state || typeof state !== 'object') return;
   /** Host state fields used as plain text; never interpreted as HTML. */
@@ -142,8 +154,10 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
   const progress = document.getElementById('progress') as HTMLElement;
   /** Fill element whose width reflects a known percent. */
   const fill = document.getElementById('progress-fill') as HTMLElement;
+
   /** True when the host supplied a finite progress percent. */
   const hasPct = typeof s.progress === 'number' && Number.isFinite(s.progress);
+
   // Holding the lock while a picker is open is not background progress.
   /** True while work is running, not while a native picker is open. */
   const working = busy && status === 'running';

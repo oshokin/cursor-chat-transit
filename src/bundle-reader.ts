@@ -16,9 +16,7 @@ import { parseBoundedJson } from './record-json';
 
 /** Checked manifest. Only version 4 is accepted. */
 export interface BundleManifest {
-  /** Format name. */
   format: typeof BUNDLE_FORMAT;
-  /** Format version. */
   formatVersion: typeof EXPORT_FORMAT_VERSION;
   /** Inventory file hash. */
   inventory: {
@@ -100,7 +98,10 @@ export async function openBundle(
 }
 
 /** Load and validate `manifest.json`. */
-async function readManifest(root: string): Promise<BundleManifest> {
+async function readManifest(
+  /** Directory that contains the extracted or staged archive. */
+  root: string,
+): Promise<BundleManifest> {
   const filePath = path.join(root, 'manifest.json');
   const bytes = await readFile(filePath);
 
@@ -162,8 +163,11 @@ async function readManifest(root: string): Promise<BundleManifest> {
 
 /** Check `inventory.ndjson` against the manifest hash and extracted entries. */
 async function verifyInventory(
+  /** Directory that contains the extracted or staged archive. */
   root: string,
+  /** Archive manifest. */
   manifest: BundleManifest,
+  /** Entries to turn into picker rows. */
   entries: Map<string, ExtractedEntry>,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -181,6 +185,7 @@ async function verifyInventory(
   let contentBytes = 0;
   let lastProgress = performance.now();
 
+  /** Report progress for this step. */
   const report = () =>
     transferProgress('validate', {
       scope: 'inventory',

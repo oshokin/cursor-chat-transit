@@ -27,10 +27,12 @@ window.addEventListener('message', (event) => {
     const message = event.data;
     if (!message ||
         typeof message !== 'object' ||
+        /** Record type discriminant. */
         message.type !== 'state') {
         return;
     }
     /** Compact sidebar model posted by the extension host. */
+    /** Conversation or transfer state. */
     const state = message.state;
     if (!state || typeof state !== 'object')
         return;
