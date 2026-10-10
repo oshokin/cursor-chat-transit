@@ -65,6 +65,11 @@ export interface ManagedPlanTarget {
   pathLabel: string;
   /** `dev:ino` of the workspace directory captured with the plan. */
   directoryId?: string;
+  /**
+   * Hash of the selected global chat rows.
+   * A live Cursor rewrite of unrelated global state does not change it.
+   */
+  chatFingerprint?: string;
   /** Select empty workspaces asked for a workspace that still has no history. */
   requireEmpty?: true;
 }

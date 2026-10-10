@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { sqlText } from '../src/core';
 import { countOwnershipReads } from '../src/deletion-ownership';
+import { listWorkspaceChats } from '../src/export-transfer';
 import {
   executeManagedDelete,
   findEmptyWorkspaces,
@@ -16,6 +17,7 @@ import {
   execSqlScript,
   findSqliteExecutable,
 } from '../src/sqlite';
+import { runStatistics } from '../src/statistics';
 import { SqliteSession } from '../src/sqlite-session';
 import { observeTransfer } from '../src/transfer-events';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
@@ -210,7 +212,7 @@ test(
 );
 
 test(
-  'an orphan bubble is history and a missing composer row is unknown',
+  'an orphan bubble is history and a missing composer row is empty',
   { skip },
   async () => {
     const { root, ctx, add } = await profile();
@@ -219,15 +221,159 @@ test(
       const orphan = await add('orphan', [A], [[`bubbleId:${A}:m`, '{}']], '');
       const missing = await add('missing', [B], [], '');
 
+      const mixed = await add(
+        'mixed',
+        [C, D],
+        [[`bubbleId:${D}:m`, '{"type":"user","text":"kept"}']],
+        '',
+      );
+
       assert.equal(
         (await assessWorkspaceHistory(ctx, orphan)).state,
         'present',
       );
 
+      assert.equal((await assessWorkspaceHistory(ctx, missing)).state, 'empty');
+      assert.equal((await assessWorkspaceHistory(ctx, mixed)).state, 'present');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'a blank conversation state is empty and one bad id does not hide a chat',
+  { skip },
+  async () => {
+    const blankProfile = await profile();
+
+    try {
+      const blank = await blankProfile.add(
+        'blank',
+        [A],
+        [],
+        JSON.stringify({
+          _v: 11,
+          conversationState: '',
+          text: '',
+          fullConversationHeadersOnly: [],
+        }),
+      );
+
       assert.equal(
-        (await assessWorkspaceHistory(ctx, missing)).state,
+        (await assessWorkspaceHistory(blankProfile.ctx, blank)).state,
+        'empty',
+      );
+    } finally {
+      await rm(blankProfile.root, { recursive: true, force: true });
+    }
+
+    const badProfile = await profile();
+
+    try {
+      const alone = await badProfile.add('alone', ['task-tool_not-a-uuid']);
+
+      const listed = await badProfile.add(
+        'listed',
+        ['task-tool_not-a-uuid', B],
+        [[`bubbleId:${B}:m`, '{"type":"user","text":"kept"}']],
+      );
+
+      assert.equal(
+        (await assessWorkspaceHistory(badProfile.ctx, alone)).state,
         'unknown',
       );
+
+      assert.equal(
+        (await assessWorkspaceHistory(badProfile.ctx, listed)).state,
+        'present',
+      );
+    } finally {
+      await rm(badProfile.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'listed header-only chats are selected as empty and an unreadable sibling stays unchecked',
+  { skip },
+  async () => {
+    const { root, ctx, add } = await profile();
+
+    try {
+      const missing = await add('missing', [A], [], '');
+
+      const blank = await add(
+        'blank',
+        [B],
+        [],
+        JSON.stringify({
+          _v: 11,
+          conversationState: '',
+          text: '',
+          fullConversationHeadersOnly: [],
+        }),
+      );
+
+      const mixed = await add('mixed', [C, D], [], '');
+
+      await execSqlScript({
+        ...ctx,
+        database: mixed.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)},${sqlText('[]')});`,
+      });
+
+      const listedMissing = await listWorkspaceChats(ctx, missing);
+      const listedBlank = await listWorkspaceChats(ctx, blank);
+      const listedMixed = await listWorkspaceChats(ctx, mixed);
+
+      assert.deepEqual(
+        listedMissing.allComposers.map((chat) => chat.composerId),
+        [A],
+      );
+
+      assert.deepEqual(
+        listedBlank.allComposers.map((chat) => chat.composerId),
+        [B],
+      );
+
+      assert.deepEqual(
+        listedMixed.allComposers.map((chat) => chat.composerId).sort(),
+        [C, D].sort(),
+      );
+
+      const updates: Array<{ detail: string; failed?: boolean }> = [];
+
+      const checked = await runStatistics(
+        {
+          kind: 'chat-statistics',
+          ...ctx,
+          workspace: blank,
+          chats: listedBlank.allComposers,
+        },
+        new AbortController().signal,
+        (row) => updates.push(row),
+      );
+
+      assert.equal(checked.failed, 0);
+      assert.equal(updates[0]?.failed, undefined);
+      assert.match(updates[0]?.detail || '', /user message/);
+
+      const scan = await findEmptyWorkspaces(ctx, {
+        kind: 'find-empty-workspaces',
+        ...ctx,
+        userDataRoot: root,
+        workspaces: [missing, blank, mixed],
+        emptyWindow: true,
+      });
+
+      assert.deepEqual(scan.selected.map((entry) => entry.storageId).sort(), [
+        'blank',
+        'missing',
+      ]);
+
+      assert.equal(scan.unchecked, 1);
+      assert.equal(scan.candidates, 2);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -130,7 +130,7 @@ Format version 4 is the only file format read and written by this build. An arch
 | Single JSON record      | 32 MiB    |
 | Single SQLite value     | 32 MiB    |
 | JSON nesting            | 64 levels |
-| Keys in one JSON record | 100,000   |
+| Keys in one JSON record | 1,000,000 |
 | ZIP entries             | 250,000   |
 
 A record larger than the part target occupies its own part within the record limit. The total archive can exceed 1 GiB. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.

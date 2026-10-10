@@ -4,8 +4,8 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { readNdjson } from '../src/ndjson-io';
-import { parseBoundedJson } from '../src/record-json';
-import { MAX_JSON_RECORD_BYTES } from '../src/bundle-limits';
+import { assertJsonLimits, parseBoundedJson } from '../src/record-json';
+import { MAX_JSON_KEYS, MAX_JSON_RECORD_BYTES } from '../src/bundle-limits';
 
 test('ndjson reader rejects a line that exceeds the record limit', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-ndjson-'));
@@ -63,6 +63,39 @@ test('a mention selection larger than 64 KiB stays one object key', () => {
   assert.equal(keys.length, 1);
   assert.equal(keys[0], selection);
   assert.deepEqual(parsed.context.mentions.selections[selection], []);
+});
+
+test('a long conversation index stays readable and one past the key limit does not', () => {
+  const header = {
+    bubbleId: 'm',
+    type: 1,
+    grouping: { textPreview: 'x' },
+    serverBubbleId: 's',
+    requestId: 'r',
+    tokenCount: { input: 1, output: 1 },
+  };
+
+  const parsed = parseBoundedJson(
+    Buffer.from(
+      JSON.stringify({
+        _v: 18,
+        isNAL: true,
+        fullConversationHeadersOnly: Array.from(
+          { length: 13_000 },
+          () => header,
+        ),
+      }),
+    ),
+    'composer',
+  ) as { fullConversationHeadersOnly: unknown[] };
+
+  assert.equal(parsed.fullConversationHeadersOnly.length, 13_000);
+
+  const wide: Record<string, number> = {};
+
+  for (let index = 0; index < MAX_JSON_KEYS + 1; index++) wide[`k${index}`] = 1;
+
+  assert.throws(() => assertJsonLimits(wide, 'composer'), /properties/);
 });
 
 test('bounded JSON rejects invalid UTF-8 even when replacement has the same byte count', () => {

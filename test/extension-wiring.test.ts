@@ -232,6 +232,30 @@ test('operation lock excludes a second command and releases shared state after f
     await state.withLock(context, async () => 'available'),
     'available',
   );
+
+  state.setUi({
+    status: 'idle',
+    statusTitle: 'No imports or exports yet',
+    statusDetail: 'Choose an action to get started.',
+  });
+
+  const scan = state.withLock(
+    context,
+    async () => state.runtime.uiState.statusTitle,
+    {
+      title: 'Finding empty workspaces…',
+      detail: 'Checking workspaces for chat history.',
+    },
+  );
+
+  assert.equal(await scan, 'Finding empty workspaces…');
+
+  assert.equal(state.runtime.uiState.statusTitle, 'No imports or exports yet');
+
+  assert.equal(
+    state.runtime.uiState.statusDetail,
+    'Choose an action to get started.',
+  );
 });
 
 test('sidebar and notification cancellation target the same active operation', async () => {

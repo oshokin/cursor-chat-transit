@@ -50,7 +50,12 @@ export function blobKeysFromComposerBody(bodyText: string): {
   const version = rec._v;
   const state = rec.conversationState;
 
-  if (state === undefined || state === null) return { status: 'ok', keys: [] };
+  if (
+    state === undefined ||
+    state === null ||
+    (typeof state === 'string' && state.trim() === '')
+  )
+    return { status: 'ok', keys: [] };
 
   if (
     version !== undefined &&

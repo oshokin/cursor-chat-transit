@@ -12,7 +12,7 @@ export type WorkspaceHistoryState =
 /**
  * Read supported indexes until the first history row.
  * Selection-only references are included. Message bodies and blob graphs are not loaded.
- * A missing `composerData` row for a known id is `unknown`, not `empty`.
+ * A missing `composerData` row with no bubbles is no history. An unreadable body is `unknown`.
  */
 export async function assessWorkspaceHistory(
   /** Transfer hooks, timeouts, and cancellation. */
@@ -34,18 +34,30 @@ export async function assessWorkspaceHistory(
 
     if (!ids.length) return { state: 'empty', ids };
 
+    let unreadable = false;
+
     for (const id of ids) {
-      const presence = await inspectChatPresence(
-        { ...ctx, database: entry.globalDbPath },
-        id,
-        { emptyShell: true },
-      );
+      let presence: Awaited<ReturnType<typeof inspectChatPresence>>;
+
+      try {
+        presence = await inspectChatPresence(
+          { ...ctx, database: entry.globalDbPath },
+          id,
+          { emptyShell: true },
+        );
+      } catch (error) {
+        if (ctx.signal?.aborted) throw error;
+
+        // One unsupported id must not hide the other composers in this workspace.
+        unreadable = true;
+        continue;
+      }
 
       if (presence === 'present') return { state: 'present', ids };
-      if (presence !== 'empty') return { state: 'unknown', ids };
+      if (presence === 'unknown') unreadable = true;
     }
 
-    return { state: 'empty', ids };
+    return { state: unreadable ? 'unknown' : 'empty', ids };
   } catch (error) {
     if (ctx.signal?.aborted) throw error;
 

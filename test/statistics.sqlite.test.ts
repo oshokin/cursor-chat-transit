@@ -278,6 +278,67 @@ test(
 );
 
 test(
+  'a conversation index past 100,000 properties still passes the deep check',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const id = healthId('long');
+    const extra: Record<string, number> = {};
+
+    for (let index = 0; index < 1001; index++) extra[`p${index}`] = 1;
+
+    const headers = Array.from({ length: 100 }, (_item, index) => ({
+      bubbleId: `m${index}`,
+      type: 1,
+      extra,
+    }));
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+        `composerData:${id}`,
+      )},${sqlText(
+        JSON.stringify({
+          _v: 18,
+          isNAL: true,
+          conversationState: '~',
+          fullConversationHeadersOnly: headers,
+        }),
+      )}); ${headers
+        .map(
+          (header) =>
+            `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${header.bubbleId}`)},${sqlText(
+              JSON.stringify({ bubbleId: header.bubbleId, type: 1 }),
+            )});`,
+        )
+        .join('\n')}`,
+    });
+
+    const rows: StatisticsUpdate[] = [];
+
+    const result = await runTransfer<{ failed: number }>(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        deepCheck: true,
+        workspace,
+        chats: [{ composerId: id, name: 'Long transcript' }],
+      },
+      { onStatistics: (row) => rows.push(row) },
+    );
+
+    assert.equal(result.failed, 0);
+    assert.equal(rows[0]?.eligible, true);
+
+    assert.match(
+      rows[0]?.detail || '',
+      /100 user messages · Agent format · Transfer checks passed/,
+    );
+  },
+);
+
+test(
   'workspace cleanup keeps legacy, incomplete and unknown history; hides only empty or absent data',
   { skip },
   async (t) => {

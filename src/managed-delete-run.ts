@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
-import { bubbleRange } from './core';
+import { bubbleRange, sqlText } from './core';
 import { deleteSelectedChats } from './chat-deletion';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import type {
@@ -22,6 +23,7 @@ import {
   removeWorkspaceDirectory,
   workspaceDataRefusal,
 } from './workspace-removal';
+import { execSql, execSqlHexRows } from './sqlite';
 import { transferEvent } from './transfer-events';
 import type { TransferContext, WorkspaceEntry } from './types';
 
@@ -275,6 +277,16 @@ export async function prepareManagedDelete(
     globalTokens[database] = await databaseToken(database);
   }
 
+  for (const target of targets) {
+    if (!target.ids.length) continue;
+
+    target.chatFingerprint = await chatSelectionFingerprint(
+      ctx,
+      target.workspace.globalDbPath,
+      target.ids,
+    );
+  }
+
   transferEvent({
     action: 'Workspace deletion prepared',
     status: 'info',
@@ -304,6 +316,7 @@ export async function executeManagedDelete(
   let error: string | undefined;
   const removed = new Set<string>();
   const acceptedGlobal = { ...(job.plan.globalTokens ?? {}) };
+  const finished = new Set<string>();
   const quiet: TransferContext = { ...ctx, onPhase: undefined };
 
   let ownership:
@@ -352,8 +365,34 @@ export async function executeManagedDelete(
       if (sameDatabaseToken(token, now)) continue;
 
       // Cursor rewrites globalStorage while the confirmation dialog is open.
-      // That clock is not chat history. requireEmpty targets are re-read instead.
-      if (emptySelection) {
+      // The file clock is not the selected chat. Compare those rows instead.
+      const pending = job.plan.targets.filter(
+        (target) =>
+          target.workspace.globalDbPath === database &&
+          !finished.has(target.workspace.workspaceDbPath) &&
+          target.ids.length > 0,
+      );
+
+      let unchanged =
+        emptySelection ||
+        pending.every((target) => target.chatFingerprint !== undefined);
+
+      if (unchanged && !emptySelection) {
+        for (const target of pending) {
+          const live = await chatSelectionFingerprint(
+            ctx,
+            database,
+            target.ids,
+          );
+
+          if (live !== target.chatFingerprint) {
+            unchanged = false;
+            break;
+          }
+        }
+      }
+
+      if (unchanged) {
         acceptedGlobal[database] = now;
         continue;
       }
@@ -398,10 +437,8 @@ export async function executeManagedDelete(
         'The user-data directory changed. Review the selection again.',
       );
 
-    let token: string;
-
     try {
-      token = await databaseToken(entry.workspaceDbPath);
+      await databaseToken(entry.workspaceDbPath);
     } catch (cause) {
       if (target.kind === 'workspace-data' && missingPath(cause))
         return { gone: true as const, entry };
@@ -409,19 +446,13 @@ export async function executeManagedDelete(
       throw cause;
     }
 
-    if (target.kind === 'chats') {
-      if (!sameDatabaseToken(target.token, token))
-        throw new Error(
-          'Selected chats changed during confirmation. Review the selection again.',
-        );
-
+    if (target.kind === 'chats')
       return {
         gone: false as const,
         entry,
         ids: target.ids,
         directory: undefined,
       };
-    }
 
     const refusal = await activeRefusal(entry, job);
 
@@ -456,12 +487,8 @@ export async function executeManagedDelete(
     const sameIds =
       [...target.ids].sort().join('\n') === [...ids].sort().join('\n');
 
-    // A live Cursor process touches database files without adding chats.
-    // requireEmpty follows the composer index, not the file clock.
-    if (
-      !sameIds ||
-      (!target.requireEmpty && !sameDatabaseToken(target.token, token))
-    )
+    // Editor state rewrites the workspace file without changing the chat index.
+    if (!sameIds)
       throw new Error(
         target.requireEmpty && beforeAnyWrite()
           ? 'Some selected workspaces are no longer empty. Nothing was deleted. Review the selection and try again.'
@@ -596,6 +623,8 @@ export async function executeManagedDelete(
           break;
         }
 
+        finished.add(read.entry.workspaceDbPath);
+
         acceptedGlobal[read.entry.globalDbPath] = await databaseToken(
           read.entry.globalDbPath,
         );
@@ -652,6 +681,8 @@ export async function executeManagedDelete(
           stopAt(index + 1, deleted.error);
           break;
         }
+
+        finished.add(read.entry.workspaceDbPath);
 
         acceptedGlobal[read.entry.globalDbPath] = await databaseToken(
           read.entry.globalDbPath,
@@ -887,4 +918,75 @@ export async function findEmptyWorkspaces(
   });
 
   return { selected, unchecked, candidates };
+}
+
+/**
+ * Hash the selected global chat rows.
+ * Unrelated Cursor writes, including `agentKv` and editor state, are not part of the hash.
+ */
+async function chatSelectionFingerprint(
+  /** Transfer hooks and the sqlite binary. */
+  ctx: TransferContext,
+  /** Global database that stores the chat rows. */
+  database: string,
+  /** Composer ids approved for this target. */
+  ids: string[],
+): Promise<string> {
+  const hash = createHash('sha256');
+  const sorted = [...new Set(ids)].sort();
+
+  hash.update(sorted.join('\n'));
+
+  if (!sorted.length) return hash.digest('hex');
+
+  const hasTable = (
+    await execSql({
+      ...ctx,
+      database,
+      readOnly: true,
+      sql: `SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='composerHeaders';`,
+    })
+  ).trim();
+
+  if (hasTable === '1') {
+    await execSqlHexRows({
+      ...ctx,
+      database,
+      readOnly: true,
+      sql: `SELECT hex(composerId), hex(COALESCE(CAST(value AS BLOB), X'')) FROM composerHeaders WHERE composerId IN (${sorted.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
+      cols: 2,
+      onRow: (fields) => {
+        hash.update(fields[0]);
+        hash.update(fields[1]);
+      },
+    });
+  }
+
+  const batchSize = 64;
+
+  for (let start = 0; start < sorted.length; start += batchSize) {
+    const batch = sorted.slice(start, start + batchSize);
+
+    const where = batch
+      .map((id) => {
+        const range = bubbleRange(id);
+
+        return `key=${sqlText(`composerData:${id}`)} OR key=${sqlText(`composerRootWriterDiagnostic:${id}`)} OR (key>=${sqlText(range.lower)} AND key<${sqlText(range.upper)})`;
+      })
+      .join(' OR ');
+
+    await execSqlHexRows({
+      ...ctx,
+      database,
+      readOnly: true,
+      sql: `SELECT hex(key), hex(COALESCE(CAST(value AS BLOB), X'')) FROM cursorDiskKV WHERE ${where} ORDER BY key;`,
+      cols: 2,
+      onRow: (fields) => {
+        hash.update(fields[0]);
+        hash.update(fields[1]);
+      },
+    });
+  }
+
+  return hash.digest('hex');
 }

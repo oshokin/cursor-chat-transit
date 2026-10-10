@@ -442,7 +442,7 @@ test(
 );
 
 test(
-  'a changed workspace database after confirmation is not deleted',
+  'an unrelated workspace value does not block a confirmed delete',
   { skip },
   async () => {
     const { root, ctx, one, empty, shared } = await profile();
@@ -476,19 +476,13 @@ test(
         emptyWindow: true,
       });
 
-      assert.equal(result.outcomes[0]?.storage, 'not-started');
-      await lstat(one.workspaceDbPath);
-
       assert.equal(
-        (
-          await execSql({
-            ...ctx,
-            database: one.workspaceDbPath,
-            sql: `SELECT value FROM ItemTable WHERE key='unrelated';`,
-          })
-        ).trim(),
-        'KEEP2',
+        result.outcomes[0]?.storage,
+        'deleted',
+        JSON.stringify(result),
       );
+
+      await assert.rejects(lstat(one.workspaceDbPath));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1161,52 +1155,105 @@ test(
   },
 );
 
-test('a stale second target blocks every write', { skip }, async () => {
-  const { root, ctx, one, empty, shared } = await profile();
+test(
+  'an unrelated workspace row does not block a confirmed delete',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
 
-  try {
-    const prepared = await prepareManagedDelete(ctx, {
-      kind: 'prepare-managed-delete',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
-      userDataRoot: root,
-      requests: [
-        { kind: 'workspace-data', workspace: one },
-        { kind: 'workspace-data', workspace: shared },
-      ],
-      workspaces: [one, empty, shared],
-      emptyWindow: true,
-    });
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [
+          { kind: 'workspace-data', workspace: one },
+          { kind: 'workspace-data', workspace: shared },
+        ],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
 
-    assert.equal(prepared.ok, true);
-    if (!prepared.ok) return;
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
 
-    await execSqlScript({
-      ...ctx,
-      database: shared.workspaceDbPath,
-      sql: "INSERT INTO ItemTable VALUES ('changed-after-confirmation','yes');",
-    });
+      await execSqlScript({
+        ...ctx,
+        database: shared.workspaceDbPath,
+        sql: "INSERT INTO ItemTable VALUES ('changed-after-confirmation','yes');",
+      });
 
-    const result = await executeManagedDelete(ctx, {
-      kind: 'delete-managed-data',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
-      plan: prepared.plan,
-      workspaces: [one, empty, shared],
-      emptyWindow: true,
-    });
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        plan: prepared.plan,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
 
-    assert.equal(
-      result.outcomes.some((outcome) => outcome.storage === 'deleted'),
-      false,
-      JSON.stringify(result),
-    );
+      assert.equal(
+        result.outcomes.every((outcome) => outcome.storage === 'deleted'),
+        true,
+        JSON.stringify(result),
+      );
 
-    await lstat(one.workspaceDbPath);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
+      await assert.rejects(lstat(one.workspaceDbPath));
+      await assert.rejects(lstat(shared.workspaceDbPath));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'an unrelated global key does not block a confirmed delete',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('agentKv:blob:noise','unrelated');`,
+      });
+
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        plan: prepared.plan,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(
+        result.outcomes[0]?.storage,
+        'deleted',
+        JSON.stringify(result),
+      );
+
+      await assert.rejects(lstat(one.workspaceDbPath));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test(
   'a changed global message invalidates the plan before any write',
@@ -1396,6 +1443,68 @@ test(
       await lstat(
         path.join(path.dirname(one.workspaceDbPath), 'images', `${image}.png`),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'a draft or task-tool id in another composer does not stop workspace removal',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+    const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const taskTool = 'task-tool_a404505b-10a1-4846-b615-eec50b9c1bc';
+
+    try {
+      await mkdir(path.join(path.dirname(one.workspaceDbPath), 'images'));
+
+      await writeFile(
+        path.join(path.dirname(one.workspaceDbPath), 'images', `${image}.png`),
+        'png',
+      );
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES
+          ('composerData:empty-state-draft','{}'),
+          (${sqlText(`composerData:${taskTool}`)},'{}'),
+          ('composerData:not a uuid','{}');`,
+      });
+
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:empty-state-draft:image',${sqlText(
+          JSON.stringify({ images: [{ uuid: image }] }),
+        )});`,
+      });
+
+      const refused = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(refused.ok, false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -71,7 +71,15 @@ export async function foreignImageRefusal(
     .filter((id) => id && !own.has(id));
 
   for (const id of others) {
-    const range = bubbleRange(id);
+    let range: { lower: string; upper: string };
+
+    try {
+      range = bubbleRange(id);
+    } catch (error) {
+      if (error instanceof TypeError) continue;
+
+      throw error;
+    }
 
     for (const uuid of uuids) {
       const hit = await execSql({

@@ -145,43 +145,50 @@ export class ChatManager
     let scan: EmptyWorkspaceScan | undefined;
 
     try {
-      scan = await withLock(this.context, async () => {
-        const sqlite = await prepareSqlite(this.context);
-        const host = listHostEntries();
+      scan = await withLock(
+        this.context,
+        async () => {
+          const sqlite = await prepareSqlite(this.context);
+          const host = listHostEntries();
 
-        return vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: 'Finding empty workspaces…',
-            cancellable: true,
-          },
-          (progress, token) =>
-            runTransfer<EmptyWorkspaceScan>(
-              {
-                kind: 'find-empty-workspaces',
-                ...sqlite,
-                ...transferSettings(),
-                userDataRoot: host.userDir,
-                workspaces: host.entries,
-                database: currentWorkspaceDatabase(this.context),
-                identity: host.identity,
-                emptyWindow:
-                  !vscode.workspace.workspaceFolders?.length &&
-                  !vscode.workspace.workspaceFile,
-              },
-              {
-                signal: linkedSignal(token),
-                onPhase: (_phase, metrics) => {
-                  const message = `Checked ${metrics?.processed || 0} of ${metrics?.total || host.entries.length} workspaces`;
-
-                  progress.report({ message });
-                  this.operationMessage = `Finding empty workspaces… ${message}`;
-                  this.publishMessage();
+          return vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: 'Finding empty workspaces…',
+              cancellable: true,
+            },
+            (progress, token) =>
+              runTransfer<EmptyWorkspaceScan>(
+                {
+                  kind: 'find-empty-workspaces',
+                  ...sqlite,
+                  ...transferSettings(),
+                  userDataRoot: host.userDir,
+                  workspaces: host.entries,
+                  database: currentWorkspaceDatabase(this.context),
+                  identity: host.identity,
+                  emptyWindow:
+                    !vscode.workspace.workspaceFolders?.length &&
+                    !vscode.workspace.workspaceFile,
                 },
-              },
-            ),
-        );
-      });
+                {
+                  signal: linkedSignal(token),
+                  onPhase: (_phase, metrics) => {
+                    const message = `Checked ${metrics?.processed || 0} of ${metrics?.total || host.entries.length} workspaces`;
+
+                    progress.report({ message });
+                    this.operationMessage = `Finding empty workspaces… ${message}`;
+                    this.publishMessage();
+                  },
+                },
+              ),
+          );
+        },
+        {
+          title: 'Finding empty workspaces…',
+          detail: 'Checking workspaces for chat history.',
+        },
+      );
     } catch (error) {
       this.operationMessage = undefined;
       this.publishMessage();

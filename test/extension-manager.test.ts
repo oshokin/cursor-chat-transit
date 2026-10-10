@@ -51,6 +51,8 @@ let emptyResult: {
 } = { selected: [], unchecked: 0, candidates: 0 };
 
 let lockDepth = 0;
+
+const lockStatuses: Array<{ title: string; detail: string } | undefined> = [];
 const ui: Record<string, unknown> = {};
 const messages: string[] = [];
 let currentDatabase: string | undefined;
@@ -215,7 +217,12 @@ loader._load = function (id, parent, isMain) {
     return {
       runtime: { uiState: ui },
       setUi: (value: object) => Object.assign(ui, value),
-      withLock: async (_ctx: unknown, run: () => Promise<unknown>) => {
+      withLock: async (
+        _ctx: unknown,
+        run: () => Promise<unknown>,
+        status?: { title: string; detail: string },
+      ) => {
+        lockStatuses.push(status);
         if (lockDepth) return undefined;
         lockDepth += 1;
 
@@ -314,6 +321,7 @@ beforeEach(() => {
   messages.length = 0;
   failRead = hideFirst = failedFirst = false;
   holdScan = undefined;
+  lockStatuses.length = 0;
   currentDatabase = undefined;
   searchPickers = [];
 });
@@ -993,6 +1001,34 @@ test('expanding the tree during an empty scan does not cancel it', async () => {
     );
   } finally {
     emptyHold = undefined;
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    manager.dispose();
+  }
+});
+
+test('select empty labels the sidebar as a scan and skips the unchecked note when every workspace was read', async () => {
+  const lines: string[] = [];
+
+  const manager = new Manager(context, log, (message) => lines.push(message));
+
+  try {
+    emptyResult = { selected: [entries[1]], unchecked: 0, candidates: 1 };
+    await manager.selectEmpty();
+
+    assert.deepEqual(lockStatuses.at(-1), {
+      title: 'Finding empty workspaces…',
+      detail: 'Checking workspaces for chat history.',
+    });
+
+    assert.notEqual(lockStatuses.at(-1)?.title, 'Preparing transfer…');
+
+    assert.match(
+      lines.at(-1) || '',
+      /^1 workspace with no chat history selected\.$/,
+    );
+
+    assert.doesNotMatch(lines.at(-1) || '', /could not be checked/);
+  } finally {
     emptyResult = { selected: [], unchecked: 0, candidates: 0 };
     manager.dispose();
   }

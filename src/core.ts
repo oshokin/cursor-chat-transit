@@ -174,17 +174,24 @@ export function currentIdentity(
   return undefined;
 }
 
-/** Inclusive/exclusive key bounds for `bubbleId:<uuid>:` rows. */
+/** Inclusive/exclusive key bounds for one composer's `bubbleId:<id>:` rows. */
 export function bubbleRange(composerId: string): {
   /** Inclusive lower bound for this composer's bubble keys. */
   lower: string;
   /** Exclusive upper bound for this composer's bubble keys. */
   upper: string;
 } {
+  const uuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const taskTool =
+    /^task-tool_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{8,16}$/i;
+
+  // `empty-state-draft` and `task-tool_<id>` are stored beside normal chats.
   if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      composerId,
-    )
+    composerId !== 'empty-state-draft' &&
+    !uuid.test(composerId) &&
+    !taskTool.test(composerId)
   ) {
     throw new TypeError(
       'Unsupported composer ID: validate other observed formats separately',

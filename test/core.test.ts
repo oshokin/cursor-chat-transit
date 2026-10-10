@@ -70,6 +70,17 @@ test('prefix bounds include only the selected composer', () => {
 
   assert.ok(`${lower}message` >= lower && `${lower}message` < upper);
   assert.throws(() => bubbleRange("a' OR 1=1 --"));
+  assert.throws(() => bubbleRange('not-a-uuid'));
+
+  for (const observed of [
+    'empty-state-draft',
+    'task-tool_a404505b-10a1-4846-b615-eec50b9c1bc',
+  ]) {
+    const bounds = bubbleRange(observed);
+
+    assert.equal(bounds.lower, `bubbleId:${observed}:`);
+    assert.ok(`${bounds.lower}message` < bounds.upper);
+  }
 });
 
 test('SQL text preserves apostrophes, NUL and Unicode without executable payload', () => {

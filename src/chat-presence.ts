@@ -52,10 +52,14 @@ export async function inspectChatPresence(
 
   if (conversation.items.length) return 'present';
   if (conversation.state === 'absent' && !options?.emptyShell) return 'unknown';
+  const conversationState = body.conversationState;
+
+  // A blank value stores no protobuf. Only a non-empty state other than `~` is unreadable.
   if (
-    body.conversationState !== undefined &&
-    body.conversationState !== null &&
-    body.conversationState !== '~'
+    conversationState !== undefined &&
+    conversationState !== null &&
+    conversationState !== '~' &&
+    !(typeof conversationState === 'string' && conversationState.trim() === '')
   )
     return 'unknown';
   if (blobKeysFromComposerBody(raw).status !== 'ok') return 'unknown';

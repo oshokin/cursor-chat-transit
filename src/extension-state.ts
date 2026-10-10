@@ -170,6 +170,13 @@ export async function withLock<T>(
   context: vscode.ExtensionContext,
   /** Work that runs while the lock is held. */
   fn: () => Promise<T>,
+  /** Sidebar copy for a lock that is not a transfer. Restored on release. */
+  status?: {
+    /** Title shown while the lock is held. */
+    title: string;
+    /** Detail shown while the lock is held. */
+    detail: string;
+  },
 ): Promise<T | undefined> {
   if (runtime.busy) {
     vscode.window.showWarningMessage('Cursor Chat Transit is already running.');
@@ -178,6 +185,15 @@ export async function withLock<T>(
   }
 
   runtime.busy = true;
+
+  const previousStatus = status
+    ? {
+        status: runtime.uiState.status,
+        statusTitle: runtime.uiState.statusTitle,
+        statusDetail: runtime.uiState.statusDetail,
+        statusItems: runtime.uiState.statusItems,
+      }
+    : undefined;
 
   setUi({
     busy: true,
@@ -188,8 +204,8 @@ export async function withLock<T>(
     currentItem: '',
     timingLabel: '',
     canRecoverLock: false,
-    statusTitle: 'Preparing transfer…',
-    statusDetail: 'Checking transfer availability.',
+    statusTitle: status?.title ?? 'Preparing transfer…',
+    statusDetail: status?.detail ?? 'Checking transfer availability.',
     statusItems: [],
     progress: undefined,
   });
@@ -232,6 +248,7 @@ export async function withLock<T>(
         currentItem: '',
         timingLabel:
           runtime.uiState.timingLabel?.split('\n')[0]?.split(' · ')[0] || '',
+        ...previousStatus,
       });
     }
   }
