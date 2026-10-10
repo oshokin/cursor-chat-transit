@@ -197,6 +197,12 @@ export async function withLock<T>(
   let lock: LockHandle | undefined;
 
   try {
+    void vscode.commands?.executeCommand?.(
+      'setContext',
+      'cursorChatTransit.manageBusy',
+      true,
+    );
+
     lock = await acquireLock(context.globalStorageUri.fsPath, 'transfer');
 
     return await fn();
@@ -207,6 +213,13 @@ export async function withLock<T>(
       clearInterval(runtime.progressTimer);
       runtime.progressTimer = undefined;
       runtime.busy = false;
+
+      void vscode.commands?.executeCommand?.(
+        'setContext',
+        'cursorChatTransit.manageBusy',
+        false,
+      );
+
       runtime.activeAbort = undefined;
       runtime.cancelSubscription?.dispose();
       runtime.cancelSubscription = undefined;

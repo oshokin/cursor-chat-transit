@@ -6,6 +6,8 @@ import type { ComposerHeader, WorkspaceEntry } from './types';
 export class ManagedSelection {
   /** Explicit workspace or chat scopes; exact IDs are resolved before confirmation. */
   private readonly items = new Map<string, ManagedNode>();
+  /** Bumps on every edit so a late scan cannot overwrite a newer selection. */
+  revision = 0;
   /** Scope-qualified identity. */
   /** Tree row being acted on. */
   private key(node: ManagedNode): string {
@@ -20,6 +22,7 @@ export class ManagedSelection {
   }
   /** Clear the whole selection, including hidden items. */
   clear(): void {
+    this.revision += 1;
     this.items.clear();
   }
   /** True for an explicit selection or a chat covered by its selected workspace. */
@@ -31,6 +34,7 @@ export class ManagedSelection {
   }
   /** Select workspace scopes in one pass instead of rescanning all selections per root. */
   selectWorkspaces(nodes: ManagedNode[]): void {
+    this.revision += 1;
     const workspaces = nodes.filter((node) => !node.chat && !node.error);
 
     const keys = new Set(
@@ -45,6 +49,7 @@ export class ManagedSelection {
   /** Change an explicit checkbox; an excluded child removes the parent selection. */
   set(node: ManagedNode, checked: boolean): void {
     if (node.error) return;
+    this.revision += 1;
     const parent = this.key({ workspace: node.workspace });
 
     if (!checked) {

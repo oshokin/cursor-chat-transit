@@ -15,6 +15,7 @@ let confirmationDetail = '';
 let decision: { title: string } | undefined;
 let busy = false;
 let workerFailure = false;
+let prepareRefusal = false;
 let outcome: ManagedDeleteResult;
 const ui: Record<string, unknown> = {};
 
@@ -33,9 +34,10 @@ const fake = {
   },
   window: {
     showWarningMessage: async (_title: string, options: { detail: string }) => {
-      events.push('confirm');
+      events.push(prepareRefusal ? 'warning' : 'confirm');
       confirmationTitle = _title;
       confirmationDetail = options.detail;
+      if (prepareRefusal) return new Promise(() => {});
       assert.match(options.detail, /Close all other Cursor windows/);
       assert.match(options.detail, /cannot be undone/);
 
@@ -98,7 +100,15 @@ loader._load = function (id, parent, isMain) {
       }) => {
         assert.equal(job.busyTimeoutMs, 0);
         events.push(job.kind);
-        if (job.kind === 'prepare-managed-delete')
+
+        if (job.kind === 'prepare-managed-delete') {
+          if (prepareRefusal)
+            return {
+              ok: false,
+              title: 'Cannot delete the selected data',
+              detail: 'No data was deleted.',
+            };
+
           return {
             ok: true,
             plan: {
@@ -114,6 +124,8 @@ loader._load = function (id, parent, isMain) {
               })),
             },
           };
+        }
+
         if (workerFailure) throw new Error('worker stopped');
 
         return outcome;
@@ -146,7 +158,7 @@ const targets: ManagedDeleteRequest[] = [
 beforeEach(() => {
   events.length = 0;
   decision = undefined;
-  busy = workerFailure = false;
+  busy = workerFailure = prepareRefusal = false;
 
   outcome = {
     outcomes: [
@@ -301,4 +313,61 @@ test('confirmation shows the resolved bulk count across workspaces', async () =>
   assert.match(confirmationDetail, /test — 2 chats/);
   assert.match(confirmationDetail, /other — 1 chat\b/);
   assert.equal(events.includes('delete-managed-data'), false);
+});
+
+test('a refusal notice does not keep the finished lock', async () => {
+  prepareRefusal = true;
+  assert.equal(await remove(context, log, targets), false);
+
+  assert.deepEqual(events, [
+    'lock',
+    'prepare-managed-delete',
+    'warning',
+    'unlock',
+  ]);
+
+  assert.equal(ui.status, 'failed');
+});
+
+test('deleted rows plus skipped rows are not reported as a clean success', async () => {
+  decision = { title: 'Delete chats' };
+
+  outcome = {
+    outcomes: [
+      {
+        kind: 'chats',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: ['deleted'],
+        chatIdsSkipped: ['kept'],
+        storage: 'not-requested',
+      },
+    ],
+  };
+
+  assert.equal(await remove(context, log, targets), true);
+  assert.equal(ui.status, 'partial');
+  assert.match(String(ui.statusDetail), /1 chat skipped/i);
+});
+
+test('an unknown directory result is not a completed deletion', async () => {
+  decision = { title: 'Delete chats' };
+
+  outcome = {
+    outcomes: [
+      {
+        kind: 'workspace-data',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: [],
+        chatIdsSkipped: [],
+        storage: 'unknown',
+        errorMessage: 'Workspace data was already gone.',
+      },
+    ],
+  };
+
+  assert.equal(await remove(context, log, targets), false);
+  assert.equal(ui.status, 'failed');
+  assert.doesNotMatch(String(ui.statusDetail), /^Deleted data/);
 });

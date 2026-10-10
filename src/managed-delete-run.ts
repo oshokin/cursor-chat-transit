@@ -4,16 +4,20 @@ import { deleteSelectedChats } from './chat-deletion';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import type {
   DeletionJob,
+  EmptyWorkspaceScan,
   ManagedDeleteOutcome,
   ManagedDeleteResult,
   ManagedPlanTarget,
   ManagedPrepareResult,
 } from './deletion-types';
-import { planTargetMatches } from './managed-delete-plan';
 import { workspacePresentation } from './workspace-presentation';
+import { assessWorkspaceHistory } from './workspace-history';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
+import { foreignImageRefusal } from './workspace-resources';
 import {
   databaseToken,
+  directoryIdentity,
+  sameDatabaseToken,
   resolveWorkspaceDirectory,
   removeWorkspaceDirectory,
   workspaceDataRefusal,
@@ -154,8 +158,10 @@ export async function prepareManagedDelete(
           detail: `${refusal}\nNo data was deleted.`,
         };
 
+      let directory: string;
+
       try {
-        await resolveWorkspaceDirectory(job.userDataRoot, entry);
+        directory = await resolveWorkspaceDirectory(job.userDataRoot, entry);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
@@ -184,16 +190,24 @@ export async function prepareManagedDelete(
         };
       }
 
-      if (ids.length) {
-        const ownership = await inspectDeletionOwnership(ctx, job.workspaces, [
-          { workspace: entry, ids },
-        ]);
+      const imageRefusal = await foreignImageRefusal(ctx, entry, ids);
 
-        if (!exclusivelyOwned(ownership.owners, entry, ids))
+      if (imageRefusal)
+        return {
+          ok: false,
+          title: 'Cannot delete the selected data',
+          detail: `“${presentation.name}” cannot be deleted: ${imageRefusal}`,
+        };
+
+      if (request.requireEmpty) {
+        const state = await assessWorkspaceHistory(ctx, entry);
+
+        if (state.state !== 'empty')
           return {
             ok: false,
             title: 'Cannot delete the selected data',
-            detail: `“${presentation.name}” contains chat history also referenced by another workspace.\nNo data was deleted. Clear this workspace from the selection and try again.`,
+            detail:
+              'Some selected workspaces are no longer empty. Nothing was deleted. Review the selection and try again.',
           };
       }
 
@@ -202,6 +216,8 @@ export async function prepareManagedDelete(
         workspace: entry,
         ids,
         token: await databaseToken(entry.workspaceDbPath),
+        directoryId: await directoryIdentity(directory),
+        requireEmpty: request.requireEmpty ? true : undefined,
         name: presentation.name,
         location: presentation.location,
         pathLabel: presentation.path,
@@ -225,18 +241,56 @@ export async function prepareManagedDelete(
     });
   }
 
+  const owned = targets.filter(
+    (target) => target.kind === 'workspace-data' && target.ids.length,
+  );
+
+  if (owned.length) {
+    const ownership = await inspectDeletionOwnership(
+      ctx,
+      job.workspaces,
+      owned.map((target) => ({ workspace: target.workspace, ids: target.ids })),
+    );
+
+    for (const target of owned)
+      if (!exclusivelyOwned(ownership.owners, target.workspace, target.ids))
+        return {
+          ok: false,
+          title: 'Cannot delete the selected data',
+          detail: `“${target.name}” contains chat history also referenced by another workspace.\nNo data was deleted. Clear this workspace from the selection and try again.`,
+        };
+  }
+
+  // Ownership reads can create or remove a WAL after the first stat.
+  // Sample every database once those readers have returned.
+  for (const target of targets)
+    target.token = await databaseToken(target.workspace.workspaceDbPath);
+
+  const globalTokens: Record<string, string> = {};
+
+  for (const target of targets) {
+    const database = target.workspace.globalDbPath;
+
+    if (globalTokens[database]) continue;
+    globalTokens[database] = await databaseToken(database);
+  }
+
   transferEvent({
     action: 'Workspace deletion prepared',
     status: 'info',
     detail: `${targets.length} targets`,
   });
 
-  return { ok: true, plan: { userDataRoot: job.userDataRoot, targets } };
+  return {
+    ok: true,
+    plan: { userDataRoot: job.userDataRoot, targets, globalTokens },
+  };
 }
 
 /**
  * Re-check the confirmed plan, delete exclusive history, then remove workspace directories.
  * SQLite and the filesystem are not one transaction. Earlier targets stay deleted.
+ * Ownership is read once per phase. Directories this operation already removed are not opened again.
  */
 export async function executeManagedDelete(
   /** Transfer hooks, timeouts, and cancellation. */
@@ -248,6 +302,25 @@ export async function executeManagedDelete(
   let cancelled = false;
   let uncertain = false;
   let error: string | undefined;
+  const removed = new Set<string>();
+  const acceptedGlobal = { ...(job.plan.globalTokens ?? {}) };
+  const quiet: TransferContext = { ...ctx, onPhase: undefined };
+
+  let ownership:
+    Awaited<ReturnType<typeof inspectDeletionOwnership>> | undefined;
+
+  /** Batch progress. Nested chat deletion does not publish its own 1/1. */
+  const report = () => {
+    ctx.onPhase?.('write', {
+      processed: outcomes.length,
+      total: job.plan.targets.length,
+      chats: outcomes.reduce(
+        (sum, outcome) => sum + outcome.chatIdsDeleted.length,
+        0,
+      ),
+      unit: 'workspaces',
+    });
+  };
 
   /** Record every target not yet started and stop the loop. */
   const stopAt = (index: number, message?: string) => {
@@ -255,7 +328,217 @@ export async function executeManagedDelete(
 
     for (const target of job.plan.targets.slice(index))
       outcomes.push(untouched(target, 'not-started', message));
+    report();
   };
+
+  /** True until this operation has committed a delete or removed a directory. */
+  const beforeAnyWrite = () =>
+    !outcomes.some(
+      (outcome) =>
+        outcome.chatIdsDeleted.length > 0 ||
+        outcome.storage === 'deleted' ||
+        outcome.storage === 'partial',
+    );
+
+  /** Global database identity. Own writes update `acceptedGlobal`; external writes do not. */
+  const assertGlobals = async () => {
+    const emptySelection = job.plan.targets.every(
+      (target) => target.requireEmpty,
+    );
+
+    for (const [database, token] of Object.entries(acceptedGlobal)) {
+      const now = await databaseToken(database);
+
+      if (sameDatabaseToken(token, now)) continue;
+
+      // Cursor rewrites globalStorage while the confirmation dialog is open.
+      // That clock is not chat history. requireEmpty targets are re-read instead.
+      if (emptySelection) {
+        acceptedGlobal[database] = now;
+        continue;
+      }
+
+      throw new Error(
+        'Workspace history changed during confirmation. Review the selection again.',
+      );
+    }
+  };
+
+  /** A database this operation did not remove must still be readable. */
+  const assertInventory = async () => {
+    for (const workspace of job.workspaces) {
+      if (removed.has(workspace.workspaceDbPath)) continue;
+
+      try {
+        await lstat(workspace.workspaceDbPath);
+      } catch (cause) {
+        if (!missingPath(cause)) throw cause;
+
+        const planned = job.plan.targets.some(
+          (target) =>
+            target.workspace.workspaceDbPath === workspace.workspaceDbPath,
+        );
+
+        // A selected directory that is already gone is reported per target.
+        // A different missing database still blocks the batch.
+        if (!planned)
+          throw new Error('A workspace database disappeared during deletion.', {
+            cause,
+          });
+      }
+    }
+  };
+
+  /** Re-read one target. `gone` is an already-missing directory, not a deletion we performed. */
+  const readTarget = async (target: ManagedPlanTarget) => {
+    const entry = sameEntry(job.workspaces, target.workspace);
+
+    if (entry.storageRoot !== job.plan.userDataRoot)
+      throw new Error(
+        'The user-data directory changed. Review the selection again.',
+      );
+
+    let token: string;
+
+    try {
+      token = await databaseToken(entry.workspaceDbPath);
+    } catch (cause) {
+      if (target.kind === 'workspace-data' && missingPath(cause))
+        return { gone: true as const, entry };
+
+      throw cause;
+    }
+
+    if (target.kind === 'chats') {
+      if (!sameDatabaseToken(target.token, token))
+        throw new Error(
+          'Selected chats changed during confirmation. Review the selection again.',
+        );
+
+      return {
+        gone: false as const,
+        entry,
+        ids: target.ids,
+        directory: undefined,
+      };
+    }
+
+    const refusal = await activeRefusal(entry, job);
+
+    if (refusal) throw new Error(refusal);
+
+    let directory: string;
+
+    try {
+      directory = await resolveWorkspaceDirectory(job.plan.userDataRoot, entry);
+    } catch (cause) {
+      if (missingPath(cause)) return { gone: true as const, entry };
+
+      throw cause;
+    }
+
+    if (
+      target.directoryId &&
+      (await directoryIdentity(directory)) !== target.directoryId
+    )
+      throw new Error(
+        'Workspace storage changed during confirmation. Review the selection again.',
+      );
+
+    const ids = [
+      ...new Set(
+        (await new WorkspaceHeaderReader(ctx).read(entry, true)).map(
+          (row) => row.composerId,
+        ),
+      ),
+    ];
+
+    const sameIds =
+      [...target.ids].sort().join('\n') === [...ids].sort().join('\n');
+
+    // A live Cursor process touches database files without adding chats.
+    // requireEmpty follows the composer index, not the file clock.
+    if (
+      !sameIds ||
+      (!target.requireEmpty && !sameDatabaseToken(target.token, token))
+    )
+      throw new Error(
+        target.requireEmpty && beforeAnyWrite()
+          ? 'Some selected workspaces are no longer empty. Nothing was deleted. Review the selection and try again.'
+          : 'Workspace history changed during confirmation. Review the selection again.',
+      );
+
+    if (target.requireEmpty) {
+      const history = await assessWorkspaceHistory(ctx, entry);
+
+      if (history.state !== 'empty')
+        throw new Error(
+          beforeAnyWrite()
+            ? 'Some selected workspaces are no longer empty. Nothing was deleted. Review the selection and try again.'
+            : 'Workspace history changed during confirmation. Review the selection again.',
+        );
+    }
+
+    const imageRefusal = await foreignImageRefusal(ctx, entry, ids);
+
+    if (imageRefusal) throw new Error(imageRefusal);
+
+    return { gone: false as const, entry, ids, directory };
+  };
+
+  if (ctx.signal?.aborted) {
+    for (const target of job.plan.targets)
+      outcomes.push(untouched(target, 'not-started', 'Deletion cancelled.'));
+    report();
+
+    return { outcomes, cancelled: true, error: 'Deletion cancelled.' };
+  }
+
+  try {
+    await assertGlobals();
+    await assertInventory();
+
+    const pending: Array<{ workspace: WorkspaceEntry; ids: string[] }> = [];
+
+    for (const target of job.plan.targets) {
+      const read = await readTarget(target);
+
+      if (!read.gone && read.ids.length)
+        pending.push({ workspace: read.entry, ids: read.ids });
+    }
+
+    if (pending.length) {
+      ownership = await inspectDeletionOwnership(ctx, job.workspaces, pending);
+
+      for (const target of pending)
+        if (!exclusivelyOwned(ownership.owners, target.workspace, target.ids))
+          throw new Error(
+            'A selected workspace contains chat history also referenced by another workspace.',
+          );
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+
+    const aborted =
+      ctx.signal?.aborted === true ||
+      (cause instanceof Error && cause.name === 'AbortError');
+
+    for (const target of job.plan.targets)
+      outcomes.push(
+        untouched(
+          target,
+          'not-started',
+          aborted ? 'Deletion cancelled.' : message,
+        ),
+      );
+    report();
+
+    return {
+      outcomes,
+      cancelled: aborted,
+      error: aborted ? 'Deletion cancelled.' : message,
+    };
+  }
 
   for (const [index, target] of job.plan.targets.entries()) {
     if (ctx.signal?.aborted) {
@@ -264,49 +547,47 @@ export async function executeManagedDelete(
       break;
     }
 
+    let committed: string[] = [];
+    let recorded = false;
+
     try {
-      const entry = sameEntry(job.workspaces, target.workspace);
+      await assertGlobals();
+      await assertInventory();
+      const read = await readTarget(target);
 
-      if (entry.storageRoot !== job.plan.userDataRoot)
-        throw new Error(
-          'The user-data directory changed. Review the selection again.',
+      if (read.gone) {
+        outcomes.push(
+          untouched(target, 'unknown', 'Workspace data was already gone.'),
         );
-      let token: string;
 
-      try {
-        token = await databaseToken(entry.workspaceDbPath);
-      } catch (cause) {
-        if (target.kind === 'workspace-data' && missingPath(cause)) {
-          outcomes.push(
-            untouched(target, 'unknown', 'Workspace data was already gone.'),
-          );
-
-          continue;
-        }
-
-        throw cause;
+        report();
+        continue;
       }
 
-      if (target.kind === 'chats') {
-        if (token !== target.token)
-          throw new Error(
-            'Selected chats changed during confirmation. Review the selection again.',
-          );
+      const live = job.workspaces.filter(
+        (workspace) => !removed.has(workspace.workspaceDbPath),
+      );
 
-        const deleted = await deleteSelectedChats(ctx, job.workspaces, [
-          { workspace: entry, ids: target.ids },
-        ]);
+      if (target.kind === 'chats') {
+        const deleted = await deleteSelectedChats(
+          quiet,
+          live,
+          [{ workspace: read.entry, ids: target.ids }],
+          ownership,
+        );
 
         outcomes.push({
           kind: 'chats',
-          workspaceKey: entry.workspaceDbPath,
+          workspaceKey: read.entry.workspaceDbPath,
           label: target.name,
-          chatIdsDeleted: idsFrom(deleted.deleted, entry.workspaceDbPath),
-          chatIdsSkipped: idsFrom(deleted.skipped, entry.workspaceDbPath),
+          chatIdsDeleted: idsFrom(deleted.deleted, read.entry.workspaceDbPath),
+          chatIdsSkipped: idsFrom(deleted.skipped, read.entry.workspaceDbPath),
           storage: 'not-requested',
           errorMessage: deleted.error,
         });
 
+        recorded = true;
+        report();
         uncertain ||= deleted.uncertain === true;
         cancelled ||= deleted.cancelled === true;
 
@@ -315,63 +596,31 @@ export async function executeManagedDelete(
           break;
         }
 
+        acceptedGlobal[read.entry.globalDbPath] = await databaseToken(
+          read.entry.globalDbPath,
+        );
+
         continue;
       }
 
-      const refusal = await activeRefusal(entry, job);
-
-      if (refusal) throw new Error(refusal);
-      let directory: string;
-
-      try {
-        directory = await resolveWorkspaceDirectory(
-          job.plan.userDataRoot,
-          entry,
-        );
-      } catch (cause) {
-        if (missingPath(cause)) {
-          outcomes.push(
-            untouched(target, 'unknown', 'Workspace data was already gone.'),
-          );
-
-          continue;
-        }
-
-        throw cause;
-      }
-
-      const ids = [
-        ...new Set(
-          (await new WorkspaceHeaderReader(ctx).read(entry, true)).map(
-            (row) => row.composerId,
-          ),
-        ),
-      ];
-
-      if (!planTargetMatches(target, ids, token))
+      if (
+        read.ids.length &&
+        ownership &&
+        !exclusivelyOwned(ownership.owners, read.entry, read.ids)
+      )
         throw new Error(
-          'Workspace history changed during confirmation. Review the selection again.',
+          `“${target.name}” contains chat history also referenced by another workspace.`,
         );
 
-      if (ids.length) {
-        const ownership = await inspectDeletionOwnership(ctx, job.workspaces, [
-          { workspace: entry, ids },
-        ]);
+      if (read.ids.length) {
+        const deleted = await deleteSelectedChats(
+          quiet,
+          live,
+          [{ workspace: read.entry, ids: read.ids }],
+          ownership,
+        );
 
-        if (!exclusivelyOwned(ownership.owners, entry, ids))
-          throw new Error(
-            `“${target.name}” contains chat history also referenced by another workspace.`,
-          );
-      }
-
-      let chatIdsDeleted: string[] = [];
-
-      if (ids.length) {
-        const deleted = await deleteSelectedChats(ctx, job.workspaces, [
-          { workspace: entry, ids },
-        ]);
-
-        chatIdsDeleted = idsFrom(deleted.deleted, entry.workspaceDbPath);
+        committed = idsFrom(deleted.deleted, read.entry.workspaceDbPath);
         uncertain ||= deleted.uncertain === true;
 
         if (
@@ -382,11 +631,18 @@ export async function executeManagedDelete(
         ) {
           outcomes.push({
             kind: 'workspace-data',
-            workspaceKey: entry.workspaceDbPath,
+            workspaceKey: read.entry.workspaceDbPath,
             label: target.name,
-            chatIdsDeleted,
-            chatIdsSkipped: idsFrom(deleted.skipped, entry.workspaceDbPath),
-            storage: 'not-started',
+            chatIdsDeleted: committed,
+            chatIdsSkipped: idsFrom(
+              deleted.skipped,
+              read.entry.workspaceDbPath,
+            ),
+            storage: deleted.cancelled
+              ? 'not-started'
+              : committed.length
+                ? 'partial'
+                : 'not-started',
             errorMessage:
               deleted.error ||
               'Ownership changed before workspace data could be removed.',
@@ -396,14 +652,18 @@ export async function executeManagedDelete(
           stopAt(index + 1, deleted.error);
           break;
         }
+
+        acceptedGlobal[read.entry.globalDbPath] = await databaseToken(
+          read.entry.globalDbPath,
+        );
       }
 
       if (ctx.signal?.aborted) {
         outcomes.push({
           kind: 'workspace-data',
-          workspaceKey: entry.workspaceDbPath,
+          workspaceKey: read.entry.workspaceDbPath,
           label: target.name,
-          chatIdsDeleted,
+          chatIdsDeleted: committed,
           chatIdsSkipped: [],
           storage: 'not-started',
           errorMessage: 'Deletion cancelled after chat history was deleted.',
@@ -414,22 +674,48 @@ export async function executeManagedDelete(
         break;
       }
 
+      if (!read.directory)
+        throw new Error('Workspace directory could not be resolved.');
+
+      if (
+        target.directoryId &&
+        (await directoryIdentity(read.directory)) !== target.directoryId
+      ) {
+        outcomes.push({
+          kind: 'workspace-data',
+          workspaceKey: read.entry.workspaceDbPath,
+          label: target.name,
+          chatIdsDeleted: committed,
+          chatIdsSkipped: [],
+          storage: 'partial',
+          errorMessage:
+            'Workspace storage changed before its directory could be removed.',
+        });
+
+        stopAt(
+          index + 1,
+          'Workspace storage changed before its directory could be removed.',
+        );
+
+        break;
+      }
+
       transferEvent({
         action: 'Remove workspace data started',
         status: 'info',
-        path: directory,
+        path: read.directory,
       });
 
       try {
-        await removeWorkspaceDirectory(directory);
+        await removeWorkspaceDirectory(read.directory);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
 
         outcomes.push({
           kind: 'workspace-data',
-          workspaceKey: entry.workspaceDbPath,
+          workspaceKey: read.entry.workspaceDbPath,
           label: target.name,
-          chatIdsDeleted,
+          chatIdsDeleted: committed,
           chatIdsSkipped: [],
           storage: 'partial',
           errorCode:
@@ -444,13 +730,13 @@ export async function executeManagedDelete(
       }
 
       try {
-        await lstat(directory);
+        await lstat(read.directory);
 
         outcomes.push({
           kind: 'workspace-data',
-          workspaceKey: entry.workspaceDbPath,
+          workspaceKey: read.entry.workspaceDbPath,
           label: target.name,
-          chatIdsDeleted,
+          chatIdsDeleted: committed,
           chatIdsSkipped: [],
           storage: 'partial',
           errorMessage: 'Workspace data directory is still present.',
@@ -464,31 +750,141 @@ export async function executeManagedDelete(
             ? cause.code
             : undefined;
 
-        if (code !== 'ENOENT') throw cause;
+        if (code !== 'ENOENT') {
+          const message =
+            cause instanceof Error ? cause.message : String(cause);
+
+          outcomes.push({
+            kind: 'workspace-data',
+            workspaceKey: read.entry.workspaceDbPath,
+            label: target.name,
+            chatIdsDeleted: committed,
+            chatIdsSkipped: [],
+            storage: 'partial',
+            errorMessage: message,
+          });
+
+          stopAt(index + 1, message);
+          break;
+        }
       }
+
+      removed.add(read.entry.workspaceDbPath);
 
       transferEvent({
         action: 'Remove workspace data completed',
         status: 'completed',
-        path: directory,
+        path: read.directory,
       });
 
       outcomes.push({
         kind: 'workspace-data',
-        workspaceKey: entry.workspaceDbPath,
+        workspaceKey: read.entry.workspaceDbPath,
         label: target.name,
-        chatIdsDeleted,
+        chatIdsDeleted: committed,
         chatIdsSkipped: [],
         storage: 'deleted',
       });
+
+      report();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
 
-      outcomes.push(untouched(target, 'not-started', message));
+      if (recorded) {
+        stopAt(index + 1, message);
+        break;
+      }
+
+      outcomes.push({
+        kind: target.kind,
+        workspaceKey: target.workspace.workspaceDbPath,
+        label: target.name,
+        chatIdsDeleted: committed,
+        chatIdsSkipped: [],
+        storage: committed.length ? 'partial' : 'not-started',
+        errorMessage: message,
+      });
+
       stopAt(index + 1, message);
       break;
     }
   }
 
   return { outcomes, cancelled, uncertain, error };
+}
+
+/**
+ * Find workspaces whose supported indexes contain no chat history.
+ * One ownership pass covers the whole scan. The current window is not selected.
+ */
+export async function findEmptyWorkspaces(
+  /** Transfer hooks, timeouts, and cancellation. */
+  ctx: TransferContext,
+  /** Scan job without the kind tag. */
+  job: Extract<DeletionJob, { kind: 'find-empty-workspaces' }>,
+): Promise<EmptyWorkspaceScan> {
+  let unchecked = 0;
+  let candidates = 0;
+  const empties: Array<{ workspace: WorkspaceEntry; ids: string[] }> = [];
+
+  transferEvent({
+    action: 'Find empty workspaces started',
+    status: 'info',
+    detail: `${job.workspaces.length} workspaces`,
+  });
+
+  for (const [index, entry] of job.workspaces.entries()) {
+    ctx.signal?.throwIfAborted();
+
+    ctx.onPhase?.('prepare', {
+      processed: index + 1,
+      total: job.workspaces.length,
+      unit: 'workspaces',
+    });
+
+    const history = await assessWorkspaceHistory(ctx, entry);
+
+    if (history.state === 'unknown' || history.state === 'unavailable') {
+      unchecked += 1;
+      continue;
+    }
+
+    if (history.state !== 'empty') continue;
+    candidates += 1;
+    if (await activeRefusal(entry, job)) continue;
+    empties.push({ workspace: entry, ids: history.ids });
+  }
+
+  const selected: WorkspaceEntry[] = [];
+  const owned = empties.filter((item) => item.ids.length);
+
+  let ownership:
+    Awaited<ReturnType<typeof inspectDeletionOwnership>> | undefined;
+
+  if (owned.length)
+    ownership = await inspectDeletionOwnership(
+      ctx,
+      job.workspaces,
+      owned.map((item) => ({ workspace: item.workspace, ids: item.ids })),
+    );
+
+  for (const item of empties) {
+    if (
+      item.ids.length &&
+      (!ownership ||
+        !exclusivelyOwned(ownership.owners, item.workspace, item.ids))
+    )
+      continue;
+
+    if (await foreignImageRefusal(ctx, item.workspace, item.ids)) continue;
+    selected.push(item.workspace);
+  }
+
+  transferEvent({
+    action: 'Find empty workspaces completed',
+    status: 'completed',
+    detail: `candidates=${candidates} selected=${selected.length} unchecked=${unchecked}`,
+  });
+
+  return { selected, unchecked, candidates };
 }

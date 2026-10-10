@@ -142,6 +142,12 @@ export function workspaceDataRefusal(
     target?: string;
   },
 ): string | undefined {
+  const sameIdentity =
+    !!current.identity &&
+    !!entry.identity &&
+    workspaceKey(current.identity.kind, current.identity.uri) ===
+      workspaceKey(entry.identity.kind, entry.identity.uri);
+
   if (!current.emptyWindow && !current.database && !current.identity)
     return currentWindowMessage;
   if (
@@ -150,14 +156,15 @@ export function workspaceDataRefusal(
     resolved.database === resolved.target
   )
     return currentWindowMessage;
+
+  // A named current database whose real path cannot be read is still the current window.
   if (
-    !current.database &&
-    current.identity &&
-    entry.identity &&
-    workspaceKey(current.identity.kind, current.identity.uri) ===
-      workspaceKey(entry.identity.kind, entry.identity.uri)
+    current.database &&
+    !resolved?.database &&
+    (sameIdentity || !current.identity)
   )
     return currentWindowMessage;
+  if (!current.database && sameIdentity) return currentWindowMessage;
 
   return undefined;
 }
@@ -234,7 +241,18 @@ export async function removeWorkspaceDirectory(
   throw new Error('Workspace data directory is still present.');
 }
 
-/** Size and mtime token for the database and its WAL, without reading rows. */
+/** `dev:ino` of a directory. Path text is not an identity. */
+export async function directoryIdentity(directory: string): Promise<string> {
+  const stats = await lstat(directory);
+
+  return `${stats.dev}:${stats.ino}`;
+}
+
+/**
+ * Size and mtime token for the database and its WAL, without reading rows.
+ * Only a missing WAL is `0:0`. A permission or I/O error refuses the check.
+ * This is not a guarantee against a Cursor process that is still writing.
+ */
 export async function databaseToken(database: string): Promise<string> {
   const main = await lstat(database);
   let wal = '0:0';
@@ -243,9 +261,33 @@ export async function databaseToken(database: string): Promise<string> {
     const extra = await lstat(`${database}-wal`);
 
     wal = `${extra.mtimeMs}:${extra.size}`;
-  } catch {
-    /* A database without a WAL is a valid token. */
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? error.code
+        : undefined;
+
+    if (code !== 'ENOENT') throw error;
   }
 
   return `${main.mtimeMs}:${main.size}:${wal}`;
+}
+
+/**
+ * True when two tokens name the same database bytes.
+ * An empty WAL may appear after our own reader exits; a stored write changes the main file or the WAL size.
+ */
+export function sameDatabaseToken(expected: string, now: string): boolean {
+  if (expected === now) return true;
+  const left = expected.split(':');
+  const right = now.split(':');
+
+  if (left.length !== 4 || right.length !== 4) return false;
+
+  return (
+    left[0] === right[0] &&
+    left[1] === right[1] &&
+    left[3] === '0' &&
+    right[3] === '0'
+  );
 }

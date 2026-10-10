@@ -8,4 +8,9 @@ export interface ManagedNode {
   chat?: ComposerHeader;
   /** Read failure shown instead of that workspace's chats. */
   error?: string;
+  /**
+   * Select empty workspaces set this on a root.
+   * Manual check, Select all, and uncheck/recheck leave it unset.
+   */
+  requireEmpty?: true;
 }

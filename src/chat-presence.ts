@@ -16,6 +16,8 @@ export type ChatPresence = 'present' | 'empty' | 'missing' | 'unknown';
 export async function inspectChatPresence(
   conn: SqliteConn,
   id: string,
+  /** When set, a composer shell with no history counts as empty. */
+  options?: { emptyShell?: boolean },
 ): Promise<ChatPresence> {
   conn.signal?.throwIfAborted();
   const range = bubbleRange(id);
@@ -48,8 +50,8 @@ export async function inspectChatPresence(
   if (body.composerId !== undefined && body.composerId !== id) return 'unknown';
   const conversation = splitConversation(body);
 
-  if (conversation.state === 'absent') return 'unknown';
   if (conversation.items.length) return 'present';
+  if (conversation.state === 'absent' && !options?.emptyShell) return 'unknown';
   if (
     body.conversationState !== undefined &&
     body.conversationState !== null &&

@@ -25,6 +25,8 @@ export async function deleteSelectedChats(
   workspaces: WorkspaceEntry[],
   /** Chats selected for deletion. */
   targets: DeleteTarget[],
+  /** Ownership already read for this phase. Omitting it reads once. */
+  ownership?: Awaited<ReturnType<typeof inspectDeletionOwnership>>,
 ): Promise<DeleteResult> {
   const result: DeleteResult = { deleted: [], skipped: [] };
   let commitPending = false;
@@ -36,18 +38,16 @@ export async function deleteSelectedChats(
 
     const normalized = normalizeTargets(targets, known);
 
-    const ownership = await inspectDeletionOwnership(
-      ctx,
-      workspaces,
-      normalized,
-    );
+    const resolved =
+      ownership ??
+      (await inspectDeletionOwnership(ctx, workspaces, normalized));
 
     for (const [index, target] of normalized.entries()) {
       ctx.signal?.throwIfAborted();
       const workspace = target.workspace;
 
       const ids = target.ids.filter((id) => {
-        const owners = ownership.owners.get(
+        const owners = resolved.owners.get(
           JSON.stringify([workspace.globalDbPath, id]),
         );
 
@@ -104,8 +104,8 @@ export async function deleteSelectedChats(
                 workspace,
                 session,
                 selected,
-                ownership.globals.get(workspace.globalDbPath)!,
-                ownership.headers.get(workspace.workspaceDbPath)!,
+                resolved.globals.get(workspace.globalDbPath)!,
+                resolved.headers.get(workspace.workspaceDbPath)!,
               );
 
               await deleteHeaderReferences(

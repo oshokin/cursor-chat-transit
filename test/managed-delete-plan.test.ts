@@ -10,6 +10,7 @@ import {
   selectionSummary,
   storageLabel,
 } from '../src/managed-delete-plan';
+import { ManagedSelection } from '../src/managed-selection';
 import type { WorkspaceEntry } from '../src/types';
 
 function entry(id: string, name: string): WorkspaceEntry {
@@ -192,4 +193,171 @@ test('the manifest shows one trash action per row state', () => {
   assert.match(trash[1].when, /managedChat/);
   assert.match(trash[2].when, /managedWorkspace/);
   assert.doesNotMatch(trash[2].when, /managedCurrentWorkspace/);
+});
+
+test('unknown, skipped, and failed results are not described as deleted', () => {
+  assert.doesNotMatch(
+    describeManagedResult({
+      outcomes: [
+        {
+          kind: 'workspace-data',
+          workspaceKey: 'a',
+          label: 'A',
+          chatIdsDeleted: [],
+          chatIdsSkipped: [],
+          storage: 'unknown',
+          errorMessage: 'Workspace data was already gone.',
+        },
+      ],
+    }),
+    /^Deleted data/,
+  );
+
+  assert.match(
+    describeManagedResult({
+      outcomes: [
+        {
+          kind: 'chats',
+          workspaceKey: 'a',
+          label: 'A',
+          chatIdsDeleted: ['deleted'],
+          chatIdsSkipped: ['kept'],
+          storage: 'not-requested',
+        },
+      ],
+    }),
+    /1 chat skipped/i,
+  );
+
+  assert.doesNotMatch(
+    describeManagedResult({
+      error: 'SQL failure',
+      outcomes: [
+        {
+          kind: 'chats',
+          workspaceKey: 'a',
+          label: 'A',
+          chatIdsDeleted: [],
+          chatIdsSkipped: [],
+          storage: 'not-requested',
+          errorMessage: 'SQL failure',
+        },
+      ],
+    }),
+    /^Deleted data/,
+  );
+});
+
+test('select empty keeps requireEmpty and a manual check does not', () => {
+  const automatic = requestsFromNodes([{ workspace: two, requireEmpty: true }]);
+
+  assert.equal(automatic[0]?.kind, 'workspace-data');
+  if (automatic[0]?.kind !== 'workspace-data') return;
+  assert.equal(automatic[0].requireEmpty, true);
+
+  const manual = requestsFromNodes([{ workspace: two }]);
+
+  assert.equal(manual[0]?.kind, 'workspace-data');
+  if (manual[0]?.kind !== 'workspace-data') return;
+  assert.equal(manual[0].requireEmpty, undefined);
+
+  const selection = new ManagedSelection();
+  const revision = selection.revision;
+
+  selection.selectWorkspaces([{ workspace: two, requireEmpty: true }]);
+  assert.notEqual(selection.revision, revision);
+  assert.equal(selection.values()[0]?.requireEmpty, true);
+  selection.set({ workspace: two }, true);
+  assert.equal(selection.values()[0]?.requireEmpty, undefined);
+});
+
+test('an empty-only plan uses the empty-history confirmation', () => {
+  const copy = confirmationCopy({
+    userDataRoot: '/profile',
+    targets: [
+      {
+        kind: 'workspace-data',
+        workspace: one,
+        ids: [],
+        token: 't',
+        name: 'ordermanager',
+        location: 'This computer',
+        pathLabel: '/home/oleg/projects/ordermanager',
+        requireEmpty: true,
+      },
+      {
+        kind: 'workspace-data',
+        workspace: two,
+        ids: ['shell'],
+        token: 't',
+        name: 'old-demo',
+        location: 'This computer',
+        pathLabel: '/tmp/old-demo',
+        requireEmpty: true,
+      },
+    ],
+  });
+
+  assert.equal(
+    copy.title,
+    'Delete data for 2 workspaces with no chat history?',
+  );
+
+  assert.equal(copy.confirm, 'Delete workspace data');
+  assert.match(copy.detail, /No chat history was found/);
+  assert.match(copy.detail, /1 empty chat record/);
+  assert.doesNotMatch(copy.detail, /Individual chats/);
+});
+
+test('the toolbar keeps one visibility slot, moves refresh to the overflow menu, and registers select empty once', () => {
+  const manifest = JSON.parse(
+    readFileSync(path.join(__dirname, '../package.json'), 'utf8'),
+  ) as {
+    contributes: {
+      commands: { command: string }[];
+      menus: {
+        'view/title': { command: string; group: string }[];
+        commandPalette: { command: string; when: string }[];
+      };
+    };
+  };
+
+  const commands = manifest.contributes.commands.filter(
+    (command) => command.command === 'cursorChatTransit.manageSelectEmpty',
+  );
+
+  assert.equal(commands.length, 1);
+
+  const title = manifest.contributes.menus['view/title'];
+
+  const group = (command: string) =>
+    title.filter((item) => item.command === command).map((item) => item.group);
+
+  assert.deepEqual(group('cursorChatTransit.manageRefresh'), ['1_overflow@1']);
+  assert.deepEqual(group('cursorChatTransit.manageShowAll'), ['navigation@2']);
+
+  assert.deepEqual(group('cursorChatTransit.manageShowRemovable'), [
+    'navigation@2',
+  ]);
+
+  assert.deepEqual(group('cursorChatTransit.manageSelectEmpty'), [
+    'navigation@3',
+  ]);
+
+  assert.deepEqual(group('cursorChatTransit.manageSelectAll'), [
+    'navigation@4',
+  ]);
+
+  assert.deepEqual(group('cursorChatTransit.manageClearSelection'), [
+    'navigation@4',
+  ]);
+
+  assert.deepEqual(group('cursorChatTransit.manageDelete'), ['navigation@6']);
+
+  assert.equal(
+    manifest.contributes.menus.commandPalette.filter(
+      (item) => item.command === 'cursorChatTransit.manageSelectEmpty',
+    ).length,
+    1,
+  );
 });

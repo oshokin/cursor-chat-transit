@@ -19,7 +19,11 @@ import {
   listHostEntries,
   prepareSqlite,
 } from './extension-workspaces';
-import { confirmationCopy, describeManagedResult } from './managed-delete-plan';
+import {
+  confirmationCopy,
+  describeManagedResult,
+  managedResultStatus,
+} from './managed-delete-plan';
 import { notifyCompletion } from './notifications';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
@@ -114,13 +118,17 @@ export async function deleteManagedChats(
           statusItems: [prepared.detail],
         });
 
-        await vscode.window.showWarningMessage(
-          prepared.title,
-          {
-            modal: true,
-            detail: prepared.detail,
-          },
-          { title: 'Close', isCloseAffordance: true },
+        notifyCompletion(() =>
+          Promise.resolve(
+            vscode.window.showWarningMessage(
+              prepared.title,
+              {
+                modal: true,
+                detail: prepared.detail,
+              },
+              { title: 'Close', isCloseAffordance: true },
+            ),
+          ).then(() => undefined),
         );
 
         return;
@@ -233,21 +241,7 @@ export async function deleteManagedChats(
       needsRestart ||= refresh;
       const summary = describeManagedResult(result);
 
-      const skippedOnly =
-        !changed &&
-        result.outcomes.some((outcome) => outcome.chatIdsSkipped.length);
-
-      const status = result.uncertain
-        ? 'partial'
-        : result.cancelled
-          ? 'cancelled'
-          : result.error
-            ? changed
-              ? 'partial'
-              : 'failed'
-            : skippedOnly
-              ? 'incomplete'
-              : 'completed';
+      const status = managedResultStatus(result);
 
       log.fact(`Deletion summary: ${summary}`);
       if (result.error) log.note(`Deletion stopped: ${result.error}`);

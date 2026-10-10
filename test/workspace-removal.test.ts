@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -17,6 +18,7 @@ import type { WorkspaceEntry } from '../src/types';
 import {
   assertStorageId,
   currentWindowMessage,
+  databaseToken,
   removeWorkspaceDirectory,
   resolveWorkspaceDirectory,
   workspaceDataRefusal,
@@ -258,4 +260,50 @@ test('an empty window can delete another workspace, and an unknown current windo
     }),
     currentWindowMessage,
   );
+});
+
+test('an unresolved current database still refuses the matching identity', async () => {
+  const { root, entry } = await layout();
+
+  try {
+    assert.equal(
+      workspaceDataRefusal(
+        entry,
+        {
+          database: '/missing/current.vscdb',
+          identity: entry.identity,
+          emptyWindow: false,
+        },
+        { target: entry.workspaceDbPath },
+      ),
+      currentWindowMessage,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a WAL that cannot be stat is not treated as absent', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cct-wal-'));
+  const directory = path.join(root, 'db');
+  const database = path.join(directory, 'state.vscdb');
+
+  try {
+    await mkdir(directory);
+    await writeFile(database, 'db');
+    await writeFile(`${database}-wal`, 'wal');
+    await chmod(directory, 0o000);
+
+    await assert.rejects(
+      databaseToken(database),
+      (error: NodeJS.ErrnoException) => {
+        assert.equal(error.code, 'EACCES');
+
+        return true;
+      },
+    );
+  } finally {
+    await chmod(directory, 0o700);
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -32,6 +32,11 @@ export type ManagedDeleteRequest =
       kind: 'workspace-data';
       /** Physical workspace/global storage pair. */
       workspace: WorkspaceEntry;
+      /**
+       * Set only by Select empty workspaces.
+       * Rechecked before any write. A later manual check does not keep it.
+       */
+      requireEmpty?: true;
     }
   | {
       /** Delete these chats and keep the workspace directory. */
@@ -58,6 +63,10 @@ export interface ManagedPlanTarget {
   location: string;
   /** Project or storage path shown in the dialog. */
   pathLabel: string;
+  /** `dev:ino` of the workspace directory captured with the plan. */
+  directoryId?: string;
+  /** Select empty workspaces asked for a workspace that still has no history. */
+  requireEmpty?: true;
 }
 
 /** Read-only plan. Execution rejects it when the profile or token no longer matches. */
@@ -66,6 +75,11 @@ export interface ManagedDeletePlan {
   userDataRoot: string;
   /** Targets in preview order. */
   targets: ManagedPlanTarget[];
+  /**
+   * Global database and WAL identity captured with the plan.
+   * Keyed by `globalDbPath`. Message bodies are not stored.
+   */
+  globalTokens?: Record<string, string>;
 }
 
 /** Per-target result. SQL success is not workspace deletion. */
@@ -172,4 +186,22 @@ export type DeletionJob = DeletionConnection &
         /** Fresh inventory. A changed profile rejects the plan. */
         workspaces: WorkspaceEntry[];
       } & ManagedWindowFacts)
+    | ({
+        /** Read-only empty-history scan. It does not change the checked set. */
+        kind: 'find-empty-workspaces';
+        /** User-data directory the inventory belongs to. */
+        userDataRoot: string;
+        /** Full Manage Chats inventory, including rows hidden by the eye toggle. */
+        workspaces: WorkspaceEntry[];
+      } & ManagedWindowFacts)
   );
+
+/** Read-only result of Select empty workspaces. */
+export interface EmptyWorkspaceScan {
+  /** Workspaces that may be checked. The current window is omitted. */
+  selected: WorkspaceEntry[];
+  /** Rows that could not be proved empty or nonempty. */
+  unchecked: number;
+  /** Empty history, including the current window, which is not selected. */
+  candidates: number;
+}

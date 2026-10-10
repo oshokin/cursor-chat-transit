@@ -2,6 +2,7 @@ import { deleteSelectedChats } from './chat-deletion';
 import type { DeletionJob } from './deletion-types';
 import {
   executeManagedDelete,
+  findEmptyWorkspaces,
   prepareManagedDelete,
 } from './managed-delete-run';
 import { exportToFile, listWorkspaceChats } from './export-transfer';
@@ -132,6 +133,17 @@ async function run(
     );
   if (job.kind === 'delete-managed-data')
     return executeManagedDelete(
+      {
+        ...job,
+        signal: abort.signal,
+        onPhase: (phase, metrics) =>
+          sendUpdate({ type: 'phase', phase, metrics }),
+        onNote: (note) => sendUpdate({ type: 'note', note }),
+      },
+      job,
+    );
+  if (job.kind === 'find-empty-workspaces')
+    return findEmptyWorkspaces(
       {
         ...job,
         signal: abort.signal,

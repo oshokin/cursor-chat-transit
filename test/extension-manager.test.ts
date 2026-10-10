@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Module from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { ManagedDeleteRequest } from '../src/deletion-types';
+import type { DeletionJob, ManagedDeleteRequest } from '../src/deletion-types';
 import type { ManagedNode } from '../src/managed-node';
 import type * as vscode from 'vscode';
 import type { TransitLog } from '../src/output-ui';
@@ -36,11 +36,21 @@ const registeredCommands = new Map<string, (node?: unknown) => Promise<void>>();
 const nativeContexts = new Map<string, unknown>();
 let registeredManager: import('../src/extension-manager').ChatManager;
 let nativeSelection: ManagedNode[] = [];
-const jobs: (TransferJob | StatisticsJob | CatalogueJob)[] = [];
+const jobs: (TransferJob | StatisticsJob | CatalogueJob | DeletionJob)[] = [];
 let failRead = false;
 let hideFirst = false;
 let failedFirst = false;
 let holdScan: (() => Promise<void>) | undefined;
+let emptyHold: Promise<void> | undefined;
+let emptyFail = false;
+
+let emptyResult: {
+  selected: WorkspaceEntry[];
+  unchecked: number;
+  candidates: number;
+} = { selected: [], unchecked: 0, candidates: 0 };
+
+let lockDepth = 0;
 const ui: Record<string, unknown> = {};
 const messages: string[] = [];
 let currentDatabase: string | undefined;
@@ -205,7 +215,16 @@ loader._load = function (id, parent, isMain) {
     return {
       runtime: { uiState: ui },
       setUi: (value: object) => Object.assign(ui, value),
-      withLock: async (_ctx: unknown, run: () => Promise<void>) => run(),
+      withLock: async (_ctx: unknown, run: () => Promise<unknown>) => {
+        if (lockDepth) return undefined;
+        lockDepth += 1;
+
+        try {
+          return await run();
+        } finally {
+          lockDepth -= 1;
+        }
+      },
       linkedSignal: () => new AbortController().signal,
       finishPhaseProgress() {},
       attachPhaseProgress: () => () => {},
@@ -220,7 +239,7 @@ loader._load = function (id, parent, isMain) {
   if (id === './transfer-process')
     return {
       runTransfer: async (
-        job: TransferJob | StatisticsJob | CatalogueJob,
+        job: TransferJob | StatisticsJob | CatalogueJob | DeletionJob,
         handlers: {
           signal: AbortSignal;
           onStatistics?: (row: StatisticsUpdate) => void;
@@ -244,6 +263,13 @@ loader._load = function (id, parent, isMain) {
           if (failRead) throw new Error('Database unavailable');
 
           return { failed: failedFirst ? 1 : 0 };
+        }
+
+        if (job.kind === 'find-empty-workspaces') {
+          await emptyHold;
+          if (emptyFail) throw new Error('scan failed');
+
+          return emptyResult;
         }
 
         if (failRead) throw new Error('Database unavailable');
@@ -754,4 +780,172 @@ test('manifest exposes one row trash action per checkbox state and keeps toolbar
       .map((item: { command: string }) => item.command),
     ['cursorChatTransit.manageDelete'],
   );
+});
+
+test('select empty replaces checks, ignores a late scan, and does not start twice', async () => {
+  const lines: string[] = [];
+
+  const manager = new Manager(context, log, (message) => lines.push(message));
+
+  try {
+    await manager.select({ workspace: entries[0] }, true);
+    emptyResult = { selected: [entries[1]], unchecked: 2, candidates: 1 };
+    const selected = await manager.selectEmpty();
+
+    assert.equal(
+      selected?.workspace.workspaceDbPath,
+      entries[1].workspaceDbPath,
+    );
+
+    assert.equal(manager.selection.values().length, 1);
+    assert.equal(manager.selection.values()[0]?.requireEmpty, true);
+
+    assert.match(
+      lines.at(-1) || '',
+      /1 workspace with no chat history selected/,
+    );
+
+    assert.match(lines.at(-1) || '', /2 could not be checked/);
+
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    assert.equal(await manager.selectEmpty(), undefined);
+    assert.equal(manager.selection.values()[0]?.requireEmpty, true);
+    assert.match(lines.at(-1) || '', /Selection unchanged/);
+
+    let release = () => {};
+
+    emptyHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    emptyResult = { selected: [entries[0]], unchecked: 0, candidates: 1 };
+
+    const before = jobs.filter(
+      (job) => job.kind === 'find-empty-workspaces',
+    ).length;
+
+    const pending = manager.selectEmpty();
+
+    for (
+      let i = 0;
+      i < 50 &&
+      jobs.filter((job) => job.kind === 'find-empty-workspaces').length ===
+        before;
+      i++
+    )
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const overlapped = manager.selectEmpty();
+
+    assert.equal(await overlapped, undefined);
+    await manager.select({ workspace: entries[1] }, true);
+    release();
+    emptyHold = undefined;
+    assert.equal(await pending, undefined);
+
+    assert.equal(
+      manager.selection.values()[0]?.workspace.workspaceDbPath,
+      entries[1].workspaceDbPath,
+    );
+
+    assert.equal(manager.selection.values()[0]?.requireEmpty, undefined);
+    assert.match(lines.at(-1) || '', /Selection changed while checking/);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'find-empty-workspaces').length,
+      before + 1,
+    );
+  } finally {
+    emptyHold = undefined;
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    manager.dispose();
+  }
+});
+
+test('a failed empty scan keeps the previous selection', async () => {
+  const manager = new Manager(context, log, () => undefined);
+
+  try {
+    await manager.select({ workspace: entries[0] }, true);
+    emptyFail = true;
+    await assert.rejects(manager.selectEmpty(), /scan failed/);
+
+    assert.equal(
+      manager.selection.values()[0]?.workspace.workspaceDbPath,
+      entries[0].workspaceDbPath,
+    );
+
+    assert.equal(manager.selection.values()[0]?.requireEmpty, undefined);
+  } finally {
+    emptyFail = false;
+    manager.dispose();
+  }
+});
+
+test('refresh during an empty scan drops the late result and the eye toggle keeps requireEmpty', async () => {
+  const lines: string[] = [];
+
+  const manager = new Manager(context, log, (message) => lines.push(message));
+
+  try {
+    manager.selection.selectWorkspaces([
+      { workspace: entries[0], requireEmpty: true },
+    ]);
+
+    manager.toggleVisibility();
+    assert.equal(manager.selection.values()[0]?.requireEmpty, true);
+    manager.clearSelection();
+    assert.equal(manager.selection.values().length, 0);
+
+    let release = () => {};
+
+    emptyHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    emptyResult = { selected: [entries[1]], unchecked: 0, candidates: 1 };
+    const pending = manager.selectEmpty();
+
+    for (
+      let i = 0;
+      i < 50 && !jobs.some((job) => job.kind === 'find-empty-workspaces');
+      i++
+    )
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+    manager.refresh();
+    release();
+    emptyHold = undefined;
+    assert.equal(await pending, undefined);
+    assert.equal(manager.selection.values().length, 0);
+    assert.match(lines.at(-1) || '', /Selection changed while checking/);
+  } finally {
+    emptyHold = undefined;
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    manager.dispose();
+  }
+});
+
+test('select empty reveals a hidden empty root by turning show-all on', async () => {
+  hideFirst = true;
+  const manager = new Manager(context, log);
+
+  try {
+    assert.equal((await manager.getChildren()).length, 1);
+    emptyResult = { selected: [entries[0]], unchecked: 1, candidates: 1 };
+    await manager.selectEmpty();
+    const roots = await manager.getChildren();
+
+    assert.equal(roots.length, 2);
+    assert.equal(manager.selection.values()[0]?.requireEmpty, true);
+
+    assert.equal(
+      manager.selection.values()[0]?.workspace.workspaceDbPath,
+      entries[0].workspaceDbPath,
+    );
+  } finally {
+    hideFirst = false;
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    manager.dispose();
+  }
 });

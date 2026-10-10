@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   matchesWorkspaceStorage,
   readGlobalHeaderSources,
@@ -13,6 +14,20 @@ import type {
 } from './types';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
 
+/** Per-call ownership passes. Parallel tests do not share the count. */
+const ownershipReads = new AsyncLocalStorage<{ count: number }>();
+
+/** Count ownership passes inside `fn`. */
+export async function countOwnershipReads<T>(
+  /** Work whose ownership passes are counted. */
+  fn: () => Promise<T>,
+): Promise<{ result: T; reads: number }> {
+  const box = { count: 0 };
+  const result = await ownershipReads.run(box, fn);
+
+  return { result, reads: box.count };
+}
+
 /** Read ownership once; retain only selected IDs, and fail closed on unreadable storage. */
 export async function inspectDeletionOwnership(
   /** Transfer hooks, timeouts, and cancellation. */
@@ -22,6 +37,9 @@ export async function inspectDeletionOwnership(
   /** Chats selected for deletion. */
   targets: DeleteTarget[],
 ) {
+  const box = ownershipReads.getStore();
+
+  if (box) box.count += 1;
   const reader = new WorkspaceHeaderReader(ctx);
   const selected = new Map<string, Set<string>>();
 

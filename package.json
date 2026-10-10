@@ -166,6 +166,12 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "cursorChatTransit.manageSelectEmpty",
+        "title": "Select empty workspaces",
+        "category": "Cursor Chat Transit",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "cursorChatTransit.manageCheck",
         "title": "Check selected item",
         "category": "Cursor Chat Transit",
@@ -236,7 +242,12 @@
         {
           "command": "cursorChatTransit.manageRefresh",
           "when": "view == cursorChatTransit.manage",
-          "group": "navigation@2"
+          "group": "1_overflow@1"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectEmpty",
+          "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageBusy",
+          "group": "navigation@3"
         },
         {
           "command": "cursorChatTransit.manageSelectAll",
@@ -251,12 +262,12 @@
         {
           "command": "cursorChatTransit.manageShowAll",
           "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageShowAll",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "cursorChatTransit.manageShowRemovable",
           "when": "view == cursorChatTransit.manage && cursorChatTransit.manageShowAll",
-          "group": "navigation@3"
+          "group": "navigation@2"
         },
         {
           "command": "cursorChatTransit.manageCheckSelected",
@@ -294,6 +305,10 @@
       "commandPalette": [
         {
           "command": "cursorChatTransit.manageRefresh",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectEmpty",
           "when": "false"
         },
         {

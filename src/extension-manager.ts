@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
-import { showFail } from './extension-errors';
+import { isAbort, showFail } from './extension-errors';
 import { checkManagedNodes } from './extension-managed-check';
 import { deleteManagedChats } from './extension-managed-delete';
 import { transferSettings } from './extension-settings';
+import { linkedSignal, withLock } from './extension-state';
 import {
   currentWorkspaceDatabase,
   listHostEntries,
@@ -19,6 +20,7 @@ import { orderedChatHeaders, workspacePickItems } from './picker';
 import { listIncompleteWorkspaceDirs } from './paths';
 import { workspaceStatisticsKey, type StatisticsUpdate } from './statistics';
 import { runTransfer } from './transfer-process';
+import type { EmptyWorkspaceScan } from './deletion-types';
 import type { ComposerHeader, WorkspaceEntry } from './types';
 import { workspacePresentation } from './workspace-presentation';
 
@@ -52,12 +54,15 @@ export class ChatManager
     'Select workspace data or individual chats. Project files are kept.';
   /** Temporary status that outranks the selection summary. */
   private operationMessage?: string;
+  /** Invalidates a scan when the tree is refreshed or disposed. */
+  private generation = 0;
 
   /** Apply one checkbox change and update all affected rows. */
   async select(node: ManagedNode, checked: boolean): Promise<void> {
     const generation = this.loading.signal;
     const parent = { workspace: node.workspace };
 
+    this.operationMessage = undefined;
     if (!node.chat && this.isCurrentRoot(node)) return;
     if (!checked && node.chat && this.selection.has(parent)) {
       const siblings = await this.getChildren(parent);
@@ -77,6 +82,7 @@ export class ChatManager
   }
   /** Select visible workspace rows that can be deleted. The current window is excluded. */
   async selectAll(): Promise<void> {
+    this.operationMessage = undefined;
     const roots = await this.getChildren();
 
     this.selection.selectWorkspaces(
@@ -88,6 +94,7 @@ export class ChatManager
   }
   /** Clear hidden and visible selections alike. */
   clearSelection(): void {
+    this.operationMessage = undefined;
     this.selection.clear();
     this.publishMessage();
     this.changed.fire(undefined);
@@ -112,6 +119,8 @@ export class ChatManager
 
   /** Resolve checked scopes before row fallback; keyboard focus never changes deletion targets. */
   async deleteSelected(node?: ManagedNode): Promise<void> {
+    this.loading.abort();
+    await Promise.allSettled([...this.lists.values()]);
     const checked = this.selection.values();
 
     const requests = requestsFromNodes(
@@ -120,6 +129,124 @@ export class ChatManager
 
     if (await deleteManagedChats(this.context, this.operations, requests))
       this.refresh();
+  }
+
+  /**
+   * Replace the checked set with workspaces that have no supported chat history.
+   * Hidden rows are included. A selection edit during the scan keeps the user's set.
+   */
+  async selectEmpty(): Promise<ManagedNode | undefined> {
+    const generation = this.generation;
+    const revision = this.selection.revision;
+
+    this.operationMessage = 'Finding empty workspaces…';
+    this.publishMessage();
+
+    let scan: EmptyWorkspaceScan | undefined;
+
+    try {
+      scan = await withLock(this.context, async () => {
+        const sqlite = await prepareSqlite(this.context);
+        const host = listHostEntries();
+
+        return vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Finding empty workspaces…',
+            cancellable: true,
+          },
+          (progress, token) =>
+            runTransfer<EmptyWorkspaceScan>(
+              {
+                kind: 'find-empty-workspaces',
+                ...sqlite,
+                ...transferSettings(),
+                userDataRoot: host.userDir,
+                workspaces: host.entries,
+                database: currentWorkspaceDatabase(this.context),
+                identity: host.identity,
+                emptyWindow:
+                  !vscode.workspace.workspaceFolders?.length &&
+                  !vscode.workspace.workspaceFile,
+              },
+              {
+                signal: linkedSignal(token),
+                onPhase: (_phase, metrics) => {
+                  const message = `Checked ${metrics?.processed || 0} of ${metrics?.total || host.entries.length} workspaces`;
+
+                  progress.report({ message });
+                  this.operationMessage = `Finding empty workspaces… ${message}`;
+                  this.publishMessage();
+                },
+              },
+            ),
+        );
+      });
+    } catch (error) {
+      this.operationMessage = undefined;
+      this.publishMessage();
+      if (isAbort(error)) return undefined;
+
+      throw error;
+    }
+
+    if (!scan) {
+      this.operationMessage = undefined;
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    if (
+      generation !== this.generation ||
+      revision !== this.selection.revision
+    ) {
+      this.operationMessage =
+        'Selection changed while checking. Run Select empty workspaces again.';
+
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    if (!scan.selected.length) {
+      this.operationMessage = scan.unchecked
+        ? `No empty workspaces found. Selection unchanged. ${scan.unchecked} could not be checked.`
+        : 'No empty workspaces found. Selection unchanged.';
+
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    this.showAll = true;
+
+    void vscode.commands.executeCommand(
+      'setContext',
+      'cursorChatTransit.manageShowAll',
+      true,
+    );
+
+    this.selection.clear();
+
+    this.selection.selectWorkspaces(
+      scan.selected.map((workspace) => ({ workspace, requireEmpty: true })),
+    );
+
+    const roots = await this.getChildren();
+
+    this.operationMessage = `${scan.selected.length} workspace${scan.selected.length === 1 ? '' : 's'} with no chat history selected.${scan.unchecked ? ` ${scan.unchecked} could not be checked.` : ''}`;
+    this.publishMessage();
+    this.changed.fire(undefined);
+
+    const first = scan.selected[0];
+
+    return roots.find(
+      (node) =>
+        !node.chat &&
+        node.workspace.workspaceDbPath === first.workspaceDbPath &&
+        node.workspace.globalDbPath === first.globalDbPath,
+    );
   }
 
   /** Physical database of the workspace open in this window. */
@@ -167,6 +294,7 @@ export class ChatManager
 
   /** Stop loads and release the tree event. */
   dispose(): void {
+    this.generation += 1;
     this.loading.abort();
     clearTimeout(this.repaint);
     this.changed.dispose();
@@ -174,6 +302,7 @@ export class ChatManager
 
   /** Drop cached chat lists and check results, then redraw. */
   refresh(): void {
+    this.generation += 1;
     this.loading.abort();
     this.loading = new AbortController();
     this.roots = undefined;
@@ -736,6 +865,16 @@ export function registerManager(
       manageRefresh: () => manager.refresh(),
       manageCheck: (node) => manager.check(node || view.selection[0]),
       manageSelectAll: () => manager.selectAll(),
+      manageSelectEmpty: async () => {
+        const first = await manager.selectEmpty();
+
+        if (first)
+          await view.reveal(first, {
+            select: false,
+            focus: false,
+            expand: false,
+          });
+      },
       manageClearSelection: () => manager.clearSelection(),
       manageShowAll: () => manager.toggleVisibility(),
       manageShowRemovable: () => manager.toggleVisibility(),

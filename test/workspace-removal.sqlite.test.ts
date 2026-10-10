@@ -9,13 +9,17 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { sqlText } from '../src/core';
 import {
   executeManagedDelete,
+  findEmptyWorkspaces,
   prepareManagedDelete,
 } from '../src/managed-delete-run';
+import { assessWorkspaceHistory } from '../src/workspace-history';
+import { countOwnershipReads } from '../src/deletion-ownership';
 import { withDirectoryRemoval } from '../src/workspace-removal';
 import { observeTransfer } from '../src/transfer-events';
 import { listWorkspaceEntries } from '../src/paths';
@@ -345,7 +349,12 @@ test('chat-only deletion keeps the workspace directory', { skip }, async () => {
       emptyWindow: true,
     });
 
-    assert.equal(result.outcomes[0]?.storage, 'not-requested');
+    assert.equal(
+      result.outcomes[0]?.storage,
+      'not-requested',
+      JSON.stringify(result),
+    );
+
     assert.deepEqual(result.outcomes[0]?.chatIdsDeleted, [A]);
 
     assert.equal(
@@ -1099,6 +1108,491 @@ test(
 
       await lstat(one.workspaceDbPath);
       await lstat(empty.workspaceDbPath);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'two exclusive workspaces both delete after the first directory is gone',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [
+          { kind: 'workspace-data', workspace: one },
+          { kind: 'workspace-data', workspace: shared },
+        ],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const counted = await countOwnershipReads(() =>
+        executeManagedDelete(ctx, {
+          kind: 'delete-managed-data',
+          executable: ctx.executable,
+          initFile: ctx.initFile,
+          plan: prepared.plan,
+          workspaces: [one, empty, shared],
+          emptyWindow: true,
+        }),
+      );
+
+      assert.equal(
+        counted.result.outcomes[1]?.storage,
+        'deleted',
+        JSON.stringify(counted.result),
+      );
+
+      assert.equal(counted.reads, 1);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('a stale second target blocks every write', { skip }, async () => {
+  const { root, ctx, one, empty, shared } = await profile();
+
+  try {
+    const prepared = await prepareManagedDelete(ctx, {
+      kind: 'prepare-managed-delete',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      userDataRoot: root,
+      requests: [
+        { kind: 'workspace-data', workspace: one },
+        { kind: 'workspace-data', workspace: shared },
+      ],
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+
+    await execSqlScript({
+      ...ctx,
+      database: shared.workspaceDbPath,
+      sql: "INSERT INTO ItemTable VALUES ('changed-after-confirmation','yes');",
+    });
+
+    const result = await executeManagedDelete(ctx, {
+      kind: 'delete-managed-data',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      plan: prepared.plan,
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(
+      result.outcomes.some((outcome) => outcome.storage === 'deleted'),
+      false,
+      JSON.stringify(result),
+    );
+
+    await lstat(one.workspaceDbPath);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'a changed global message invalidates the plan before any write',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `UPDATE cursorDiskKV SET value='{"text":"new user message"}' WHERE key='bubbleId:${A}:message';`,
+      });
+
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        plan: prepared.plan,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(
+        result.outcomes.some((outcome) => outcome.storage === 'deleted'),
+        false,
+        JSON.stringify(result),
+      );
+
+      await lstat(one.workspaceDbPath);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'batch progress counts every target, including an empty directory',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+    const phases: Array<{ processed?: number; total?: number }> = [];
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [
+          { kind: 'workspace-data', workspace: one },
+          { kind: 'workspace-data', workspace: empty },
+        ],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const result = await executeManagedDelete(
+        {
+          ...ctx,
+          onPhase: (_phase, metrics) => {
+            if (metrics) phases.push(metrics);
+          },
+        },
+        {
+          kind: 'delete-managed-data',
+          executable: ctx.executable,
+          initFile: ctx.initFile,
+          plan: prepared.plan,
+          workspaces: [one, empty, shared],
+          emptyWindow: true,
+        },
+      );
+
+      assert.equal(
+        result.outcomes.filter((outcome) => outcome.storage === 'deleted')
+          .length,
+        2,
+      );
+
+      assert.ok(
+        phases.some(
+          (metrics) => metrics.processed === 2 && metrics.total === 2,
+        ),
+        JSON.stringify(phases),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('a missing unselected database blocks the batch', { skip }, async () => {
+  const { root, ctx, one, empty, shared } = await profile();
+
+  try {
+    const prepared = await prepareManagedDelete(ctx, {
+      kind: 'prepare-managed-delete',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      userDataRoot: root,
+      requests: [
+        { kind: 'workspace-data', workspace: one },
+        { kind: 'workspace-data', workspace: shared },
+      ],
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+
+    await rm(path.dirname(empty.workspaceDbPath), {
+      recursive: true,
+      force: true,
+    });
+
+    const result = await executeManagedDelete(ctx, {
+      kind: 'delete-managed-data',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      plan: prepared.plan,
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(
+      result.outcomes.some((outcome) => outcome.storage === 'deleted'),
+      false,
+    );
+
+    await lstat(one.workspaceDbPath);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'an image referenced by another chat refuses workspace removal',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+    const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+    try {
+      await mkdir(path.join(path.dirname(one.workspaceDbPath), 'images'));
+
+      await writeFile(
+        path.join(path.dirname(one.workspaceDbPath), 'images', `${image}.png`),
+        'png',
+      );
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${B}:image','{"images":[{"uuid":"${image}"}]}');`,
+      });
+
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, false);
+
+      await lstat(
+        path.join(path.dirname(one.workspaceDbPath), 'images', `${image}.png`),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test('a directory replaced after SQL is not removed', { skip }, async () => {
+  const { root, ctx, one, empty, shared } = await profile();
+  const directory = path.dirname(one.workspaceDbPath);
+
+  try {
+    const prepared = await prepareManagedDelete(ctx, {
+      kind: 'prepare-managed-delete',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      userDataRoot: root,
+      requests: [{ kind: 'workspace-data', workspace: one }],
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+
+    const result = await observeTransfer(
+      {
+        event: (event) => {
+          if (event.action !== 'Delete chat' || event.status !== 'completed')
+            return;
+
+          rmSync(directory, { recursive: true, force: true });
+          mkdirSync(directory, { recursive: true });
+          writeFileSync(path.join(directory, 'replacement'), 'kept');
+        },
+      },
+      () =>
+        executeManagedDelete(ctx, {
+          kind: 'delete-managed-data',
+          executable: ctx.executable,
+          initFile: ctx.initFile,
+          plan: prepared.plan,
+          workspaces: [one, empty, shared],
+          emptyWindow: true,
+        }),
+    );
+
+    assert.notEqual(result.outcomes[0]?.storage, 'deleted');
+    assert.deepEqual(result.outcomes[0]?.chatIdsDeleted, [A]);
+
+    assert.equal(
+      await readFile(path.join(directory, 'replacement'), 'utf8'),
+      'kept',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('requireEmpty ignores an unrelated global write', { skip }, async () => {
+  const { root, ctx, one, empty, shared } = await profile();
+
+  try {
+    const prepared = await prepareManagedDelete(ctx, {
+      kind: 'prepare-managed-delete',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      userDataRoot: root,
+      requests: [
+        { kind: 'workspace-data', workspace: empty, requireEmpty: true },
+      ],
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(prepared.ok, true);
+    if (!prepared.ok) return;
+
+    await execSqlScript({
+      ...ctx,
+      database: empty.globalDbPath,
+      sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${B}:later','{"text":"created later"}');`,
+    });
+
+    const deleted = await executeManagedDelete(ctx, {
+      kind: 'delete-managed-data',
+      executable: ctx.executable,
+      initFile: ctx.initFile,
+      plan: prepared.plan,
+      workspaces: [one, empty, shared],
+      emptyWindow: true,
+    });
+
+    assert.equal(
+      deleted.outcomes[0]?.storage,
+      'deleted',
+      JSON.stringify(deleted),
+    );
+
+    await assert.rejects(lstat(empty.workspaceDbPath));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'requireEmpty refuses a workspace that gained its own composer',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+    const gained = '55555555-5555-4555-8555-555555555555';
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [
+          { kind: 'workspace-data', workspace: empty, requireEmpty: true },
+        ],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      await execSqlScript({
+        ...ctx,
+        database: empty.workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(
+          JSON.stringify({
+            allComposers: [{ composerId: gained }],
+            selectedComposerIds: [gained],
+            lastFocusedComposerIds: [gained],
+          }),
+        )} WHERE key='composer.composerData';`,
+      });
+
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        plan: prepared.plan,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.match(result.error || '', /no longer empty/);
+      assert.equal(result.outcomes[0]?.storage, 'not-started');
+      await lstat(empty.workspaceDbPath);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'empty history is classified without treating a bubble as empty',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      assert.equal((await assessWorkspaceHistory(ctx, empty)).state, 'empty');
+      assert.equal((await assessWorkspaceHistory(ctx, shared)).state, 'empty');
+      assert.equal((await assessWorkspaceHistory(ctx, one)).state, 'present');
+
+      const scan = await findEmptyWorkspaces(ctx, {
+        kind: 'find-empty-workspaces',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.deepEqual(scan.selected.map((entry) => entry.storageId).sort(), [
+        'empty',
+        'shared',
+      ]);
+
+      const current = await findEmptyWorkspaces(ctx, {
+        kind: 'find-empty-workspaces',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        workspaces: [one, empty, shared],
+        database: empty.workspaceDbPath,
+        identity: empty.identity,
+        emptyWindow: false,
+      });
+
+      assert.equal(
+        current.selected.some((entry) => entry.storageId === 'empty'),
+        false,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
