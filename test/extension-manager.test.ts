@@ -949,3 +949,51 @@ test('select empty reveals a hidden empty root by turning show-all on', async ()
     manager.dispose();
   }
 });
+
+test('expanding the tree during an empty scan does not cancel it', async () => {
+  const lines: string[] = [];
+
+  const manager = new Manager(context, log, (message) => lines.push(message));
+
+  try {
+    let release = () => {};
+
+    emptyHold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    emptyResult = { selected: [entries[1]], unchecked: 0, candidates: 1 };
+    const pending = manager.selectEmpty();
+
+    for (
+      let i = 0;
+      i < 50 && !jobs.some((job) => job.kind === 'find-empty-workspaces');
+      i++
+    )
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const roots = await manager.getChildren();
+
+    await manager.getChildren(roots[0]);
+    release();
+    emptyHold = undefined;
+
+    const selected = await pending;
+
+    assert.equal(
+      selected?.workspace.workspaceDbPath,
+      entries[1].workspaceDbPath,
+    );
+
+    assert.equal(manager.selection.values()[0]?.requireEmpty, true);
+
+    assert.match(
+      lines.at(-1) || '',
+      /1 workspace with no chat history selected/,
+    );
+  } finally {
+    emptyHold = undefined;
+    emptyResult = { selected: [], unchecked: 0, candidates: 0 };
+    manager.dispose();
+  }
+});
