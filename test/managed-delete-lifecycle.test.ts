@@ -4,15 +4,18 @@ import Module from 'node:module';
 import type * as vscode from 'vscode';
 import type { TransitLog } from '../src/output-ui';
 import type { WorkspaceEntry } from '../src/types';
-import type { DeleteResult } from '../src/deletion-types';
+import type {
+  ManagedDeleteRequest,
+  ManagedDeleteResult,
+} from '../src/deletion-types';
 
 const events: string[] = [];
 let confirmationTitle = '';
 let confirmationDetail = '';
-let decision: string | undefined;
+let decision: { title: string } | undefined;
 let busy = false;
 let workerFailure = false;
-let outcome: DeleteResult;
+let outcome: ManagedDeleteResult;
 const ui: Record<string, unknown> = {};
 
 const runtime = {
@@ -21,6 +24,7 @@ const runtime = {
 };
 
 const fake = {
+  workspace: {},
   ProgressLocation: { Notification: 15 },
   commands: {
     executeCommand: async () => {
@@ -78,14 +82,38 @@ loader._load = function (id, parent, isMain) {
   if (id === './extension-workspaces')
     return {
       prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
-      listHostEntries: () => ({ entries: [] }),
+      listHostEntries: () => ({
+        entries: [],
+        userDir: '/fixture',
+        identity: undefined,
+      }),
+      currentWorkspaceDatabase: () => undefined,
     };
   if (id === './transfer-process')
     return {
-      runTransfer: async (job: { kind: string; busyTimeoutMs: number }) => {
-        assert.equal(job.kind, 'delete-chats');
+      runTransfer: async (job: {
+        kind: string;
+        busyTimeoutMs: number;
+        requests?: ManagedDeleteRequest[];
+      }) => {
         assert.equal(job.busyTimeoutMs, 0);
-        events.push('worker');
+        events.push(job.kind);
+        if (job.kind === 'prepare-managed-delete')
+          return {
+            ok: true,
+            plan: {
+              userDataRoot: '/fixture',
+              targets: (job.requests || []).map((request) => ({
+                kind: request.kind,
+                workspace: request.workspace,
+                ids: request.kind === 'chats' ? request.ids : [],
+                token: 't',
+                name: request.workspace.storageId,
+                location: 'This computer',
+                pathLabel: '/demo',
+              })),
+            },
+          };
         if (workerFailure) throw new Error('worker stopped');
 
         return outcome;
@@ -111,65 +139,124 @@ const workspace = {
   globalDbPath: '/fixture/global',
 } as WorkspaceEntry;
 
-const targets = [{ workspace, ids: ['chat'] }];
+const targets: ManagedDeleteRequest[] = [
+  { kind: 'chats', workspace, ids: ['chat'] },
+];
 
 beforeEach(() => {
   events.length = 0;
   decision = undefined;
   busy = workerFailure = false;
-  outcome = { deleted: ['chat'], skipped: [] };
+
+  outcome = {
+    outcomes: [
+      {
+        kind: 'chats',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: ['chat'],
+        chatIdsSkipped: [],
+        storage: 'not-requested',
+      },
+    ],
+  };
+
   for (const key of Object.keys(ui)) delete ui[key];
 });
 
 test('cancelled deletion performs no worker job and preserves a prior restart requirement', async () => {
   ui.importNeedsRestart = true;
   assert.equal(await remove(context, log, targets), false);
-  assert.deepEqual(events, ['lock', 'confirm', 'unlock']);
+
+  assert.deepEqual(events, [
+    'lock',
+    'prepare-managed-delete',
+    'confirm',
+    'unlock',
+  ]);
+
   assert.equal(ui.importNeedsRestart, true);
 });
 
 test('busy operation cannot start a deletion or quit Cursor', async () => {
   busy = true;
-  decision = 'Delete chats';
+  decision = { title: 'Delete chats' };
   assert.equal(await remove(context, log, targets), false);
   assert.deepEqual(events, []);
 });
 
 test('confirmed deletion releases its lock despite an undismissed notice and enables Quit', async () => {
-  decision = 'Delete chats';
+  decision = { title: 'Delete chats' };
   assert.equal(await remove(context, log, targets), true);
-  assert.deepEqual(events, ['lock', 'confirm', 'worker', 'unlock']);
+
+  assert.deepEqual(events, [
+    'lock',
+    'prepare-managed-delete',
+    'confirm',
+    'delete-managed-data',
+    'unlock',
+  ]);
+
   assert.equal(ui.importNeedsRestart, true);
   assert.equal(ui.status, 'completed');
   assert.equal(runtime.progressTimer, undefined);
 });
 
 test('skipped-only result does not enable Quit or claim a mutation', async () => {
-  decision = 'Delete chats';
-  outcome = { deleted: [], skipped: ['shared chat'] };
+  decision = { title: 'Delete chats' };
+
+  outcome = {
+    outcomes: [
+      {
+        kind: 'chats',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: [],
+        chatIdsSkipped: ['shared chat'],
+        storage: 'not-requested',
+      },
+    ],
+  };
+
   assert.equal(await remove(context, log, targets), false);
   assert.equal(ui.importNeedsRestart, false);
   assert.equal(ui.status, 'incomplete');
 });
 
 test('partial cancellation retains committed counts and enables Quit', async () => {
-  decision = 'Delete chats';
+  decision = { title: 'Delete chats' };
 
   outcome = {
-    deleted: ['committed'],
-    skipped: [],
     cancelled: true,
     error: 'Cancelled',
+    outcomes: [
+      {
+        kind: 'chats',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: ['committed'],
+        chatIdsSkipped: [],
+        storage: 'not-requested',
+      },
+      {
+        kind: 'workspace-data',
+        workspaceKey: '/fixture/other',
+        label: 'other',
+        chatIdsDeleted: [],
+        chatIdsSkipped: [],
+        storage: 'not-started',
+      },
+    ],
   };
 
   assert.equal(await remove(context, log, targets), true);
   assert.equal(ui.status, 'cancelled');
   assert.equal(ui.importNeedsRestart, true);
-  assert.match(String(ui.statusDetail), /1 chats deleted/);
+  assert.match(String(ui.statusDetail), /1 chat/);
 });
 
 test('a lost worker result is reported as uncertain and releases all UI state', async () => {
-  decision = 'Delete chats';
+  decision = { title: 'Delete chats' };
   workerFailure = true;
   assert.equal(await remove(context, log, targets), true);
   assert.equal(ui.status, 'failed');
@@ -178,28 +265,40 @@ test('a lost worker result is reported as uncertain and releases all UI state', 
 });
 
 test('uncertain commit enables Quit even without a confirmed deleted count', async () => {
-  decision = 'Delete chats';
+  decision = { title: 'Delete chats' };
 
   outcome = {
-    deleted: [],
-    skipped: [],
-    error: 'Commit acknowledgement lost',
     uncertain: true,
+    error: 'Commit acknowledgement lost',
+    outcomes: [
+      {
+        kind: 'chats',
+        workspaceKey: '/fixture/ws',
+        label: 'test',
+        chatIdsDeleted: [],
+        chatIdsSkipped: [],
+        storage: 'not-requested',
+      },
+    ],
   };
 
   assert.equal(await remove(context, log, targets), true);
   assert.equal(ui.importNeedsRestart, true);
-  assert.match(String(ui.statusDetail), /final commit outcome unknown/);
+  assert.match(String(ui.statusDetail), /final result is unknown/);
 });
 
 test('confirmation shows the resolved bulk count across workspaces', async () => {
   await remove(context, log, [
-    { workspace, ids: ['a', 'b'] },
-    { workspace: { ...workspace, storageId: 'other' }, ids: ['c'] },
+    { kind: 'chats', workspace, ids: ['a', 'b'] },
+    {
+      kind: 'chats',
+      workspace: { ...workspace, storageId: 'other' },
+      ids: ['c'],
+    },
   ]);
 
   assert.equal(confirmationTitle, 'Delete 3 selected chats?');
-  assert.match(confirmationDetail, /\(test\): 2 chats/);
-  assert.match(confirmationDetail, /\(other\): 1 chat\b/);
-  assert.equal(events.includes('worker'), false);
+  assert.match(confirmationDetail, /test — 2 chats/);
+  assert.match(confirmationDetail, /other — 1 chat\b/);
+  assert.equal(events.includes('delete-managed-data'), false);
 });

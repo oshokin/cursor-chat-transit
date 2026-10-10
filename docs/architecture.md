@@ -69,14 +69,15 @@ Global header enumeration gives an explicit storage ID priority over the URI: a 
 
 ### Composer and message records
 
-| Record or field                    | Handling                                                                                                        |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `composerData:<composerId>`        | Read a bounded composer JSON value; remap known identity fields for a new copy                                  |
-| `fullConversationHeadersOnly`      | Preserve conversation order and references to stored messages                                                   |
-| `bubbleId:<composerId>:<bubbleId>` | Read by an indexed key range; preserve payload text and remap known IDs                                         |
-| `conversationState`                | Inspect supported `~`-prefixed protobuf state to discover blob dependencies                                     |
-| `agentKv:blob:<sha256>`            | Preserve bytes and SQLite storage class; verify content and references                                          |
-| `isNAL`                            | Read as an explicit storage-format hint for statistics; never change it to bypass Cursor's compatibility checks |
+| Record or field                             | Handling                                                                                                        |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `composerData:<composerId>`                 | Read a bounded composer JSON value; remap known identity fields for a new copy                                  |
+| `composerRootWriterDiagnostic:<composerId>` | Delete this exact key with the composer. A longer suffix is left in place                                       |
+| `fullConversationHeadersOnly`               | Preserve conversation order and references to stored messages                                                   |
+| `bubbleId:<composerId>:<bubbleId>`          | Read by an indexed key range; preserve payload text and remap known IDs                                         |
+| `conversationState`                         | Inspect supported `~`-prefixed protobuf state to discover blob dependencies                                     |
+| `agentKv:blob:<sha256>`                     | Preserve bytes and SQLite storage class; verify content and references                                          |
+| `isNAL`                                     | Read as an explicit storage-format hint for statistics; never change it to bypass Cursor's compatibility checks |
 
 The dependency reader supports the observed conversation-state representation in composer versions 13 through 18. This is a partial wire-format reader, not a general Cursor codec. Unknown structured state remains unsupported. `~` alone encodes empty bytes and is not proof that a chat is an empty draft. `_v` does not distinguish legacy conversations from Agent conversations.
 
@@ -222,7 +223,7 @@ The normal import pipeline remains responsible for integrity checks, resources, 
 
 `managed-selection.ts` stores physical workspace/chat identities. `extension-manager.ts` owns native checkboxes, search, reversible view filtering, cached headers and actions. Parent selections are expanded to exact IDs before deletion confirmation; refresh clears selection. Unchecking a child of a selected workspace expands sibling selections. Empty and unavailable rows are hidden initially, not deleted. Show/hide toggles reuse metadata. Readable unknown formats are not treated as disposable.
 
-`extension-managed-delete.ts` owns one confirmation and one ordinary operation scope. It sends a `delete-chats` job through `runTransfer`, publishes progress/results, and enables the existing Quit Cursor action after writes. It never calls Quit automatically. There is no persisted deletion queue, detached executor or process enumeration. Cancellation and notification dismissal follow the existing transfer lifecycle.
+`extension-managed-delete.ts` owns one confirmation and one ordinary operation scope. A workspace checkbox is a `workspace-data` request, not a list of loaded chat ids. The host sends `prepare-managed-delete`, closes that read-only worker, then confirms. `delete-managed-data` rechecks the plan, reuses chat deletion for exclusive history, and only then removes the verified `workspaceStorage` directory. Quit Cursor is offered after a mutation or an uncertain result and is never called automatically. There is no persisted deletion queue, detached executor or process enumeration. SQLite and directory removal are not one transaction.
 
 `chat-deletion.ts` orchestrates deletion. `deletion-ownership.ts` reads relevant discovered workspace metadata once and retains only selected identities. `deletion-sql.ts` owns transactional schema checks, selected-index revalidation and mutations. Known shared or unresolved owners are retained. Unsupported layouts, symlink database paths, relevant triggers and foreign-key dependencies stop the affected operation. Shared resources and workspace directories are never swept.
 

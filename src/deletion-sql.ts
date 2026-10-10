@@ -202,7 +202,8 @@ export async function deleteMessageRows(
     const predicates = batch.map((id) => {
       const range = bubbleRange(id);
 
-      return `key=${sqlText(`composerData:${id}`)} OR (key>=${sqlText(range.lower)} AND key<${sqlText(range.upper)})`;
+      // The diagnostic key is exact. A longer suffix stays, as with composerData tails.
+      return `key=${sqlText(`composerData:${id}`)} OR key=${sqlText(`composerRootWriterDiagnostic:${id}`)} OR (key>=${sqlText(range.lower)} AND key<${sqlText(range.upper)})`;
     });
 
     await session.exec(

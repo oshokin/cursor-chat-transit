@@ -101,3 +101,30 @@ test('workspace activity includes WAL writes and ignores non-file databases', as
   await fs.unlink(`${db}-wal`);
   assert.equal(listWorkspaceEntries(dir)[0].mtime, 1000000);
 });
+
+test('a directory without state.vscdb is manage-only and not a transfer source', async (t) => {
+  const { listIncompleteWorkspaceDirs, listWorkspaceEntries } =
+    await import('../src/paths');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-residue-'));
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const storage = path.join(dir, 'User', 'workspaceStorage');
+
+  await fs.mkdir(path.join(storage, 'residue'), { recursive: true });
+  await fs.mkdir(path.join(storage, 'ready'), { recursive: true });
+  await fs.writeFile(path.join(storage, 'ready', 'state.vscdb'), '');
+
+  await fs.symlink(
+    path.join(storage, 'residue'),
+    path.join(storage, 'linked'),
+    'dir',
+  );
+
+  assert.deepEqual(listIncompleteWorkspaceDirs(dir), ['residue']);
+
+  assert.deepEqual(
+    listWorkspaceEntries(dir).map((entry) => entry.storageId),
+    ['ready'],
+  );
+});

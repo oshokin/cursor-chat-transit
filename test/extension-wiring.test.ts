@@ -171,6 +171,7 @@ test('activation still registers all commands, one operation log and the sidebar
         'manageCheckSelected',
         'manageDelete',
         'manageDeleteItem',
+        'manageDeleteWorkspaceData',
       ].map((name) => `cursorChatTransit.${name}`),
     ].sort(),
   );

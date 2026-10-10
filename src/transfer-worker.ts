@@ -1,5 +1,9 @@
 import { deleteSelectedChats } from './chat-deletion';
 import type { DeletionJob } from './deletion-types';
+import {
+  executeManagedDelete,
+  prepareManagedDelete,
+} from './managed-delete-run';
 import { exportToFile, listWorkspaceChats } from './export-transfer';
 import { importFromBundle } from './import-bundle';
 import type { RecoveryPreview } from './recovery-preview';
@@ -117,6 +121,26 @@ async function run(
     );
   }
 
+  if (job.kind === 'prepare-managed-delete')
+    return prepareManagedDelete(
+      {
+        ...job,
+        signal: abort.signal,
+        onNote: (note) => sendUpdate({ type: 'note', note }),
+      },
+      job,
+    );
+  if (job.kind === 'delete-managed-data')
+    return executeManagedDelete(
+      {
+        ...job,
+        signal: abort.signal,
+        onPhase: (phase, metrics) =>
+          sendUpdate({ type: 'phase', phase, metrics }),
+        onNote: (note) => sendUpdate({ type: 'note', note }),
+      },
+      job,
+    );
   if (job.kind === 'delete-chats')
     return deleteSelectedChats(
       {

@@ -22,15 +22,154 @@ export interface DeleteResult {
   uncertain?: boolean;
 }
 
-/** Ordinary cancellable transfer job; it never waits for the IDE to exit. */
-export type DeletionJob = Pick<
+/**
+ * What the user asked to delete. A workspace request is not "every currently loaded chat".
+ * An empty id list is not a workspace request.
+ */
+export type ManagedDeleteRequest =
+  | {
+      /** Delete the local workspace storage directory and its exclusive history. */
+      kind: 'workspace-data';
+      /** Physical workspace/global storage pair. */
+      workspace: WorkspaceEntry;
+    }
+  | {
+      /** Delete these chats and keep the workspace directory. */
+      kind: 'chats';
+      /** Physical workspace/global storage pair. */
+      workspace: WorkspaceEntry;
+      /** Composer ids. Not inferred from "all children were checked". */
+      ids: string[];
+    };
+
+/** One checked target after a read-only preflight. Message bodies are not stored. */
+export interface ManagedPlanTarget {
+  /** Workspace directory, or chats inside a kept directory. */
+  kind: 'workspace-data' | 'chats';
+  /** Physical workspace/global storage pair captured for the confirmation. */
+  workspace: WorkspaceEntry;
+  /** Exclusive composer ids approved for this target. */
+  ids: string[];
+  /** Database and WAL identity captured with the id list. */
+  token: string;
+  /** Display name. Not a storage key. */
+  name: string;
+  /** Location label, such as "This computer". */
+  location: string;
+  /** Project or storage path shown in the dialog. */
+  pathLabel: string;
+}
+
+/** Read-only plan. Execution rejects it when the profile or token no longer matches. */
+export interface ManagedDeletePlan {
+  /** User-data directory the paths were resolved against. */
+  userDataRoot: string;
+  /** Targets in preview order. */
+  targets: ManagedPlanTarget[];
+}
+
+/** Per-target result. SQL success is not workspace deletion. */
+export interface ManagedDeleteOutcome {
+  /** Workspace directory, or chats inside a kept directory. */
+  kind: 'workspace-data' | 'chats';
+  /** `workspaceDbPath`. Names are not identities. */
+  workspaceKey: string;
+  /** Display name copied from the plan. Not an identity. */
+  label: string;
+  /** Composer ids whose delete transaction committed. */
+  chatIdsDeleted: string[];
+  /** Composer ids retained by the chat-only ownership rules. */
+  chatIdsSkipped: string[];
+  /** Directory step. Chat-only work uses `not-requested`. */
+  storage:
+    | 'not-requested'
+    | 'not-started'
+    | 'deleted'
+    | 'partial'
+    | 'failed'
+    | 'unknown';
+  /** Stable filesystem or verification code, when one exists. */
+  errorCode?: string;
+  /** Short reason safe to show. No SQL text and no message bodies. */
+  errorMessage?: string;
+}
+
+/** Worker result for one confirmed managed deletion. */
+export interface ManagedDeleteResult {
+  /** One entry per plan target, including targets that did not start. */
+  outcomes: ManagedDeleteOutcome[];
+  /** Cancellation after zero or more committed targets. */
+  cancelled?: boolean;
+  /** A commit acknowledgement was lost. No directory deletion follows that target. */
+  uncertain?: boolean;
+  /** Stop reason. Earlier outcomes remain. */
+  error?: string;
+}
+
+/** Why a plan cannot be confirmed. Nothing has been deleted. */
+export interface ManagedDeleteRefusal {
+  /** Modal title. */
+  title: string;
+  /** Modal detail. */
+  detail: string;
+}
+
+/** Read-only preflight result. */
+export type ManagedPrepareResult =
+  | {
+      /** Preflight succeeded. */
+      ok: true;
+      /** Plan the confirmation and the write job share. */
+      plan: ManagedDeletePlan;
+    }
+  | ({
+      /** Preflight refused the whole request. */
+      ok: false;
+    } & ManagedDeleteRefusal);
+
+/** Fields shared by deletion worker jobs. */
+type DeletionConnection = Pick<
   TransferContext,
   'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
-> & {
-  /** Worker task discriminator. */
-  kind: 'delete-chats';
-  /** Complete discovered inventory for affected profiles. */
-  workspaces: WorkspaceEntry[];
-  /** Confirmed exact chat selection. */
-  targets: DeleteTarget[];
-};
+>;
+
+/** What the host knows about the window that started the operation. */
+export interface ManagedWindowFacts {
+  /** `state.vscdb` of the workspace open in this window, when the host has one. */
+  database?: string;
+  /** Project identity when the physical database path is not available. */
+  identity?: WorkspaceEntry['identity'];
+  /** True when this window has no folder and no workspace file. */
+  emptyWindow: boolean;
+}
+
+/** Ordinary cancellable transfer job; it never waits for the IDE to exit. */
+export type DeletionJob = DeletionConnection &
+  (
+    | {
+        /** Worker task discriminator. */
+        kind: 'delete-chats';
+        /** Complete discovered inventory for affected profiles. */
+        workspaces: WorkspaceEntry[];
+        /** Confirmed exact chat selection. */
+        targets: DeleteTarget[];
+      }
+    | ({
+        /** Read-only plan. Closes its SQLite processes before returning. */
+        kind: 'prepare-managed-delete';
+        /** User-data directory to resolve. */
+        userDataRoot: string;
+        /** Typed selection. Workspace scope is not a list of ids. */
+        requests: ManagedDeleteRequest[];
+        /** Profile inventory used for ownership, not a write list. */
+        workspaces: WorkspaceEntry[];
+      } & ManagedWindowFacts)
+    | ({
+        /** Re-check the plan, then delete. */
+        kind: 'delete-managed-data';
+        /** Plan returned by the matching prepare job. */
+        plan: ManagedDeletePlan;
+        /** Fresh inventory. A changed profile rejects the plan. */
+        workspaces: WorkspaceEntry[];
+      } & ManagedWindowFacts)
+  );

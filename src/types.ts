@@ -76,7 +76,10 @@ export interface BubbleRecord {
 
 /** One Cursor workspaceStorage folder paired with the global database. */
 export interface WorkspaceEntry {
-  /** Absolute `workspaceStorage` folder for this workspace. */
+  /**
+   * Cursor user-data directory that contains `User/workspaceStorage`.
+   * This is not the workspace folder. Never delete `storageRoot` itself.
+   */
   storageRoot: string;
   /** Folder name Cursor assigned under `workspaceStorage`. */
   storageId: string;

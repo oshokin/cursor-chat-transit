@@ -191,13 +191,13 @@
       },
       {
         "command": "cursorChatTransit.manageShowAll",
-        "title": "Show all workspaces",
+        "title": "Show empty and unavailable workspaces",
         "category": "Cursor Chat Transit",
         "icon": "$(eye)"
       },
       {
         "command": "cursorChatTransit.manageShowRemovable",
-        "title": "Hide empty or unavailable workspaces",
+        "title": "Hide empty and unavailable workspaces",
         "category": "Cursor Chat Transit",
         "icon": "$(eye-closed)"
       },
@@ -209,13 +209,19 @@
       },
       {
         "command": "cursorChatTransit.manageDelete",
-        "title": "Delete checked history\u2026",
+        "title": "Delete selected\u2026",
         "category": "Cursor Chat Transit",
         "icon": "$(trash)"
       },
       {
         "command": "cursorChatTransit.manageDeleteItem",
-        "title": "Delete this history\u2026",
+        "title": "Delete chat\u2026",
+        "category": "Cursor Chat Transit",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cursorChatTransit.manageDeleteWorkspaceData",
+        "title": "Delete workspace data\u2026",
         "category": "Cursor Chat Transit",
         "icon": "$(trash)"
       }
@@ -234,13 +240,13 @@
         },
         {
           "command": "cursorChatTransit.manageSelectAll",
-          "when": "view == cursorChatTransit.manage",
+          "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageHasCheckedItems",
           "group": "navigation@4"
         },
         {
           "command": "cursorChatTransit.manageClearSelection",
-          "when": "view == cursorChatTransit.manage",
-          "group": "navigation@5"
+          "when": "view == cursorChatTransit.manage && cursorChatTransit.manageHasCheckedItems",
+          "group": "navigation@4"
         },
         {
           "command": "cursorChatTransit.manageShowAll",
@@ -254,29 +260,34 @@
         },
         {
           "command": "cursorChatTransit.manageCheckSelected",
-          "when": "view == cursorChatTransit.manage",
-          "group": "navigation@6"
+          "when": "view == cursorChatTransit.manage && cursorChatTransit.manageHasCheckedItems",
+          "group": "navigation@5"
         },
         {
           "command": "cursorChatTransit.manageDelete",
-          "when": "view == cursorChatTransit.manage",
-          "group": "navigation@7"
+          "when": "view == cursorChatTransit.manage && cursorChatTransit.manageHasCheckedItems",
+          "group": "navigation@6"
         }
       ],
       "view/item/context": [
         {
           "command": "cursorChatTransit.manageCheck",
-          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|ReadOnlyChat)$/",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/",
           "group": "inline@1"
         },
         {
           "command": "cursorChatTransit.manageDelete",
-          "when": "view == cursorChatTransit.manage && viewItem =~ /^(managedChat|managedWorkspace)$/ && cursorChatTransit.manageHasCheckedItems",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^(managedChat|managedWorkspace|managedCurrentWorkspace)$/ && cursorChatTransit.manageHasCheckedItems",
           "group": "inline@3"
         },
         {
           "command": "cursorChatTransit.manageDeleteItem",
-          "when": "view == cursorChatTransit.manage && viewItem =~ /^(managedChat|managedWorkspace)$/ && !cursorChatTransit.manageHasCheckedItems",
+          "when": "view == cursorChatTransit.manage && viewItem == managedChat && !cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@3"
+        },
+        {
+          "command": "cursorChatTransit.manageDeleteWorkspaceData",
+          "when": "view == cursorChatTransit.manage && viewItem == managedWorkspace && !cursorChatTransit.manageHasCheckedItems",
           "group": "inline@3"
         }
       ],
@@ -319,6 +330,10 @@
         },
         {
           "command": "cursorChatTransit.manageDeleteItem",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageDeleteWorkspaceData",
           "when": "false"
         }
       ]

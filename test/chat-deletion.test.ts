@@ -1207,6 +1207,7 @@ test(
       `composerData:${A}`,
       `bubbleId:${A}:`,
       `bubbleId:${A}:message`,
+      `composerRootWriterDiagnostic:${A}`,
     ];
 
     const kept = [
@@ -1216,6 +1217,8 @@ test(
       `agentKv:${A}:blob`,
       `composerData:${B}`,
       `bubbleId:${B}:message`,
+      `composerRootWriterDiagnostic:${A}:tail`,
+      `composerRootWriterDiagnostic:${B}`,
     ];
 
     await session.exec(
@@ -1383,7 +1386,7 @@ test(
       ...ctx,
       database: globalDbPath,
       sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify(globalList))} WHERE key='composer.composerHeaders';
-INSERT INTO cursorDiskKV VALUES (${sqlText(`bubbleId:${A}`)}, 'KEEP'), (${sqlText(`bubbleId:${A};next`)}, 'KEEP'), (${sqlText(`composerData:${A}:tail`)}, 'KEEP'), (${sqlText(`agentKv:${A}:blob`)}, 'KEEP');`,
+INSERT INTO cursorDiskKV VALUES (${sqlText(`bubbleId:${A}`)}, 'KEEP'), (${sqlText(`bubbleId:${A};next`)}, 'KEEP'), (${sqlText(`composerData:${A}:tail`)}, 'KEEP'), (${sqlText(`agentKv:${A}:blob`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${A}`)}, 'DROP'), (${sqlText(`composerRootWriterDiagnostic:${A}:tail`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${B}`)}, 'KEEP');`,
     });
 
     const result = await deleteSelectedChats(ctx, entries, [
@@ -1447,6 +1450,9 @@ INSERT INTO cursorDiskKV VALUES (${sqlText(`bubbleId:${A}`)}, 'KEEP'), (${sqlTex
     assert.equal(keys.has(`bubbleId:${A};next`), true);
     assert.equal(keys.has(`composerData:${A}:tail`), true);
     assert.equal(keys.has(`agentKv:${A}:blob`), true);
+    assert.equal(keys.has(`composerRootWriterDiagnostic:${A}`), false);
+    assert.equal(keys.has(`composerRootWriterDiagnostic:${A}:tail`), true);
+    assert.equal(keys.has(`composerRootWriterDiagnostic:${B}`), true);
     assert.equal(keys.has(`composerData:${B}`), true);
   },
 );

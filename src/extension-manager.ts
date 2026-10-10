@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { DeleteTarget } from './deletion-types';
+import path from 'node:path';
 import { showFail } from './extension-errors';
 import { checkManagedNodes } from './extension-managed-check';
 import { deleteManagedChats } from './extension-managed-delete';
@@ -11,10 +11,12 @@ import {
 } from './extension-workspaces';
 import type { ManagedNode } from './managed-node';
 import { managedSearchItems, showManagedSearch } from './managed-search';
-import { ManagedSelection, groupManagedNodes } from './managed-selection';
+import { requestsFromNodes, selectionSummary } from './managed-delete-plan';
+import { ManagedSelection } from './managed-selection';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
 import { orderedChatHeaders, workspacePickItems } from './picker';
+import { listIncompleteWorkspaceDirs } from './paths';
 import { workspaceStatisticsKey, type StatisticsUpdate } from './statistics';
 import { runTransfer } from './transfer-process';
 import type { ComposerHeader, WorkspaceEntry } from './types';
@@ -45,12 +47,18 @@ export class ChatManager
   readonly selection = new ManagedSelection();
   /** Toggle only view filtering; never deletes data. */
   private showAll = false;
+  /** Summary used when nothing is selected and no operation message is active. */
+  private filterSummary =
+    'Select workspace data or individual chats. Project files are kept.';
+  /** Temporary status that outranks the selection summary. */
+  private operationMessage?: string;
 
   /** Apply one checkbox change and update all affected rows. */
   async select(node: ManagedNode, checked: boolean): Promise<void> {
     const generation = this.loading.signal;
     const parent = { workspace: node.workspace };
 
+    if (!node.chat && this.isCurrentRoot(node)) return;
     if (!checked && node.chat && this.selection.has(parent)) {
       const siblings = await this.getChildren(parent);
 
@@ -64,16 +72,24 @@ export class ChatManager
         if (sibling.chat?.composerId !== node.chat.composerId)
           this.selection.set(sibling, true);
     } else this.selection.set(node, checked);
+    this.publishMessage();
     this.changed.fire(undefined);
   }
-  /** Select visible workspace rows, including their collapsed chats. */
+  /** Select visible workspace rows that can be deleted. The current window is excluded. */
   async selectAll(): Promise<void> {
-    this.selection.selectWorkspaces(await this.getChildren());
+    const roots = await this.getChildren();
+
+    this.selection.selectWorkspaces(
+      roots.filter((node) => !this.isCurrentRoot(node)),
+    );
+
+    this.publishMessage();
     this.changed.fire(undefined);
   }
   /** Clear hidden and visible selections alike. */
   clearSelection(): void {
     this.selection.clear();
+    this.publishMessage();
     this.changed.fire(undefined);
   }
   /** Keep the visibility command present in both states. */
@@ -86,6 +102,7 @@ export class ChatManager
       this.showAll,
     );
 
+    this.publishMessage();
     this.changed.fire(undefined);
   }
   /** Check the explicit selection through the existing checker. */
@@ -97,35 +114,45 @@ export class ChatManager
   async deleteSelected(node?: ManagedNode): Promise<void> {
     const checked = this.selection.values();
 
-    const selected = groupManagedNodes(
-      checked.length ? checked : node ? [node] : [],
+    const requests = requestsFromNodes(
+      checked.length ? checked : node && !node.error ? [node] : [],
     );
 
-    const targets: DeleteTarget[] = [];
-
-    for (const item of selected) {
-      const children: ManagedNode[] = item.chats
-        ? item.chats.map((chat) => ({
-            workspace: item.workspace,
-            chat,
-          }))
-        : await this.getChildren({ workspace: item.workspace });
-
-      if (children.some((/** Child tree node. */ child) => child.error))
-        throw new Error(
-          'A selected workspace could not be read. Nothing scheduled.',
-        );
-
-      targets.push({
-        workspace: item.workspace,
-        ids: children.flatMap((/** Child tree node. */ child) =>
-          child.chat ? [child.chat.composerId] : [],
-        ),
-      });
-    }
-
-    if (await deleteManagedChats(this.context, this.operations, targets))
+    if (await deleteManagedChats(this.context, this.operations, requests))
       this.refresh();
+  }
+
+  /** Physical database of the workspace open in this window. */
+  private isCurrentRoot(node: ManagedNode): boolean {
+    if (node.chat || node.error) return false;
+    const current = currentWorkspaceDatabase(this.context);
+
+    return (
+      !!current &&
+      path.resolve(current) === path.resolve(node.workspace.workspaceDbPath)
+    );
+  }
+
+  /** Selection outranks the filter summary. An in-progress operation outranks both. */
+  private publishMessage(): void {
+    const selected = this.selection.values();
+
+    const hidden = this.showAll
+      ? 0
+      : selected.filter(
+          (node) =>
+            !node.chat &&
+            !node.error &&
+            (this.results.get(this.key(node))?.hide ||
+              this.results.get(this.key(node))?.failed),
+        ).length;
+
+    this.listMessage(
+      this.operationMessage ||
+        (selected.length
+          ? selectionSummary(selected, hidden)
+          : this.filterSummary),
+    );
   }
 
   /** Bind the tree to the extension lifetime and the operation log. */
@@ -156,6 +183,45 @@ export class ChatManager
     this.changed.fire(undefined);
   }
 
+  /** Directories left behind without `state.vscdb`. Hidden until empty storage is shown. */
+  private incompleteNodes(userDir: string): ManagedNode[] {
+    return listIncompleteWorkspaceDirs(userDir).map((storageId) => {
+      const workspace = {
+        storageRoot: userDir,
+        storageId,
+        workspaceDbPath: path.join(
+          userDir,
+          'User',
+          'workspaceStorage',
+          storageId,
+          'state.vscdb',
+        ),
+        globalDbPath: path.join(
+          userDir,
+          'User',
+          'globalStorage',
+          'state.vscdb',
+        ),
+        mtime: 0,
+        key: `incomplete:${storageId}`,
+      };
+
+      const node: ManagedNode = {
+        workspace,
+        error: 'Incomplete workspace storage',
+      };
+
+      this.results.set(this.key(node), {
+        key: workspaceStatisticsKey(workspace),
+        detail: 'Incomplete workspace storage',
+        hide: true,
+        failed: true,
+      });
+
+      return node;
+    });
+  }
+
   /** Stable identity for a workspace row or one of its chats. */
   /** Tree row being acted on. */
   private key(node: ManagedNode): string {
@@ -170,15 +236,20 @@ export class ChatManager
     const presentation = workspacePresentation(node.workspace);
 
     const item = new vscode.TreeItem(
-      node.error
-        ? 'Unable to load chats'
-        : node.chat?.name || (node.chat ? 'Untitled chat' : presentation.name),
+      node.error === 'Incomplete workspace storage'
+        ? 'Incomplete workspace storage'
+        : node.error
+          ? 'Unable to load chats'
+          : node.chat?.name ||
+            (node.chat ? 'Untitled chat' : presentation.name),
       node.chat || node.error
         ? vscode.TreeItemCollapsibleState.None
         : vscode.TreeItemCollapsibleState.Collapsed,
     );
 
-    if (!node.error)
+    const current = this.isCurrentRoot(node);
+
+    if (!node.error && !current)
       item.checkboxState = this.selection.has(node)
         ? vscode.TreeItemCheckboxState.Checked
         : vscode.TreeItemCheckboxState.Unchecked;
@@ -186,9 +257,11 @@ export class ChatManager
 
     item.contextValue = node.error
       ? 'unavailable'
-      : node.chat
-        ? 'managedChat'
-        : 'managedWorkspace';
+      : current
+        ? 'managedCurrentWorkspace'
+        : node.chat
+          ? 'managedChat'
+          : 'managedWorkspace';
 
     item.iconPath = new vscode.ThemeIcon(
       node.error ? 'warning' : node.chat ? 'comment-discussion' : 'folder',
@@ -196,12 +269,15 @@ export class ChatManager
 
     const result = this.results.get(this.key(node));
 
+    const workspaceSelected = !node.chat && this.selection.has(node);
+
     item.description =
       node.error ||
       (node.chat
         ? result?.detail || 'Not checked'
         : [
-            result?.detail,
+            current ? 'Current window' : undefined,
+            workspaceSelected ? 'Workspace data selected' : result?.detail,
             presentation.location,
             node.workspace.storageId.slice(0, 8),
           ]
@@ -213,9 +289,13 @@ export class ChatManager
       presentation.path,
       `Storage: ${node.workspace.workspaceDbPath}`,
       node.chat ? `Chat: ${node.chat.composerId}` : '',
-      result?.detail ||
-        node.error ||
-        'Choose Check to inspect the available data.',
+      current
+        ? 'This workspace is open in the current window. Its chats can be deleted; its workspace data cannot.'
+        : workspaceSelected
+          ? 'Workspace data selected. Project files are kept.'
+          : result?.detail ||
+            node.error ||
+            'Choose Check to inspect the available data.',
     ]
       .filter(Boolean)
       .join('\n');
@@ -329,7 +409,8 @@ export class ChatManager
       currentWorkspaceDatabase(this.context),
     ).map((row) => row.entry);
 
-    this.listMessage('Preparing workspace list…');
+    this.operationMessage = 'Preparing workspace list…';
+    this.publishMessage();
 
     const log = startOperationLog(
       this.operations,
@@ -379,26 +460,36 @@ export class ChatManager
 
       log.finish(result.failed ? 'incomplete' : 'completed');
 
-      this.listMessage(
-        `${entries.length - hidden.size} workspaces · ${hidden.size} empty or unavailable filtered. Use checkboxes to select history.`,
-      );
+      this.operationMessage = undefined;
 
-      return entries.map((workspace) => ({
-        workspace,
-      }));
+      this.filterSummary = entries.length
+        ? `${entries.length - hidden.size} workspaces · ${hidden.size} empty or unavailable filtered. Select workspace data or individual chats. Project files are kept.`
+        : 'No local workspace data found.';
+
+      this.publishMessage();
+
+      return [
+        ...entries.map((workspace) => ({ workspace })),
+        ...this.incompleteNodes(host.userDir),
+      ];
     } catch (error) {
       log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
-      if (!signal.aborted)
-        this.listMessage(
-          'Workspace check unavailable. All entries shown; see the operation log.',
-        );
+      this.operationMessage = undefined;
+
+      if (!signal.aborted) {
+        this.filterSummary =
+          'Workspace check unavailable. All entries shown; see the operation log.';
+
+        this.publishMessage();
+      }
 
       // A failed scan cannot prove that any workspace is disposable.
       return signal.aborted
         ? []
-        : entries.map((workspace) => ({
-            workspace,
-          }));
+        : [
+            ...entries.map((workspace) => ({ workspace })),
+            ...this.incompleteNodes(host.userDir),
+          ];
     }
   }
 
@@ -587,7 +678,7 @@ export function registerManager(
   });
 
   view.message =
-    'Use checkboxes to select history. Delete acts on all checked items. Project files are kept.';
+    'Select workspace data or individual chats. Project files are kept.';
 
   // Row focus and context-menu focus are native UI state, not bulk selection.
   // Separate menu labels expose the scope; handlers recheck it at invocation time.
@@ -652,6 +743,7 @@ export function registerManager(
       // Title actions can receive host context; bulk deletion ignores every argument.
       manageDelete: () => manager.deleteSelected(),
       manageDeleteItem: (node) => manager.deleteSelected(node),
+      manageDeleteWorkspaceData: (node) => manager.deleteSelected(node),
     };
 
   for (const [name, action] of Object.entries(actions))

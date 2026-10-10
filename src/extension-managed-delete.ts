@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
-import type { DeleteResult, DeleteTarget } from './deletion-types';
+import type {
+  ManagedDeleteRequest,
+  ManagedDeleteResult,
+  ManagedPrepareResult,
+} from './deletion-types';
 import { humanDuration } from './duration';
 import { isAbort } from './extension-errors';
 import { transferSettings } from './extension-settings';
@@ -10,12 +14,17 @@ import {
   setUi,
   withLock,
 } from './extension-state';
-import { listHostEntries, prepareSqlite } from './extension-workspaces';
+import {
+  currentWorkspaceDatabase,
+  listHostEntries,
+  prepareSqlite,
+} from './extension-workspaces';
+import { confirmationCopy, describeManagedResult } from './managed-delete-plan';
 import { notifyCompletion } from './notifications';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
 import { runTransfer } from './transfer-process';
-import { workspacePresentation } from './workspace-presentation';
+import type { WorkspaceIdentity } from './types';
 
 /**
  * Confirm once, delete in the ordinary cancellable worker, then offer the existing Quit action.
@@ -26,17 +35,13 @@ export async function deleteManagedChats(
   context: vscode.ExtensionContext,
   /** Output channel or operation queue. */
   operations: TransitLog,
-  /** Chats selected for deletion. */
-  targets: DeleteTarget[],
+  /** Workspace data and individual chats. An empty workspace is not a no-op. */
+  requests: ManagedDeleteRequest[],
 ): Promise<boolean> {
-  if (
-    !targets.some(
-      (/** Deletion or import target. */ target) => target.ids.length,
-    )
-  ) {
+  if (!requests.length) {
     notifyCompletion(() =>
       vscode.window.showInformationMessage(
-        'No chats selected. Check chats or workspaces to delete their history. Empty workspace storage is kept.',
+        'Select workspace data or individual chats. Project files are kept.',
       ),
     );
 
@@ -50,65 +55,108 @@ export async function deleteManagedChats(
     const log = startOperationLog(operations, 'delete managed chats');
     let workerStarted = false;
     let needsRestart = priorRestart;
+    const host = listHostEntries();
+
+    const windowFacts = {
+      database: currentWorkspaceDatabase(context),
+      identity: host.identity,
+      emptyWindow:
+        !vscode.workspace.workspaceFolders?.length &&
+        !vscode.workspace.workspaceFile,
+    };
 
     try {
-      const count = targets.reduce(
-        (
-          /** Running total. */
-          sum,
-          /** Deletion or import target. */
-          target,
-        ) => sum + new Set(target.ids).size,
-        0,
+      setUi({
+        status: 'running',
+        statusTitle: 'Preparing deletion…',
+        statusDetail: 'Checking workspace data and chat ownership.',
+      });
+
+      const sqlite = await prepareSqlite(context);
+
+      const prepared = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Preparing deletion',
+          cancellable: true,
+        },
+        (progress, token) => {
+          progress.report({
+            message: 'Checking workspace data and chat ownership.',
+          });
+
+          return runTransfer<ManagedPrepareResult>(
+            {
+              kind: 'prepare-managed-delete',
+              ...sqlite,
+              ...transferSettings(),
+              userDataRoot: host.userDir,
+              requests,
+              workspaces: host.entries,
+              ...windowFacts,
+            },
+            {
+              signal: linkedSignal(token),
+              onEvent: log.event,
+              onNote: log.note,
+            },
+          );
+        },
       );
 
-      const summary = targets
-        .slice(0, 20)
-        .map(
-          (/** Deletion or import target. */ target) =>
-            `${workspacePresentation(target.workspace).name} (${target.workspace.storageId}): ${target.ids.length} chat${target.ids.length === 1 ? '' : 's'}`,
-        )
-        .join('\n');
+      if (!prepared.ok) {
+        log.finish('failed', undefined, prepared.detail);
+
+        setUi({
+          status: 'failed',
+          statusTitle: prepared.title,
+          statusDetail: 'No data was deleted.',
+          statusItems: [prepared.detail],
+        });
+
+        await vscode.window.showWarningMessage(
+          prepared.title,
+          {
+            modal: true,
+            detail: prepared.detail,
+          },
+          { title: 'Close', isCloseAffordance: true },
+        );
+
+        return;
+      }
+
+      for (const target of prepared.plan.targets)
+        log.fact(
+          `Workspace deletion prepared workspace=${JSON.stringify(target.name)} storageId=${JSON.stringify(target.workspace.storageId)} chats=${target.ids.length}`,
+        );
 
       setUi({
         status: 'waiting',
         statusTitle: 'Confirm deletion',
-        statusDetail: `${count} chat${count === 1 ? '' : 's'} selected.`,
+        statusDetail: 'Review the selected workspace data and chats.',
       });
 
+      const copy = confirmationCopy(prepared.plan);
+
       const decision = await vscode.window.showWarningMessage(
-        `Delete ${count} selected chat${count === 1 ? '' : 's'}?`,
-        {
-          modal: true,
-          detail: `Close all other Cursor windows and stop running Agent tasks before continuing. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Create your own backup first if you need to keep this history. Project files, workspace storage folders and shared resources are kept.\n\n${summary}${targets.length > 20 ? `\nAnd ${targets.length - 20} more workspaces.` : ''}`,
-        },
-        'Delete chats',
+        copy.title,
+        { modal: true, detail: copy.detail },
+        { title: 'Cancel', isCloseAffordance: true },
+        { title: copy.confirm },
       );
 
-      if (decision !== 'Delete chats') {
+      if (decision?.title !== copy.confirm) {
         log.finish('cancelled');
 
         setUi({
           status: 'cancelled',
           statusTitle: 'Deletion cancelled',
-          statusDetail: 'No chats were changed.',
+          statusDetail: 'No data was deleted.',
         });
 
         return;
       }
-
-      const globals = new Set(
-        targets.map(
-          (/** Deletion or import target. */ target) =>
-            target.workspace.globalDbPath,
-        ),
-      );
-
-      const workspaces = listHostEntries().entries.filter((workspace) =>
-        globals.has(workspace.globalDbPath),
-      );
-
-      const sqlite = await prepareSqlite(context);
 
       runtime.progressTimer = setInterval(
         () =>
@@ -118,49 +166,51 @@ export async function deleteManagedChats(
 
       setUi({
         status: 'running',
-        statusTitle: 'Deleting history…',
-        statusDetail: 'Checking selected records and their ownership.',
+        statusTitle: 'Deleting chat history…',
+        statusDetail: 'Checking the confirmed plan again.',
       });
 
       const result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Deleting chat history',
+          title: 'Deleting selected data',
           cancellable: true,
         },
-        async (
-          /** Progress reporter for this operation. */
-          progress,
-          /** Cancellation token from the progress notification. */
-          token,
-        ) => {
+        async (progress, token) => {
+          workerStarted = true;
           const signal = linkedSignal(token);
 
-          workerStarted = true;
-
-          return runTransfer<DeleteResult>(
+          return runTransfer<ManagedDeleteResult>(
             {
-              kind: 'delete-chats',
+              kind: 'delete-managed-data',
               ...sqlite,
               ...transferSettings(),
-              workspaces,
-              targets,
+              plan: prepared.plan,
+              workspaces: listHostEntries().entries,
+              database: currentWorkspaceDatabase(context),
+              identity: listHostEntries().identity as
+                WorkspaceIdentity | undefined,
+              emptyWindow: windowFacts.emptyWindow,
             },
             {
               signal,
-              onEvent: log.event,
+              onEvent: (event) => {
+                log.event(event);
+                if (event.action === 'Remove workspace data started')
+                  setUi({ statusTitle: 'Removing workspace data…' });
+              },
               onNote: log.note,
-              onPhase: (
-                phase,
-                /** Progress counts for this phase. */
-                metrics,
-              ) => {
+              onPhase: (phase, metrics) => {
                 log.phase(phase, metrics);
-                const detail = `${metrics?.processed || 0}/${metrics?.total || targets.length} workspaces processed · ${metrics?.chats || 0} chats deleted`;
+                const detail = `${metrics?.processed || 0}/${metrics?.total || prepared.plan.targets.length} workspaces processed · ${metrics?.chats || 0} chats deleted`;
 
                 progress.report({ message: detail });
 
                 setUi({
+                  statusTitle:
+                    phase === 'write'
+                      ? 'Removing workspace data…'
+                      : 'Deleting chat history…',
                   statusDetail: detail,
                   progress: metrics?.total
                     ? ((metrics.processed || 0) / metrics.total) * 100
@@ -172,22 +222,34 @@ export async function deleteManagedChats(
         },
       );
 
-      refresh = result.deleted.length > 0 || result.uncertain === true;
+      const changed = result.outcomes.some(
+        (outcome) =>
+          outcome.chatIdsDeleted.length > 0 ||
+          outcome.storage === 'deleted' ||
+          outcome.storage === 'partial',
+      );
+
+      refresh = changed || result.uncertain === true;
       needsRestart ||= refresh;
+      const summary = describeManagedResult(result);
 
-      const status = result.cancelled
-        ? 'cancelled'
-        : result.error
-          ? refresh
-            ? 'partial'
-            : 'failed'
-          : result.skipped.length
-            ? 'incomplete'
-            : 'completed';
+      const skippedOnly =
+        !changed &&
+        result.outcomes.some((outcome) => outcome.chatIdsSkipped.length);
 
-      const counts = `${result.uncertain ? 'At least ' : ''}${result.deleted.length} chats deleted · ${result.skipped.length} skipped${result.uncertain ? '; final commit outcome unknown' : ''}`;
+      const status = result.uncertain
+        ? 'partial'
+        : result.cancelled
+          ? 'cancelled'
+          : result.error
+            ? changed
+              ? 'partial'
+              : 'failed'
+            : skippedOnly
+              ? 'incomplete'
+              : 'completed';
 
-      log.fact(`Deletion summary: ${counts}`);
+      log.fact(`Deletion summary: ${summary}`);
       if (result.error) log.note(`Deletion stopped: ${result.error}`);
       log.finish(status, undefined, result.error);
 
@@ -195,20 +257,15 @@ export async function deleteManagedChats(
         status,
         statusTitle: result.cancelled
           ? 'Deletion cancelled'
-          : result.error
+          : result.error || result.uncertain
             ? 'Deletion stopped'
             : 'Deletion completed',
-        statusDetail: `${counts}.${needsRestart ? ' Quit and reopen Cursor.' : ''}`,
+        statusDetail: summary,
         statusItems: result.error ? [result.error] : [],
       });
 
-      notifyCompletion(() =>
-        vscode.window.showInformationMessage(
-          `${counts}.${needsRestart ? ' Quit and reopen Cursor using the button in Cursor Chat Transit.' : ''}`,
-        ),
-      );
+      notifyCompletion(() => vscode.window.showInformationMessage(summary));
     } catch (error) {
-      // A disconnected worker can have committed immediately before losing IPC.
       refresh ||= workerStarted;
       needsRestart ||= workerStarted;
       log.finish(isAbort(error) ? 'cancelled' : 'failed', undefined, error);

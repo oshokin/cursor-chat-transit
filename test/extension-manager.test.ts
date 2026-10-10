@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import Module from 'node:module';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import type { DeleteTarget } from '../src/deletion-types';
+import type { ManagedDeleteRequest } from '../src/deletion-types';
 import type { ManagedNode } from '../src/managed-node';
 import type * as vscode from 'vscode';
 import type { TransitLog } from '../src/output-ui';
@@ -31,7 +31,7 @@ const entries = ['a', 'b'].map(
 );
 
 const events: string[] = [];
-const deletions: DeleteTarget[][] = [];
+const deletions: ManagedDeleteRequest[][] = [];
 const registeredCommands = new Map<string, (node?: unknown) => Promise<void>>();
 const nativeContexts = new Map<string, unknown>();
 let registeredManager: import('../src/extension-manager').ChatManager;
@@ -194,7 +194,7 @@ loader._load = function (id, parent, isMain) {
       deleteManagedChats: async (
         _context: unknown,
         _log: unknown,
-        targets: DeleteTarget[],
+        targets: ManagedDeleteRequest[],
       ) => {
         deletions.push(targets);
 
@@ -212,7 +212,7 @@ loader._load = function (id, parent, isMain) {
     };
   if (id === './extension-workspaces')
     return {
-      listHostEntries: () => ({ entries }),
+      listHostEntries: () => ({ entries, userDir: '/profile-managed' }),
       currentWorkspaceDatabase: () => currentDatabase,
       prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
     };
@@ -560,8 +560,8 @@ test('row deletion uses all checked chats, including another storage, without ad
     await manager.deleteSelected();
 
     const expected = [
-      { workspace: entries[0], ids: ['a'] },
-      { workspace: entries[1], ids: ['b'] },
+      { kind: 'chats' as const, workspace: entries[0], ids: ['a'] },
+      { kind: 'chats' as const, workspace: entries[1], ids: ['b'] },
     ];
 
     assert.deepEqual(deletions, [expected, expected, expected]);
@@ -592,7 +592,7 @@ test('checked workspace covers every child and a clicked child cannot narrow del
     await manager.deleteSelected(clicked);
 
     assert.deepEqual(deletions, [
-      [{ workspace: entries[0], ids: ['chat', 'sibling'] }],
+      [{ kind: 'workspace-data', workspace: entries[0] }],
     ]);
 
     assert.equal(jobs.filter((job) => job.kind === 'list-chats').length, 0);
@@ -601,7 +601,7 @@ test('checked workspace covers every child and a clicked child cannot narrow del
   }
 });
 
-test('hidden checked scopes stay in deletion and failed workspace expansion never submits a partial set', async () => {
+test('hidden checked workspace stays a workspace-data request and is not expanded into chat ids', async () => {
   const manager = new Manager(context, log);
 
   try {
@@ -613,8 +613,15 @@ test('hidden checked scopes stay in deletion and failed workspace expansion neve
     await manager.select(visible, true);
     assert.equal((await manager.getChildren()).length, 1);
     failRead = true;
-    await assert.rejects(manager.deleteSelected(visible), /could not be read/);
-    assert.deepEqual(deletions, []);
+    await manager.deleteSelected(visible);
+
+    assert.deepEqual(deletions, [
+      [
+        { kind: 'workspace-data', workspace: entries[0] },
+        { kind: 'chats', workspace: entries[1], ids: ['visible'] },
+      ],
+    ]);
+
     assert.equal(manager.selection.values().length, 2);
   } finally {
     manager.dispose();
@@ -630,7 +637,7 @@ test('row deletion falls back to that row only with no checked items; empty tool
     await manager.deleteSelected();
 
     assert.deepEqual(deletions, [
-      [{ workspace: entries[0], ids: ['only'] }],
+      [{ kind: 'chats', workspace: entries[0], ids: ['only'] }],
       [],
     ]);
   } finally {
@@ -672,7 +679,10 @@ test('registered toolbar command ignores native context and focus; row command r
     await bulk(focused);
     // A menu that was created before a checkbox change must not use stale scope.
     await row(focused);
-    const checked = [{ workspace: entries[0], ids: ['a', 'b'] }];
+
+    const checked = [
+      { kind: 'chats' as const, workspace: entries[0], ids: ['a', 'b'] },
+    ];
 
     assert.deepEqual(deletions.slice(2), [checked, checked]);
     registeredManager.clearSelection();
@@ -685,7 +695,7 @@ test('registered toolbar command ignores native context and focus; row command r
     await row(focused);
 
     assert.deepEqual(deletions.at(-1), [
-      { workspace: entries[1], ids: ['focused'] },
+      { kind: 'chats', workspace: entries[1], ids: ['focused'] },
     ]);
 
     await registeredManager.select(a, true);
@@ -711,7 +721,7 @@ test('manifest exposes one row trash action per checkbox state and keeps toolbar
     (item: { command: string }) => item.command.includes('manageDelete'),
   );
 
-  assert.equal(rowDelete.length, 2);
+  assert.equal(rowDelete.length, 3);
   assert.equal(rowDelete[0].command, 'cursorChatTransit.manageDelete');
 
   assert.match(
@@ -721,12 +731,20 @@ test('manifest exposes one row trash action per checkbox state and keeps toolbar
 
   assert.equal(rowDelete[1].command, 'cursorChatTransit.manageDeleteItem');
 
+  assert.equal(
+    rowDelete[2].command,
+    'cursorChatTransit.manageDeleteWorkspaceData',
+  );
+
   assert.match(
     rowDelete[1].when,
     /&& !cursorChatTransit.manageHasCheckedItems$/,
   );
 
+  assert.match(rowDelete[2].when, /managedWorkspace/);
+  assert.doesNotMatch(rowDelete[2].when, /managedCurrentWorkspace/);
   assert.equal(rowDelete[0].group, rowDelete[1].group);
+  assert.equal(rowDelete[1].group, rowDelete[2].group);
 
   assert.deepEqual(
     menus['view/title']

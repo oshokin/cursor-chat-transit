@@ -144,11 +144,35 @@ function globalDbPath(
 }
 
 /** Path to `User/workspaceStorage`. */
-function workspaceStorageRoot(
+export function workspaceStorageRoot(
   /** Cursor user-data directory. */
   userDir: string,
 ): string {
   return path.join(userDir, 'User', 'workspaceStorage');
+}
+
+/**
+ * Direct `workspaceStorage` children that have no `state.vscdb`.
+ * Manage-only. These directories are not transfer sources.
+ */
+export function listIncompleteWorkspaceDirs(
+  /** Cursor user-data directory. */
+  userDir: string,
+): string[] {
+  const root = workspaceStorageRoot(userDir);
+
+  if (!fs.existsSync(root)) return [];
+  const ids: string[] = [];
+
+  for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!ent.isDirectory() || ent.isSymbolicLink()) continue;
+    if (ent.name === '.' || ent.name === '..') continue;
+    const db = path.join(root, ent.name, 'state.vscdb');
+
+    if (!fs.existsSync(db)) ids.push(ent.name);
+  }
+
+  return ids;
 }
 
 /** Parse `workspace.json` in a storage folder, if present. */
