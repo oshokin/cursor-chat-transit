@@ -115,7 +115,7 @@ export async function collectDiagnosticReport(
         timedCheck('Storage', async () => {
           try {
             const userDir = paths.preferStorageRoot(storageOptions());
-            const entries = paths.listWorkspaceEntries(userDir);
+            const entries = await paths.listWorkspaceEntriesAsync(userDir);
             const paired = entries.length > 0;
 
             return {
@@ -151,7 +151,10 @@ export async function collectDiagnosticReport(
           await fs.promises.mkdir(tmp, { recursive: true });
           const initFile = await ensureInitFile(tmp);
           const userDir = paths.preferStorageRoot(storageOptions());
-          const entries = paths.listWorkspaceEntries(userDir);
+
+          const entries = await paths.listWorkspaceEntriesAsync(userDir, {
+            signal,
+          });
 
           const resolved = resolveSelectedWorkspace(
             runtime.sourceWorkspace,

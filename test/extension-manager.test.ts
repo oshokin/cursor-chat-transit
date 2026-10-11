@@ -59,6 +59,10 @@ let listedComposers: import('../src/types').ComposerHeader[] = [
   { composerId: 'chat', name: 'Example' },
 ];
 
+let catalogueHeaders: import('../src/types').ComposerHeader[] = [
+  { composerId: 'found', name: 'Search target' },
+];
+
 let hideFirst = false;
 let failedFirst = false;
 let holdScan: (() => Promise<void>) | undefined;
@@ -275,6 +279,16 @@ loader._load = function (id, parent, isMain) {
   if (id === './extension-workspaces')
     return {
       listHostEntries: () => ({ entries, userDir: '/profile-managed' }),
+      listHostEntriesAsync: async () => ({
+        entries,
+        userDir: '/profile-managed',
+        identity: undefined,
+      }),
+      loadHostEntries: async () => ({
+        entries,
+        userDir: '/profile-managed',
+        identity: undefined,
+      }),
       currentWorkspaceDatabase: () => currentDatabase,
       prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
     };
@@ -321,7 +335,7 @@ loader._load = function (id, parent, isMain) {
           for (let index = 0; index < job.workspaces.length; index++)
             handlers.onCatalogue?.({
               index,
-              headers: [{ composerId: 'found', name: 'Search target' }],
+              headers: catalogueHeaders,
             });
 
           return { failed: 0 };
@@ -393,6 +407,7 @@ beforeEach(() => {
   savedSort = undefined;
   searchPickers = [];
   listedComposers = [{ composerId: 'chat', name: 'Example' }];
+  catalogueHeaders = [{ composerId: 'found', name: 'Search target' }];
   clearInterval(mockRuntime.progressTimer);
   for (const key of Object.keys(ui)) delete ui[key];
 });
@@ -549,6 +564,79 @@ test('one search covers collapsed workspaces, reuses headers, and reveals an act
     );
 
     assert.equal(jobs.filter((job) => job.kind === 'list-chats').length, 0);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('search then tree keeps one parent root for a nested family', async () => {
+  catalogueHeaders = familyHeaders;
+  const manager = new Manager(context, log);
+
+  try {
+    const search = manager.find(async () => {});
+    const picker = await readySearch();
+
+    const ids = picker.items
+      .filter(
+        (row) =>
+          row.node.chat &&
+          row.node.workspace.storageRoot === entries[0].storageRoot,
+      )
+      .map((row) => row.node.chat?.composerId)
+      .sort();
+
+    assert.deepEqual(ids, ['child', 'grand', 'parent']);
+    picker.hide();
+    await search;
+    const roots = await manager.getChildren();
+    const top = await manager.getChildren(roots[0]);
+
+    assert.deepEqual(
+      top.map((node) => node.chat?.composerId),
+      ['parent'],
+    );
+
+    const children = await manager.getChildren(top[0]);
+
+    assert.deepEqual(
+      children.map((node) => node.chat?.composerId),
+      ['child'],
+    );
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('tree then search still finds nested chats', async () => {
+  listedComposers = familyHeaders;
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+    const top = await manager.getChildren(roots[0]);
+
+    assert.deepEqual(
+      top.map((node) => node.chat?.composerId),
+      ['parent'],
+    );
+
+    const search = manager.find(async () => {});
+    const picker = await readySearch();
+
+    const ids = picker.items
+      .filter(
+        (row) =>
+          row.node.chat &&
+          row.node.workspace.workspaceDbPath ===
+            roots[0].workspace.workspaceDbPath,
+      )
+      .map((row) => row.node.chat?.composerId)
+      .sort();
+
+    assert.deepEqual(ids, ['child', 'grand', 'parent']);
+    picker.hide();
+    await search;
   } finally {
     manager.dispose();
   }
@@ -1238,8 +1326,8 @@ test('sort picker keeps the current mode until accept and does not rescan', asyn
 
     assert.ok(picker);
     assert.equal(picker.ignoreFocusOut, true);
-    assert.equal(picker.items[0]?.description, 'Current');
-    assert.equal(picker.items[1]?.description, '');
+    assert.equal(picker.items[0]?.description, 'A–Z · Current');
+    assert.equal(picker.items[1]?.description, 'Most recent first');
     picker.hide();
     await dismissed;
     assert.equal(savedSort, undefined);

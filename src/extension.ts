@@ -5,15 +5,12 @@ import { operationLogLevel } from './extension-settings';
 import { runtime, setSource, setUi, withLock } from './extension-state';
 import {
   currentWorkspaceDatabase,
-  listHostEntries,
+  loadHostEntries,
   pickWorkspace,
+  rememberSource,
 } from './extension-workspaces';
 import { asTransitLog, gateOperationLog, type TransitLog } from './output-ui';
-import {
-  annotateOpening,
-  resolveAutomaticWorkspace,
-  sameDatabasePath,
-} from './workspace-opening';
+import { resolveAutomaticWorkspace } from './workspace-opening';
 import { canQuitCursor, createQuitCursorAction } from './quit-cursor';
 import { TransferSidebar, type SidebarAction } from './sidebar-provider';
 
@@ -111,14 +108,14 @@ export function activate(
 
     if (action === 'chooseWorkspace') {
       if (runtime.busy) return;
-      const { entries, identity } = listHostEntries();
+      const { entries, identity } = await loadHostEntries();
 
       const picked = await pickWorkspace(entries, identity, 'select', {
         context,
         operations,
       });
 
-      if (picked) setSource(picked);
+      if (picked) rememberSource(context, picked);
 
       return;
     }
@@ -211,23 +208,16 @@ export function activate(
   setImmediate(() => {
     void (async () => {
       try {
-        const listed = listHostEntries();
-        const entries = await annotateOpening(listed.entries);
+        const listed = await loadHostEntries();
 
         const current = resolveAutomaticWorkspace(
-          entries,
+          listed.entries,
           currentWorkspaceDatabase(context),
           listed.identity,
         );
 
         if (!current) return;
-        const database = currentWorkspaceDatabase(context);
-
-        setSource(current, {
-          currentWindow: Boolean(
-            database && sameDatabasePath(current.workspaceDbPath, database),
-          ),
-        });
+        rememberSource(context, current);
       } catch {
         /* diagnostics remain available */
       }

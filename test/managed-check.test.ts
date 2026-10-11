@@ -53,6 +53,11 @@ loader._load = function (id, parent, isMain) {
 
         return { executable: 'sqlite3', initFile: '' };
       },
+      loadHostEntries: async () => ({
+        entries: [],
+        userDir: '/fixture',
+        identity: undefined,
+      }),
     };
   if (id === './extension-settings') return { transferSettings: () => ({}) };
   if (id === './transfer-process')

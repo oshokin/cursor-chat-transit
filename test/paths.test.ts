@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { preferStorageRoot } from '../src/paths';
+import {
+  listWorkspaceEntries,
+  listWorkspaceEntriesAsync,
+  preferStorageRoot,
+  readStorageEntry,
+} from '../src/paths';
 
 test('an invalid explicit storage root fails instead of selecting another paired root', async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-paths-'));
@@ -126,5 +131,77 @@ test('a directory without state.vscdb is manage-only and not a transfer source',
   assert.deepEqual(
     listWorkspaceEntries(dir).map((entry) => entry.storageId),
     ['ready'],
+  );
+});
+
+test('a destination reread loads only the named storage', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-one-storage-'));
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const storage = path.join(dir, 'User', 'workspaceStorage');
+
+  for (const id of ['target', 'other']) {
+    const folder = path.join(storage, id);
+
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'state.vscdb'), '');
+
+    await fs.writeFile(
+      path.join(folder, 'workspace.json'),
+      JSON.stringify({ folder: `file:///tmp/${id}` }),
+    );
+  }
+
+  const entry = await readStorageEntry(dir, 'target');
+
+  assert.equal(entry?.storageId, 'target');
+  assert.equal(entry?.identity?.uri.path, '/tmp/target');
+  assert.equal(await readStorageEntry(dir, 'missing'), undefined);
+});
+
+test('async inventory matches the sync list and a cancelled snapshot is empty', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-async-inventory-'));
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const storage = path.join(dir, 'User', 'workspaceStorage');
+
+  for (const [id, mtime] of [
+    ['older', 1_000],
+    ['newer', 2_000],
+  ] as const) {
+    const folder = path.join(storage, id);
+
+    await fs.mkdir(folder, { recursive: true });
+    const db = path.join(folder, 'state.vscdb');
+
+    await fs.writeFile(db, '');
+    await fs.utimes(db, mtime / 1000, mtime / 1000);
+
+    await fs.writeFile(
+      path.join(folder, 'workspace.json'),
+      JSON.stringify({ folder: `file:///tmp/${id}` }),
+    );
+  }
+
+  const listed = listWorkspaceEntries(dir);
+  const asyncListed = await listWorkspaceEntriesAsync(dir);
+
+  assert.deepEqual(
+    asyncListed.map((item) => item.storageId),
+    listed.map((item) => item.storageId),
+  );
+
+  assert.deepEqual(
+    asyncListed.map((item) => item.storageId),
+    ['newer', 'older'],
+  );
+
+  const cancelled = new AbortController();
+
+  cancelled.abort();
+
+  assert.deepEqual(
+    await listWorkspaceEntriesAsync(dir, { signal: cancelled.signal }),
+    [],
   );
 });

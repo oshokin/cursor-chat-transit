@@ -7,7 +7,8 @@ import { transferSettings } from './extension-settings';
 import { linkedSignal, withLock } from './extension-state';
 import {
   currentWorkspaceDatabase,
-  listHostEntries,
+  listHostEntriesAsync,
+  loadHostEntries,
   prepareSqlite,
 } from './extension-workspaces';
 import type { ManagedNode } from './managed-node';
@@ -33,7 +34,6 @@ import {
 } from './chat-family';
 import { workspacePresentation } from './workspace-presentation';
 import {
-  annotateOpening,
   orderWorkspaceEntries,
   storageExplanation,
   storageMark,
@@ -53,6 +53,8 @@ export class ChatManager
   private readonly results = new Map<string, StatisticsUpdate>();
   /** Headers for one workspace, used to place subagents without another read. */
   private readonly headerCache = new Map<string, ComposerHeader[]>();
+  /** Composer id to header for the same snapshot as `headerCache`. */
+  private readonly headerIndex = new Map<string, Map<string, ComposerHeader>>();
   /** Family links for those headers. */
   private readonly familyCache = new Map<string, FamilyGraph>();
   /** Workspace row order. Name is the default; Recent keeps the previous order. */
@@ -253,7 +255,7 @@ export class ChatManager
         this.context,
         async () => {
           const sqlite = await prepareSqlite(this.context);
-          const host = listHostEntries();
+          const host = await listHostEntriesAsync();
 
           return vscode.window.withProgress(
             {
@@ -628,6 +630,7 @@ export class ChatManager
     this.selection.clear();
     this.results.clear();
     this.headerCache.clear();
+    this.headerIndex.clear();
     this.familyCache.clear();
     this.changed.fire(undefined);
   }
@@ -689,14 +692,17 @@ export class ChatManager
     pick.matchOnDetail = true;
 
     const name = {
-      label: 'Name (A–Z)',
-      description: this.workspaceSort === 'name' ? 'Current' : '',
+      label: 'Name',
+      description: this.workspaceSort === 'name' ? 'A–Z · Current' : 'A–Z',
       detail: 'Sort by name, then location.',
     };
 
     const recent = {
-      label: 'Recently active',
-      description: this.workspaceSort === 'recent' ? 'Current' : '',
+      label: 'Recent activity',
+      description:
+        this.workspaceSort === 'recent'
+          ? 'Most recent first · Current'
+          : 'Most recent first',
       detail:
         'Based on database activity, not the last time a workspace was opened.',
     };
@@ -759,12 +765,14 @@ export class ChatManager
     const stack = [...(graph.nodes.get(composerId)?.childComposerIds || [])];
     const seen = new Set<string>();
 
+    const index = new Map(headers.map((header) => [header.composerId, header]));
+
     while (stack.length) {
       const id = stack.pop();
 
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      const header = headers.find((item) => item.composerId === id);
+      const header = index.get(id);
 
       if (header) out.push(header);
 
@@ -1027,19 +1035,13 @@ export class ChatManager
       const visible =
         this.showAll ||
         !roots.some(
-          (
-            /** Directory that contains the extracted or staged archive. */
-            root,
-          ) =>
+          (root) =>
             this.results.get(this.key(root))?.failed ||
             this.results.get(this.key(root))?.hide,
         )
           ? roots
           : roots.filter(
-              (
-                /** Directory that contains the extracted or staged archive. */
-                root,
-              ) =>
+              (root) =>
                 !(
                   this.results.get(this.key(root))?.failed ||
                   this.results.get(this.key(root))?.hide
@@ -1100,16 +1102,8 @@ export class ChatManager
       );
 
       log.finish('completed');
-      const ordered = orderedChatHeaders(result.allComposers);
-      const key = workspaceStatisticsKey(workspace);
 
-      this.headerCache.set(key, ordered);
-      this.familyCache.set(key, buildFamily(ordered));
-
-      return topLevelChats(ordered).map((chat) => ({
-        workspace,
-        chat,
-      }));
+      return this.storeCatalogue(workspace, result.allComposers);
     } catch (error) {
       log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
 
@@ -1125,19 +1119,52 @@ export class ChatManager
     }
   }
 
+  /**
+   * One catalogue snapshot.
+   * The tree promise holds top-level chats. Search reads every header from the index.
+   */
+  private storeCatalogue(
+    /** Physical workspace these headers belong to. */
+    workspace: WorkspaceEntry,
+    /** Header rows from list-chats or the catalogue worker. */
+    headers: ComposerHeader[],
+  ): ManagedNode[] {
+    const ordered = orderedChatHeaders(headers);
+    const key = workspaceStatisticsKey(workspace);
+
+    this.headerCache.set(key, ordered);
+
+    this.headerIndex.set(
+      key,
+      new Map(ordered.map((header) => [header.composerId, header])),
+    );
+
+    this.familyCache.set(key, buildFamily(ordered));
+
+    const roots = topLevelChats(ordered).map((chat) => ({
+      workspace,
+      chat,
+    }));
+
+    this.lists.set(key, Promise.resolve(roots));
+
+    return roots;
+  }
+
   /** Keep readable storage, including empty storage, with a shared header cache. */
   private async loadWorkspaces(
     /** Cancellation for the shared workspace scan. */
     signal: AbortSignal,
   ): Promise<ManagedNode[]> {
-    const host = listHostEntries();
+    this.operationMessage = 'Preparing workspace list…';
+    this.publishMessage();
 
-    const annotated = await annotateOpening(host.entries, { signal });
+    const host = await loadHostEntries({ signal });
 
     if (signal.aborted) return [];
 
     const entries = workspacePickItems(
-      annotated,
+      host.entries,
       host.identity,
       currentWorkspaceDatabase(this.context),
     ).map((row) => row.entry);
@@ -1243,9 +1270,9 @@ export class ChatManager
       .get(key)
       ?.nodes.get(node.chat.composerId)?.parentComposerId;
 
-    const parent = (this.headerCache.get(key) || []).find(
-      (header) => header.composerId === parentId,
-    );
+    const parent = parentId
+      ? this.headerIndex.get(key)?.get(parentId)
+      : undefined;
 
     return parent ? { workspace: node.workspace, chat: parent } : workspace;
   }
@@ -1286,31 +1313,32 @@ export class ChatManager
         const pending: WorkspaceEntry[] = [];
 
         const rank = new Map(
-          roots.map(
-            (
-              /** Directory that contains the extracted or staged archive. */
-              root,
-              index,
-            ) => [workspaceStatisticsKey(root.workspace), index],
-          ),
+          roots.map((root, index) => [
+            workspaceStatisticsKey(root.workspace),
+            index,
+          ]),
         );
 
-        // Cached headers are small and avoid a second read on repeated searches.
+        // Cached headers are the full catalogue. The tree list is only the roots.
         for (const root of roots) {
-          const cached = this.lists.get(workspaceStatisticsKey(root.workspace));
+          const key = workspaceStatisticsKey(root.workspace);
+          const cached = this.lists.get(key);
 
           if (cached) {
             const nodes = await cached;
 
             signal.throwIfAborted();
-            if (nodes.some((node) => node.error)) pending.push(root.workspace);
+            const headers = this.headerCache.get(key);
+
+            if (nodes.some((node) => node.error) || !headers)
+              pending.push(root.workspace);
             else
               append(
                 managedSearchItems(
                   root.workspace,
-                  nodes.flatMap((node) => (node.chat ? [node.chat] : [])),
+                  headers,
                   undefined,
-                  rank.get(workspaceStatisticsKey(root.workspace)),
+                  rank.get(key),
                 ),
               );
           } else pending.push(root.workspace);
@@ -1342,16 +1370,7 @@ export class ChatManager
                 if (!workspace) return;
                 const headers = orderedChatHeaders(row.headers || []);
 
-                if (!row.error)
-                  this.lists.set(
-                    workspaceStatisticsKey(workspace),
-                    Promise.resolve(
-                      headers.map((chat) => ({
-                        workspace,
-                        chat,
-                      })),
-                    ),
-                  );
+                if (!row.error) this.storeCatalogue(workspace, headers);
 
                 append(
                   managedSearchItems(

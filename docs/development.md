@@ -47,6 +47,8 @@ npm run check
 
 `npm run check` is compile + typecheck + lint + format + tests.
 
+Change workspace, import, export, and Manage chats share one annotated inventory. Search and the tree share one catalogue snapshot: the tree shows roots, and search reads every header. Import rechecks only the chosen storage. Windows drive-letter hashes and Keep-after-a-changed-expected-id are fixture tests, not live Windows or macOS runs. `npm run test:host` is the Extension Development Host; it was not a substitute for a Cursor profile.
+
 TypeScript sources live in `src/` and compile to `out/`. The sidebar client compiles from `webview/` to `resources/sidebar-client.js`. `npm run watch` (or the VS Code **watch** task) rebuilds both. Tests and scripts run with `tsx`. `tsc -p tsconfig.check.json` typechecks scripts and tests. Node tests live in `test/*.test.ts`; `*.sqlite.test.ts` needs the sqlite3 CLI. `test/host` is the VS Code smoke runner.
 
 ## Debug loops
@@ -169,7 +171,7 @@ Settings and command IDs use `cursorChatTransit.*`. File imports accept only ver
 
 ## Opt-in performance checks
 
-Compile, then run `npm run test:perf` or `task test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases, then runs two benchmarks in order. Workspace filtering and checked chat selection use three repetitions; `CCT_BENCH_BLOBS` defaults to 2048 and `CCT_BENCH_CHATS` to 4. Import, export, and repeated import use `CCT_BENCH_MESSAGES` (default 3,000), `CCT_BENCH_MESSAGE_BYTES` (default 16 KiB), and `CCT_BENCH_RANDOM=1` for less-compressible payloads. `CCT_BENCH_PROJECT` points both benchmarks at another compiled checkout. Compare versions one after another on the same machine. A large transfer check can still start only the archive benchmark with `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
+Compile, then run `npm run test:perf` or `task test:perf` with sqlite3 on PATH. It creates and removes only temporary fixture databases, then runs three benchmarks in order. The third compares the indexed family-plan adjustment with the previous per-row filters, and the async profile inventory with the synchronous listing, on 100, 1,000, and 5,000 temporary storage directories. Seven samples report a median and a min-to-max range; that is not a tail-latency estimate. The async listing is there to keep the extension host responsive. Its wall time can match the synchronous listing. Workspace filtering and checked chat selection use three repetitions; `CCT_BENCH_BLOBS` defaults to 2048 and `CCT_BENCH_CHATS` to 4. Import, export, and repeated import use `CCT_BENCH_MESSAGES` (default 3,000), `CCT_BENCH_MESSAGE_BYTES` (default 16 KiB), and `CCT_BENCH_RANDOM=1` for less-compressible payloads. `CCT_BENCH_PROJECT` points both benchmarks at another compiled checkout. Compare versions one after another on the same machine. A large transfer check can still start only the archive benchmark with `node --max-old-space-size=256 --import tsx scripts/perf-bundle.ts`; the V8 heap limit is not a process RSS limit.
 
 Results include import/export/repeat durations, maximum batch transaction duration when instrumented, process peak sampled RSS, logical payload size and final ZIP bytes. Values describe this synthetic workload and machine; they do not predict every Cursor profile. RSS excludes SQLite child processes. The first archive creation is setup, not part of the import timing.
 

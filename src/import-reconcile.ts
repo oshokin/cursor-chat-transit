@@ -1,4 +1,3 @@
-import fs from 'node:fs';
 import path from 'node:path';
 import { attachmentDirectory, isAttachmentBasename } from './attachments';
 import { canvasFilenamesFromChat, readCanvasFile } from './canvases';
@@ -24,6 +23,7 @@ import {
   type PendingImportChat,
 } from './journal';
 import { planFilenamesFromChat, readPlanFile } from './plans';
+import { hashFile } from './hash-file';
 import { sha256Hex } from './resource-bytes';
 import type {
   BubbleRecord,
@@ -66,17 +66,24 @@ export function pendingChatsFromClone(opts: {
   /** Completeness of each source chat in this batch. */
   quality: Map<string, 'complete' | 'history-only'>;
 }): PendingImportChat[] {
+  const bubblesBySource = new Map<string, Array<[string, string]>>();
+
+  for (const [compound, newId] of opts.bubbleMap) {
+    const sep = compound.indexOf('\0');
+
+    if (sep < 0) continue;
+    const sourceId = compound.slice(0, sep);
+    const pair: [string, string] = [compound.slice(sep + 1), newId];
+    const grouped = bubblesBySource.get(sourceId);
+
+    if (grouped) grouped.push(pair);
+    else bubblesBySource.set(sourceId, [pair]);
+  }
+
   const chats: PendingImportChat[] = [];
 
   for (const [sourceId, targetId] of opts.composerMap) {
-    const bubbleMap: Array<[string, string]> = [];
-
-    for (const [compound, newId] of opts.bubbleMap) {
-      const sep = compound.indexOf('\0');
-
-      if (sep < 0 || compound.slice(0, sep) !== sourceId) continue;
-      bubbleMap.push([compound.slice(sep + 1), newId]);
-    }
+    const bubbleMap = bubblesBySource.get(sourceId) || [];
 
     const body = opts.cloned.composers[targetId] || '';
 
@@ -348,9 +355,9 @@ export async function pendingResourceMatches(
       const dest = path.join(attachmentDirectory(opts.workspace), dep.id);
 
       try {
-        const bytes = await fs.promises.readFile(dest);
+        const hashed = await hashFile(dest);
 
-        return sha256Hex(bytes) === dep.sha256;
+        return hashed.sha256 === dep.sha256;
       } catch {
         return false;
       }
@@ -359,9 +366,14 @@ export async function pendingResourceMatches(
     const found = await resolveAttachmentPath(opts.workspace, dep.id);
 
     if (!found) return false;
-    const bytes = await fs.promises.readFile(found.filePath);
 
-    return sha256Hex(bytes) === dep.sha256;
+    try {
+      const hashed = await hashFile(found.filePath);
+
+      return hashed.sha256 === dep.sha256;
+    } catch {
+      return false;
+    }
   }
 
   if (dep.kind === 'plan') {

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { mapInBatches } from './bounded-io';
 import { identityFromWorkspaceJson, workspaceKey } from './core';
 import { workspacePresentation } from './workspace-presentation';
 import type { WorkspaceEntry, WorkspaceIdentity } from './types';
@@ -175,18 +176,84 @@ export function listIncompleteWorkspaceDirs(
   return ids;
 }
 
+/** Parse workspace.json text. Invalid metadata is an unidentified storage. */
+function identityFromMetaText(text: string): WorkspaceIdentity | undefined {
+  try {
+    return identityFromWorkspaceJson(JSON.parse(text));
+  } catch {
+    return undefined;
+  }
+}
+
 /** Parse `workspace.json` in a storage folder, if present. */
 function readWorkspaceMeta(storageDir: string): WorkspaceIdentity | undefined {
   const jsonPath = path.join(storageDir, 'workspace.json');
 
   try {
     if (!fs.existsSync(jsonPath) || !isFile(jsonPath)) return undefined;
-    const meta: unknown = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 
-    return identityFromWorkspaceJson(meta);
+    return identityFromMetaText(fs.readFileSync(jsonPath, 'utf8'));
   } catch {
     return undefined;
   }
+}
+
+/**
+ * One physical storage, read again before a write.
+ * Does not list the rest of the profile.
+ */
+export async function readStorageEntry(
+  /** Cursor user-data directory. */
+  userDir: string,
+  /** Storage directory name under workspaceStorage. */
+  storageId: string,
+): Promise<WorkspaceEntry | undefined> {
+  const storageDir = path.join(workspaceStorageRoot(userDir), storageId);
+  const dbPath = path.join(storageDir, 'state.vscdb');
+
+  let stat: fs.Stats;
+
+  try {
+    stat = await fs.promises.stat(dbPath);
+  } catch {
+    return undefined;
+  }
+
+  if (!stat.isFile()) return undefined;
+  let identity: WorkspaceIdentity | undefined;
+
+  try {
+    identity = identityFromMetaText(
+      await fs.promises.readFile(
+        path.join(storageDir, 'workspace.json'),
+        'utf8',
+      ),
+    );
+  } catch {
+    identity = undefined;
+  }
+
+  let mtime = stat.mtimeMs || 0;
+
+  try {
+    const wal = await fs.promises.stat(`${dbPath}-wal`);
+
+    if (wal.isFile()) mtime = Math.max(mtime, wal.mtimeMs);
+  } catch {
+    /* The main database time remains the activity hint. */
+  }
+
+  return {
+    storageRoot: userDir,
+    storageId,
+    workspaceDbPath: dbPath,
+    globalDbPath: globalDbPath(userDir),
+    mtime,
+    identity,
+    key: identity
+      ? workspaceKey(identity.kind, identity.uri)
+      : `id:${storageId}`,
+  };
 }
 
 /** Latest local storage write is a recency hint, not proof of the last editor visit. */
@@ -240,6 +307,57 @@ export function listWorkspaceEntries(
   results.sort((a, b) => b.mtime - a.mtime);
 
   return results;
+}
+
+/**
+ * Same inventory as `listWorkspaceEntries`, read with bounded async stat calls.
+ * Cancellation does not start another batch. An in-flight stat is ignored by
+ * returning no rows rather than a partial snapshot.
+ */
+export async function listWorkspaceEntriesAsync(
+  /** Cursor user-data directory. */
+  userDir: string,
+  options?: {
+    /** Refresh that must not publish this snapshot. */
+    signal?: AbortSignal;
+  },
+): Promise<WorkspaceEntry[]> {
+  if (options?.signal?.aborted) return [];
+  const root = workspaceStorageRoot(userDir);
+  let names: string[];
+
+  try {
+    const dirents = await fs.promises.readdir(root, { withFileTypes: true });
+
+    names = dirents.filter((ent) => ent.isDirectory()).map((ent) => ent.name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+
+    throw error;
+  }
+
+  const entries: WorkspaceEntry[] = [];
+
+  try {
+    for await (const batch of mapInBatches(
+      names,
+      (storageId) => readStorageEntry(userDir, storageId),
+      options?.signal,
+    )) {
+      if (options?.signal?.aborted) return [];
+
+      for (const entry of batch) if (entry) entries.push(entry);
+    }
+  } catch (error) {
+    if (options?.signal?.aborted) return [];
+
+    throw error;
+  }
+
+  if (options?.signal?.aborted) return [];
+  entries.sort((a, b) => b.mtime - a.mtime);
+
+  return entries;
 }
 
 /** Human-readable label; SSH host aliases never replace workspace identity. */

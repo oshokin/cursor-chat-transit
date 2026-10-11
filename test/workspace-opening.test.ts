@@ -204,7 +204,7 @@ test('Windows drive and UNC paths use fsPath, not a URL string', () => {
       { scheme: 'file', authority: '', path: '/C:/Work/App' },
       'win32',
     ),
-    'C:\\Work\\App',
+    'c:\\Work\\App',
   );
 
   assert.equal(
@@ -213,6 +213,19 @@ test('Windows drive and UNC paths use fsPath, not a URL string', () => {
       'win32',
     ),
     '\\\\server\\share\\folder',
+  );
+});
+
+test('a lowercase Windows drive is the independent folder hash input', () => {
+  assert.deepEqual(
+    openingStorageId({
+      platform: 'win32',
+      kind: 'folder',
+      scheme: 'file',
+      hashed: 'c:\\Work\\App',
+      stat: { birthtimeMs: 1700000000123.9 },
+    }),
+    { status: 'id', id: '1e03d7f65ade7a6fb6e8c47c74b8c7b2' },
   );
 });
 
@@ -629,8 +642,20 @@ test('a vanished or recreated destination stops instead of changing the target',
 
   const kept = recheckDestination(chosen, [recreated], true);
 
-  assert.equal(kept.status, 'ok');
-  if (kept.status === 'ok') assert.equal(kept.entry.storageId, 'older');
+  assert.equal(kept.status, 'stop');
+
+  const moved = {
+    ...chosen,
+    identity: folder('/other'),
+    opening: { reason: 'stat-unavailable' as const, duplicate: true },
+  };
+
+  const chosenUnknown = {
+    ...chosen,
+    opening: { reason: 'stat-unavailable' as const, duplicate: true },
+  };
+
+  assert.equal(recheckDestination(chosenUnknown, [moved], true).status, 'stop');
 });
 
 test('one snapshot stats each local folder once and issues no SQL', async () => {

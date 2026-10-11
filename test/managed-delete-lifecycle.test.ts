@@ -89,6 +89,16 @@ loader._load = function (id, parent, isMain) {
         userDir: '/fixture',
         identity: undefined,
       }),
+      listHostEntriesAsync: async () => ({
+        entries: [],
+        userDir: '/fixture',
+        identity: undefined,
+      }),
+      loadHostEntries: async () => ({
+        entries: [],
+        userDir: '/fixture',
+        identity: undefined,
+      }),
       currentWorkspaceDatabase: () => undefined,
     };
   if (id === './transfer-process')

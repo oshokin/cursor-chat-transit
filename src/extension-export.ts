@@ -20,13 +20,13 @@ import {
   finishPhaseProgress,
   linkedSignal,
   runtime,
-  setSource,
   setUi,
 } from './extension-state';
 import {
   currentWorkspaceDatabase,
   hostState,
   pickWorkspace,
+  rememberSource,
 } from './extension-workspaces';
 import { resolveAutomaticWorkspace } from './workspace-opening';
 import { ZIP_FILTER } from './file-dialogs';
@@ -85,7 +85,7 @@ export async function doExport(opts: {
       });
 
       workspace = await pickWorkspace(entries, identity, 'export', opts);
-      if (workspace) setSource(workspace);
+      if (workspace) rememberSource(opts.context, workspace);
     }
 
     if (!workspace) {

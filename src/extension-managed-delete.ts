@@ -16,7 +16,7 @@ import {
 } from './extension-state';
 import {
   currentWorkspaceDatabase,
-  listHostEntries,
+  listHostEntriesAsync,
   prepareSqlite,
 } from './extension-workspaces';
 import {
@@ -28,7 +28,6 @@ import { notifyCompletion } from './notifications';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
 import { runTransfer } from './transfer-process';
-import type { WorkspaceIdentity } from './types';
 
 /**
  * Confirm once, delete in the ordinary cancellable worker, then offer the existing Quit action.
@@ -59,7 +58,7 @@ export async function deleteManagedChats(
     const log = startOperationLog(operations, 'delete managed chats');
     let workerStarted = false;
     let needsRestart = priorRestart;
-    const host = listHostEntries();
+    const host = await listHostEntriesAsync();
 
     const windowFacts = {
       database: currentWorkspaceDatabase(context),
@@ -188,6 +187,7 @@ export async function deleteManagedChats(
         async (progress, token) => {
           workerStarted = true;
           const signal = linkedSignal(token);
+          const fresh = await listHostEntriesAsync({ signal });
 
           return runTransfer<ManagedDeleteResult>(
             {
@@ -195,10 +195,9 @@ export async function deleteManagedChats(
               ...sqlite,
               ...settings,
               plan: prepared.plan,
-              workspaces: listHostEntries().entries,
+              workspaces: fresh.entries,
               database: currentWorkspaceDatabase(context),
-              identity: listHostEntries().identity as
-                WorkspaceIdentity | undefined,
+              identity: fresh.identity,
               emptyWindow: windowFacts.emptyWindow,
             },
             {

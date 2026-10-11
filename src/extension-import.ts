@@ -15,10 +15,13 @@ import {
   finishPhaseProgress,
   linkedSignal,
   runtime,
-  setSource,
   setUi,
 } from './extension-state';
-import { hostState, pickWorkspace } from './extension-workspaces';
+import {
+  hostState,
+  pickWorkspace,
+  rememberSource,
+} from './extension-workspaces';
 import * as paths from './paths';
 import {
   annotateOpening,
@@ -110,7 +113,7 @@ export async function doImport(opts: {
       });
 
       workspace = await pickWorkspace(entries, identity, 'select', opts);
-      if (workspace) setSource(workspace);
+      if (workspace) rememberSource(opts.context, workspace);
     }
 
     if (!workspace) {
@@ -156,7 +159,13 @@ export async function doImport(opts: {
     }
 
     if (destination.workspaceDbPath) {
-      const fresh = await annotateOpening(paths.listWorkspaceEntries(userDir));
+      const target = await paths.readStorageEntry(
+        userDir,
+        destination.storageId,
+      );
+
+      const fresh = target ? await annotateOpening([target]) : [];
+
       const checked = recheckDestination(destination, fresh, keptSelection);
 
       if (checked.status === 'stop') {
@@ -177,6 +186,8 @@ export async function doImport(opts: {
 
       destination = checked.entry;
     }
+
+    rememberSource(opts.context, destination);
 
     setUi({
       status: 'running',

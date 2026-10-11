@@ -19,7 +19,7 @@ No OrderManager workspace URI appears in this fragment. The exact storage IDs in
 5. **No unused inspection hashes.** Health inspection no longer computes a content hash that its sink discards. Export hashes and import checks remain in place.
 6. **Bounded independent file reads.** Export inventory hashing and ZIP source inspection use at most `min(4, os.availableParallelism())` concurrent reads. Inventory output retains input order. Failed or cancelled batches drain all started reads before cleanup; later batches never start.
 7. **Physical workspace binding.** Global headers with an explicit storage ID belong to that storage entry. A matching project URI cannot attach them to every older/newer storage directory at that path. URI-only headers remain a fallback, and explicit local lists remain visible. The separate import conflict rules are unchanged.
-8. **Unambiguous Current label.** Use the extension host's workspace-storage location when available. Without it, a URI match is only decisive when exactly one storage entry matches. Never merge databases or mark several generations as current based only on their path.
+8. **Unambiguous Current label.** Current window is the physical database this window has open. A matching project URI alone does not mark a row current, even when only one storage has that URI. Never merge databases or mark several generations as current based only on their path.
 
 These changes introduce no new settings, registry dependencies, archive version, database journal mode, persistent payload cache, or full-database copy.
 
@@ -72,7 +72,7 @@ The public Cursor repository does not provide the full editor implementation, an
 
 ## Next feature: a persistent Storage view
 
-Historical proposal: the current implementation uses a native Manage chats tree with selection, checks, reversible filtering and confirmed history deletion (see [Usage](usage.md#manage-chats)). Physical deletion below remains unimplemented. Keep the workspace picker focused on choosing a transfer source or destination. Add one **Manage storage** action that opens a persistent editor panel with Workspace and Chat views.
+The current implementation uses a native Manage chats tree with selection, checks, reversible filtering, confirmed chat deletion, and **Delete workspace data…** (see [Usage](usage.md#manage-chats)). Deleting workspace data removes that storage directory except for the database this window has open; that directory is kept while the window is open. The notes below are the earlier proposal for a separate editor panel and are not the current screen.
 
 The first small release should provide:
 

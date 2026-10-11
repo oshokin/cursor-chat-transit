@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { currentIdentity } from './core';
+import { setSource } from './extension-state';
 import { config, storageOptions } from './extension-settings';
 import * as paths from './paths';
 import {
@@ -16,7 +17,11 @@ import {
 import { ensureInitFile, findSqliteExecutable } from './sqlite';
 import type { WorkspaceEntry, WorkspaceIdentity } from './types';
 import { workspacePresentation } from './workspace-presentation';
-import { annotateOpening, destinationStaysVisible } from './workspace-opening';
+import {
+  annotateOpening,
+  destinationStaysVisible,
+  sameDatabasePath,
+} from './workspace-opening';
 
 /** Resolve sqlite3 and an empty `-init` file in globalStorage. */
 export async function prepareSqlite(
@@ -45,7 +50,26 @@ export async function prepareSqlite(
   return { executable, initFile };
 }
 
-/** List local storage entries without requiring sqlite3. */
+/** User-data directory and the identity of this window, without reading storage. */
+function hostScope(): {
+  /** Cursor user-data directory that was searched. */
+  userDir: string;
+  /** Identity of the workspace open in this window, when it can be read. */
+  identity: WorkspaceIdentity | undefined;
+} {
+  return {
+    userDir: paths.preferStorageRoot(storageOptions()),
+    identity: currentIdentity(
+      vscode.workspace.workspaceFile,
+      vscode.workspace.workspaceFolders,
+    ),
+  };
+}
+
+/**
+ * Synchronous inventory for a low-level task that does not need opening facts.
+ * UI routes use `listHostEntriesAsync`.
+ */
 export function listHostEntries(): {
   /** Cursor user-data directory that was searched. */
   userDir: string;
@@ -54,15 +78,57 @@ export function listHostEntries(): {
   /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
 } {
-  const userDir = paths.preferStorageRoot(storageOptions());
+  const scope = hostScope();
 
   return {
-    userDir,
-    entries: paths.listWorkspaceEntries(userDir),
-    identity: currentIdentity(
-      vscode.workspace.workspaceFile,
-      vscode.workspace.workspaceFolders,
-    ),
+    ...scope,
+    entries: paths.listWorkspaceEntries(scope.userDir),
+  };
+}
+
+/** Profile inventory with bounded metadata reads. A cancelled snapshot is empty. */
+export async function listHostEntriesAsync(options?: {
+  /** Refresh that must not publish this snapshot. */
+  signal?: AbortSignal;
+}): Promise<{
+  /** Cursor user-data directory that was searched. */
+  userDir: string;
+  /** Discovered workspace storage pairs. */
+  entries: WorkspaceEntry[];
+  /** Identity of the workspace open in this window, when it can be read. */
+  identity: WorkspaceIdentity | undefined;
+}> {
+  const scope = hostScope();
+
+  return {
+    ...scope,
+    entries: await paths.listWorkspaceEntriesAsync(scope.userDir, options),
+  };
+}
+
+/**
+ * One prepared inventory for Change, startup, import, export, and Manage chats.
+ * Opening facts are attached once. SQLite is not required for this step.
+ */
+export async function loadHostEntries(options?: {
+  /** Refresh that should not publish this snapshot. */
+  signal?: AbortSignal;
+}): Promise<{
+  /** Cursor user-data directory that was searched. */
+  userDir: string;
+  /** Physical entries with opening facts for this snapshot. */
+  entries: WorkspaceEntry[];
+  /** Identity of the workspace open in this window, when it can be read. */
+  identity: WorkspaceIdentity | undefined;
+}> {
+  const listed = await listHostEntriesAsync(options);
+
+  if (options?.signal?.aborted) return { ...listed, entries: [] };
+
+  return {
+    userDir: listed.userDir,
+    identity: listed.identity,
+    entries: await annotateOpening(listed.entries, { signal: options?.signal }),
   };
 }
 
@@ -87,14 +153,34 @@ export async function hostState(
   identity: WorkspaceIdentity | undefined;
 }> {
   const sqlite = await prepareSqlite(context);
-  const listed = listHostEntries();
+  const listed = await loadHostEntries();
 
-  return {
-    sqlite,
-    userDir: listed.userDir,
-    identity: listed.identity,
-    entries: await annotateOpening(listed.entries),
-  };
+  return { sqlite, ...listed };
+}
+
+/**
+ * Remember the selected storage and mark Current window only for this window's database.
+ * A later selection of another storage clears that mark.
+ */
+export function rememberSource(
+  /** Extension storage used to read this window's database path. */
+  context: vscode.ExtensionContext,
+  /** Selected workspace, or none. */
+  entry: WorkspaceEntry | undefined,
+): void {
+  if (!entry) {
+    setSource(undefined);
+
+    return;
+  }
+
+  const database = currentWorkspaceDatabase(context);
+
+  setSource(entry, {
+    currentWindow: Boolean(
+      database && sameDatabasePath(entry.workspaceDbPath, database),
+    ),
+  });
 }
 
 /** Local physical workspace database reported by the host, including profile isolation. */

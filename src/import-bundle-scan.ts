@@ -1,7 +1,5 @@
-import {
-  coherentFamilyAssignment,
-  familyImportAdjustments,
-} from './chat-family';
+import { coherentFamilyAssignment } from './chat-family';
+import { adjustFamilyPlan, type CatalogFamilyRow } from './import-family-plan';
 import { textRecovery } from './text-recovery';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -26,7 +24,11 @@ import {
   Plan,
 } from './import-bundle-common';
 import { reusedSha } from './import-bundle-resources';
-import { classifyTargetObservation, decideImport } from './import-policy';
+import {
+  classifyTargetObservation,
+  decideImport,
+  type Receipt,
+} from './import-policy';
 import { observeTargetComposer } from './import-reconcile';
 import { JournalStore } from './journal-db';
 import { readNdjson } from './ndjson-io';
@@ -74,16 +76,8 @@ export async function scanAll(opts: {
   };
 
   const receipts = await opts.journal.receipts();
-
-  const familyRows: Array<{
-    sourceId: string;
-    ordinal: number;
-    name?: string;
-    decision: 'create' | 'skip';
-    targetId: string;
-    hash: string;
-    header: ComposerHeader;
-  }> = [];
+  const receiptsBySource = receiptsByComposer(receipts);
+  const familyRows: CatalogFamilyRow[] = [];
 
   for (const file of await ndjsonFiles(path.join(opts.root, 'catalog'))) {
     for await (const row of readNdjson(
@@ -174,8 +168,7 @@ export async function scanAll(opts: {
       );
 
       if (decision.action === 'blocked') {
-        const targets = receipts
-          .filter((row) => row.sourceComposerId === sourceId)
+        const targets = (receiptsBySource.get(sourceId) || [])
           .map((row) => row.targetComposerId)
           .join(' ');
 
@@ -226,62 +219,25 @@ export async function scanAll(opts: {
     }
   }
 
-  const adjusted = familyImportAdjustments(familyRows);
+  const adjusted = adjustFamilyPlan(familyRows, plan);
 
-  for (const sourceId of adjusted.drop) {
-    const row = familyRows.find((item) => item.sourceId === sourceId);
-
-    if (!row) continue;
-
-    await opts.work.exec(
-      `UPDATE chat SET decision='skip', reason='missing-family' WHERE source_id=${sqlText(sourceId)};`,
-    );
-
-    plan.create = plan.create.filter((ordinal) => ordinal !== row.ordinal);
-
-    plan.newVersions = plan.newVersions.filter(
-      (item) => item.composerId !== sourceId,
-    );
-
-    plan.restored = plan.restored.filter(
-      (item) => item.composerId !== sourceId,
-    );
-
-    plan.skipped.push({
-      composerId: sourceId,
-      name: row.name,
-      reason: 'The parent chat is not in this archive.',
-    });
-  }
-
-  for (const sourceId of adjusted.promote) {
-    const row = familyRows.find((item) => item.sourceId === sourceId);
-
-    if (!row) continue;
-    const targetId = randomUUID();
+  for (const update of adjusted.updates) {
+    const assignment =
+      update.decision === 'create'
+        ? `, target_id=${sqlText(update.targetId || '')}`
+        : '';
 
     await opts.work.exec(
-      `UPDATE chat SET decision='create', target_id=${sqlText(targetId)}, reason='family-copy' WHERE source_id=${sqlText(sourceId)};`,
+      `UPDATE chat SET decision=${sqlText(update.decision)}${assignment}, reason=${sqlText(update.reason)} WHERE source_id=${sqlText(update.sourceId)};`,
     );
-
-    plan.already = plan.already.filter((item) => item.composerId !== sourceId);
-    plan.create.push(row.ordinal);
-
-    plan.newVersions.push({
-      composerId: sourceId,
-      name: row.name,
-      reason: 'A subagent changed; a new conversation family will be created',
-    });
   }
 
-  const skipped = familyRows.filter(
-    (row) =>
-      row.decision === 'skip' &&
-      !adjusted.promote.includes(row.sourceId) &&
-      !adjusted.drop.includes(row.sourceId),
+  await realignSkippedFamilies(
+    opts,
+    adjusted.skippedFamilies,
+    receiptsBySource,
+    plan,
   );
-
-  await realignSkippedFamilies(opts, skipped, receipts, plan);
 
   return plan;
 }
@@ -289,15 +245,8 @@ export async function scanAll(opts: {
 /** Keep a reused family on one destination copy. A split pair becomes a new family. */
 async function realignSkippedFamilies(
   opts: Parameters<typeof scanAll>[0],
-  rows: Array<{
-    sourceId: string;
-    ordinal: number;
-    name?: string;
-    targetId: string;
-    hash: string;
-    header: ComposerHeader;
-  }>,
-  receipts: Awaited<ReturnType<JournalStore['receipts']>>,
+  rows: CatalogFamilyRow[],
+  receiptsBySource: ReadonlyMap<string, readonly Receipt[]>,
   plan: Plan,
 ): Promise<void> {
   if (rows.length < 2) return;
@@ -329,12 +278,10 @@ async function realignSkippedFamilies(
     const candidates = new Map<string, string[]>();
 
     for (const member of members) {
-      const options = receipts
+      const options = (receiptsBySource.get(member.sourceId) || [])
         .filter(
           (receipt) =>
-            receipt.sourceComposerId === member.sourceId &&
-            receipt.snapshotHash === member.hash &&
-            receipt.state !== 'pending',
+            receipt.snapshotHash === member.hash && receipt.state !== 'pending',
         )
         .map((receipt) => receipt.targetComposerId);
 
@@ -361,6 +308,8 @@ async function realignSkippedFamilies(
     );
 
     if (!assignment) {
+      const remove = new Set<string>();
+
       for (const member of members) {
         const targetId = randomUUID();
 
@@ -368,15 +317,20 @@ async function realignSkippedFamilies(
           `UPDATE chat SET decision='create', target_id=${sqlText(targetId)}, reason='family-copy' WHERE source_id=${sqlText(member.sourceId)};`,
         );
 
-        plan.already = plan.already.filter(
-          (item) => item.composerId !== member.sourceId,
-        );
-
+        remove.add(member.sourceId);
         plan.create.push(member.ordinal);
       }
 
+      plan.already = plan.already.filter(
+        (item) => !remove.has(item.composerId),
+      );
+
       continue;
     }
+
+    const alreadyBySource = new Map(
+      plan.already.map((item) => [item.composerId, item]),
+    );
 
     for (const member of members) {
       const targetId = assignment.get(member.sourceId);
@@ -387,13 +341,27 @@ async function realignSkippedFamilies(
         `UPDATE chat SET target_id=${sqlText(targetId)} WHERE source_id=${sqlText(member.sourceId)};`,
       );
 
-      const already = plan.already.find(
-        (item) => item.composerId === member.sourceId,
-      );
+      const already = alreadyBySource.get(member.sourceId);
 
       if (already) already.targetComposerId = targetId;
     }
   }
+}
+
+/** Group receipts once so later family checks do not rescan the journal. */
+function receiptsByComposer(
+  receipts: readonly Receipt[],
+): Map<string, Receipt[]> {
+  const bySource = new Map<string, Receipt[]>();
+
+  for (const receipt of receipts) {
+    const grouped = bySource.get(receipt.sourceComposerId);
+
+    if (grouped) grouped.push(receipt);
+    else bySource.set(receipt.sourceComposerId, [receipt]);
+  }
+
+  return bySource;
 }
 
 /** Parent id stored on one destination composer body. */

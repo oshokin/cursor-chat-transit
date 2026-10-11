@@ -93,8 +93,11 @@ export function cursorFsPath(
   if (uri.authority)
     return `\\\\${uri.authority}${uri.path.replaceAll('/', '\\')}`;
 
-  if (/^\/[A-Za-z]:(?:\/|$)/.test(uri.path))
-    return uri.path.slice(1).replaceAll('/', '\\');
+  if (/^\/[A-Za-z]:(?:\/|$)/.test(uri.path)) {
+    const drivePath = uri.path.slice(1).replaceAll('/', '\\');
+
+    return drivePath[0].toLowerCase() + drivePath.slice(1);
+  }
 
   return uri.path.replaceAll('/', '\\');
 }
@@ -460,24 +463,38 @@ export function importStoragePrompt(
 }
 
 /**
- * Re-read before write. A vanished database or a new opening id stops the import.
- * `kept` preserves an explicit Other storage choice and does not retarget it.
+ * Re-read before write.
+ * Keep agrees to one physical target and one expected id. A changed URI,
+ * storage id, root, or expected id stops the import, including unknown to unknown
+ * when the identity changed and known to unknown when the facts changed.
  */
 export function recheckDestination(
   /** Row confirmed by the user. */
   chosen: WorkspaceEntry,
-  /** Inventory annotated again just before write. */
+  /** Fresh read of that same physical target. */
   fresh: WorkspaceEntry[],
-  /** User chose Keep Selected Storage. */
+  /** User chose Keep Selected Storage. This does not skip the checks below. */
   kept: boolean,
 ): { status: 'ok'; entry: WorkspaceEntry } | { status: 'stop' } {
-  const entry = fresh.find((item) =>
-    sameDatabasePath(item.workspaceDbPath, chosen.workspaceDbPath),
+  const entry = fresh.find(
+    (item) =>
+      item.storageRoot === chosen.storageRoot &&
+      item.storageId === chosen.storageId &&
+      sameDatabasePath(item.workspaceDbPath, chosen.workspaceDbPath),
   );
 
   if (!entry) return { status: 'stop' };
-  if (kept) return { status: 'ok', entry };
-  if (chosen.opening?.expectedId !== entry.opening?.expectedId)
+
+  const sameIdentity =
+    Boolean(chosen.identity) === Boolean(entry.identity) &&
+    (!chosen.identity ||
+      !entry.identity ||
+      workspaceKey(chosen.identity.kind, chosen.identity.uri) ===
+        workspaceKey(entry.identity.kind, entry.identity.uri));
+
+  const sameExpected = chosen.opening?.expectedId === entry.opening?.expectedId;
+
+  if (!sameIdentity || !sameExpected || (kept && !sameExpected))
     return { status: 'stop' };
 
   return { status: 'ok', entry };

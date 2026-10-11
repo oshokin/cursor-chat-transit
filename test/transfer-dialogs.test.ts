@@ -163,6 +163,8 @@ const workspaces = {
 
     return host.cancel === 'workspace' ? undefined : workspace;
   },
+  /** Sidebar selection is not part of these dialog fixtures. */
+  rememberSource() {},
 };
 
 /** Real command orchestration with transfer I/O replaced by observable stubs. */
