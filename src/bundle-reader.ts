@@ -1,9 +1,8 @@
 import { transferEvent, transferProgress } from './transfer-events';
 import { readFile } from './trace-fs';
 import { rm } from 'node:fs/promises';
-import { mkdtemp } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import {
   BUNDLE_FORMAT,
   EXPORT_FORMAT_VERSION,
@@ -56,8 +55,10 @@ export interface OpenBundle {
 export async function openBundle(
   zipPath: string,
   signal?: AbortSignal,
+  /** Scratch parent captured for this operation. Empty uses the system temp directory. */
+  temporaryDirectory?: string,
 ): Promise<OpenBundle> {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'cct-bundle-'));
+  const root = await operationTempDir('cct-bundle-', temporaryDirectory);
 
   transferEvent({
     action: 'Extract archive',

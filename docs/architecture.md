@@ -123,17 +123,17 @@ Snapshot comparison ignores known presentation-only changes such as `grouping.te
 
 Format version 4 is the only file format read and written by this build. An archive is a ZIP directory containing a manifest, catalog parts, per-chat headers and composer fields, conversation/message parts, inventory data, and content-addressed resources. There is no custom JSON parser and no monolithic JSON import fallback.
 
-| Limit                   | Value     |
-| ----------------------- | --------- |
-| Manifest                | 1 MiB     |
-| NDJSON part target      | 16 MiB    |
-| Single JSON record      | 32 MiB    |
-| Single SQLite value     | 32 MiB    |
-| JSON nesting            | 64 levels |
-| Keys in one JSON record | 1,000,000 |
-| ZIP entries             | 250,000   |
+| Limit                   | Value                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------- |
+| Manifest                | 1 MiB                                                                                  |
+| NDJSON part target      | 16 MiB                                                                                 |
+| Single JSON record      | 32 MiB                                                                                 |
+| Single SQLite value     | 32 MiB                                                                                 |
+| JSON nesting            | 64 levels                                                                              |
+| JSON payload properties | 1,000,000 by default (`cursorChatTransit.limits.maxJsonProperties`, 100,000–5,000,000) |
+| ZIP entries             | 250,000                                                                                |
 
-A record larger than the part target occupies its own part within the record limit. The total archive can exceed 1 GiB. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.
+A record larger than the part target occupies its own part within the record limit. The property budget counts a user payload. A bubble line `{ bubbleId, payload }` does not charge those two envelope fields against that budget. Byte and nesting limits still apply. The total archive can exceed 1 GiB. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Temporary archive files use `cursorChatTransit.temporaryDirectory` when it is set, and the system temporary directory otherwise. Each operation creates its own child directory there. The finished archive is still staged beside its destination. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.
 
 ZIP extraction validates paths and entry metadata before installation. Resource bytes are verified and existing files are reused only when their content matches. Format and safety constraints remain active during recovery. An incomplete import pauses after staging its plan and before publishing Cursor data. The worker sends only bounded counts and examples over IPC; the extension requests consent for this operation. Cancellation while waiting releases the worker and its locks. Reconciliation validates prior pending records and may update private receipts during inspection; cleanup of unpublished Cursor rows is deferred until the decision boundary has passed.
 

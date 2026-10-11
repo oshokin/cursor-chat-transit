@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as vscode from 'vscode';
@@ -82,12 +83,64 @@ export function transferSettings(): {
   busyTimeoutMs: number;
   /** Absolute plans directory from the user setting, when set. */
   plansDir?: string;
+  /** Object-property budget for one JSON payload. */
+  maxJsonProperties: number;
+  /** Absolute scratch parent, when the user set one. */
+  temporaryDirectory?: string;
 } {
   return {
     timeoutMs: seconds('sqlite.operationTimeoutSeconds', 600, 30, 3600) * 1000,
     busyTimeoutMs: seconds('sqlite.busyTimeoutSeconds', 5, 0, 30) * 1000,
     plansDir: localPath('plansDirectory') || undefined,
+    maxJsonProperties: seconds(
+      'limits.maxJsonProperties',
+      1_000_000,
+      100_000,
+      5_000_000,
+    ),
+    temporaryDirectory: configuredTempDir(),
   };
+}
+
+/** Absolute scratch parent, or unset when the user left the setting empty. */
+function configuredTempDir(): string | undefined {
+  const dir = localPath('temporaryDirectory');
+
+  if (!dir) return undefined;
+
+  let info: ReturnType<typeof statSync>;
+
+  try {
+    info = statSync(dir);
+  } catch (error) {
+    throw new Error(
+      `cursorChatTransit.temporaryDirectory: ${dir} is not an existing directory (${error instanceof Error ? error.message : String(error)}).`,
+      { cause: error },
+    );
+  }
+
+  if (!info.isDirectory()) {
+    throw new Error(
+      `cursorChatTransit.temporaryDirectory: ${dir} is not a directory.`,
+    );
+  }
+
+  let child: string | undefined;
+
+  try {
+    child = mkdtempSync(path.join(dir, '.cct-probe-'));
+    rmSync(child, { recursive: true, force: true });
+    child = undefined;
+  } catch (error) {
+    if (child) rmSync(child, { recursive: true, force: true });
+
+    throw new Error(
+      `cursorChatTransit.temporaryDirectory: cannot use ${dir} (${error instanceof Error ? error.message : String(error)}).`,
+      { cause: error },
+    );
+  }
+
+  return dir;
 }
 
 /** Require a local `file:` URI and return its fsPath. */

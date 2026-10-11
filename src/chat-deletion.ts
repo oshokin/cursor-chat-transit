@@ -1,5 +1,6 @@
 import { lstat } from 'node:fs/promises';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { chatSelectionFingerprint } from './chat-fingerprint';
 import { bubbleRange, sqlText } from './core';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import {
@@ -97,6 +98,24 @@ export async function deleteSelectedChats(
                     .join(',')};`,
                 );
               await session.exec('BEGIN IMMEDIATE;');
+
+              if (target.chatFingerprint) {
+                const live = await chatSelectionFingerprint(
+                  ctx,
+                  workspace.globalDbPath,
+                  target.ids,
+                  session,
+                );
+
+                if (live !== target.chatFingerprint) {
+                  await session.exec('ROLLBACK;');
+
+                  throw new Error(
+                    'Selected chat data changed before it could be deleted.',
+                  );
+                }
+              }
+
               const selected = new Set(ids);
 
               const layouts = await checkDeletionTransaction(
@@ -178,6 +197,8 @@ function normalizeTargets(
       /** Physical workspace these chats belong to. */
       workspace: WorkspaceEntry;
       ids: Set<string>;
+      /** Hash captured when the user confirmed this target. */
+      chatFingerprint?: string;
     }
   >();
 
@@ -194,6 +215,7 @@ function normalizeTargets(
     const group = grouped.get(workspace.workspaceDbPath) || {
       workspace,
       ids: new Set<string>(),
+      chatFingerprint: target.chatFingerprint,
     };
 
     for (const id of target.ids) {
@@ -207,6 +229,7 @@ function normalizeTargets(
   return [...grouped.values()].map((group) => ({
     workspace: group.workspace,
     ids: [...group.ids],
+    chatFingerprint: group.chatFingerprint,
   }));
 }
 

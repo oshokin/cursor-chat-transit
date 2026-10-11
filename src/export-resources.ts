@@ -83,8 +83,10 @@ export async function writeResources(opts: {
     chatName: opts.header.name,
   });
 
+  const state = parsed.conversationState;
+
   const closed = await readBlobGraph(
-    parsed.conversationState,
+    typeof state === 'string' && state.trim() === '' ? undefined : state,
     async (/** Blob digests for this call. */ digests) => {
       const batch = new Map<string, Buffer | null>();
 
@@ -188,6 +190,10 @@ export async function writeResources(opts: {
   } catch (err) {
     if (err instanceof TransferError) throw err;
     opts.issues.push(chatIssue(opts.header, 'invalid-attachment-id'));
+
+    opts.ctx.onNote?.(
+      `Incomplete chat ${chatLogLabel(opts.header)}: an attachment id could not be read`,
+    );
 
     return;
   }

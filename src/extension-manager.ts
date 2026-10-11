@@ -38,6 +38,8 @@ export class ChatManager
   private readonly results = new Map<string, StatisticsUpdate>();
   /** Cancels chat loads when the view is disposed. */
   private loading = new AbortController();
+  /** True after dispose. Deletion cancel must not replace the controller. */
+  private closed = false;
   /** One shared scan per refresh, rather than a worker for every workspace. */
   private roots?: Promise<ManagedNode[]>;
   /** Do not open overlapping search pickers. */
@@ -119,16 +121,30 @@ export class ChatManager
 
   /** Resolve checked scopes before row fallback; keyboard focus never changes deletion targets. */
   async deleteSelected(node?: ManagedNode): Promise<void> {
+    const pending = [
+      ...this.lists.values(),
+      ...(this.roots ? [this.roots] : []),
+    ];
+
     this.loading.abort();
-    await Promise.allSettled([...this.lists.values()]);
-    const checked = this.selection.values();
+    await Promise.allSettled(pending);
 
-    const requests = requestsFromNodes(
-      checked.length ? checked : node && !node.error ? [node] : [],
-    );
+    try {
+      const checked = this.selection.values();
 
-    if (await deleteManagedChats(this.context, this.operations, requests))
-      this.refresh();
+      const requests = requestsFromNodes(
+        checked.length ? checked : node && !node.error ? [node] : [],
+      );
+
+      if (await deleteManagedChats(this.context, this.operations, requests))
+        this.refresh();
+    } finally {
+      if (!this.closed && this.loading.signal.aborted) {
+        this.loading = new AbortController();
+        this.lists.clear();
+        this.roots = undefined;
+      }
+    }
   }
 
   /**
@@ -138,6 +154,7 @@ export class ChatManager
   async selectEmpty(): Promise<ManagedNode | undefined> {
     const generation = this.generation;
     const revision = this.selection.revision;
+    const log = startOperationLog(this.operations, 'find empty workspaces');
 
     this.operationMessage = 'Finding empty workspaces…';
     this.publishMessage();
@@ -173,8 +190,17 @@ export class ChatManager
                 },
                 {
                   signal: linkedSignal(token),
-                  onPhase: (_phase, metrics) => {
-                    const message = `Checked ${metrics?.processed || 0} of ${metrics?.total || host.entries.length} workspaces`;
+                  onEvent: log.event,
+                  onPhase: (phase, metrics) => {
+                    const label =
+                      phase === 'validate'
+                        ? 'Checking whether deletion is allowed'
+                        : 'Checking chat history';
+
+                    const message =
+                      typeof metrics?.total === 'number'
+                        ? `${label}: ${metrics.processed || 0} of ${metrics.total}`
+                        : label;
 
                     progress.report({ message });
                     this.operationMessage = `Finding empty workspaces… ${message}`;
@@ -192,6 +218,7 @@ export class ChatManager
     } catch (error) {
       this.operationMessage = undefined;
       this.publishMessage();
+      log.finish(isAbort(error) ? 'cancelled' : 'failed', undefined, error);
       if (isAbort(error)) return undefined;
 
       throw error;
@@ -200,9 +227,14 @@ export class ChatManager
     if (!scan) {
       this.operationMessage = undefined;
       this.publishMessage();
+      log.finish('cancelled');
 
       return undefined;
     }
+
+    log.fact(
+      `candidates=${scan.candidates} selected=${scan.selected.length} unchecked=${scan.unchecked}`,
+    );
 
     if (
       generation !== this.generation ||
@@ -212,6 +244,7 @@ export class ChatManager
         'Selection changed while checking. Run Select empty workspaces again.';
 
       this.publishMessage();
+      log.finish('incomplete');
 
       return undefined;
     }
@@ -222,6 +255,7 @@ export class ChatManager
         : 'No empty workspaces found. Selection unchanged.';
 
       this.publishMessage();
+      log.finish(scan.unchecked ? 'incomplete' : 'completed');
 
       return undefined;
     }
@@ -244,6 +278,7 @@ export class ChatManager
 
     this.operationMessage = `${scan.selected.length} workspace${scan.selected.length === 1 ? '' : 's'} with no chat history selected.${scan.unchecked ? ` ${scan.unchecked} could not be checked.` : ''}`;
     this.publishMessage();
+    log.finish(scan.unchecked ? 'incomplete' : 'completed');
     this.changed.fire(undefined);
 
     const first = scan.selected[0];
@@ -301,6 +336,7 @@ export class ChatManager
 
   /** Stop loads and release the tree event. */
   dispose(): void {
+    this.closed = true;
     this.generation += 1;
     this.loading.abort();
     clearTimeout(this.repaint);

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import * as vscode from 'vscode';
 
 /** File picker filter for `*.zip` exports. */
@@ -32,6 +32,8 @@ export async function localBundlePath(
   /** URI string or parts. */
   uri: vscode.Uri,
   signal?: AbortSignal,
+  /** Scratch parent captured for this operation. Empty uses the system temp directory. */
+  temporaryDirectory?: string,
 ): Promise<string> {
   signal?.throwIfAborted();
 
@@ -43,7 +45,7 @@ export async function localBundlePath(
     );
   }
 
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-remote-'));
+  const dir = await operationTempDir('cct-remote-', temporaryDirectory);
   const dest = path.join(dir, 'import.cursor-chat.zip');
 
   try {

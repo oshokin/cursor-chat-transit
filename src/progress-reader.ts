@@ -27,12 +27,18 @@ export async function* readMeasuredNdjson(
     });
 
   report(0);
-  for await (const row of readNdjson(file, label, ctx.signal, (processed) => {
-    if (performance.now() - last >= 250) {
-      last = performance.now();
-      report(processed);
-    }
-  }))
+  for await (const row of readNdjson(
+    file,
+    label,
+    ctx.signal,
+    (processed) => {
+      if (performance.now() - last >= 250) {
+        last = performance.now();
+        report(processed);
+      }
+    },
+    ctx.maxJsonProperties,
+  ))
     yield row;
   report(total);
 }

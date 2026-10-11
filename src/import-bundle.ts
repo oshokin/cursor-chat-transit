@@ -102,7 +102,7 @@ export async function runImport(
   },
 ): Promise<ImportResult> {
   ctx.onPhase?.('read');
-  const bundle = await openBundle(zipPath, ctx.signal);
+  const bundle = await openBundle(zipPath, ctx.signal, ctx.temporaryDirectory);
   const executable = ctx.executable || findSqliteExecutable();
 
   if (!executable) throw new Error('sqlite3 is required.');

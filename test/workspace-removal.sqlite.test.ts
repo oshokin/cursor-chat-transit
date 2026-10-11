@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
   lstat,
   mkdir,
@@ -18,7 +19,9 @@ import {
   findEmptyWorkspaces,
   prepareManagedDelete,
 } from '../src/managed-delete-run';
+import { attachmentDirectory } from '../src/attachments';
 import { assessWorkspaceHistory } from '../src/workspace-history';
+import { foreignImageRefusal } from '../src/workspace-resources';
 import { countOwnershipReads } from '../src/deletion-ownership';
 import { withDirectoryRemoval } from '../src/workspace-removal';
 import { observeTransfer } from '../src/transfer-events';
@@ -1470,8 +1473,7 @@ test(
         database: one.globalDbPath,
         sql: `INSERT INTO cursorDiskKV VALUES
           ('composerData:empty-state-draft','{}'),
-          (${sqlText(`composerData:${taskTool}`)},'{}'),
-          ('composerData:not a uuid','{}');`,
+          (${sqlText(`composerData:${taskTool}`)},'{}');`,
       });
 
       const prepared = await prepareManagedDelete(ctx, {
@@ -1505,6 +1507,49 @@ test(
       });
 
       assert.equal(refused.ok, false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'an unsupported composer id is not treated as proof that images are unused',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      await mkdir(path.join(path.dirname(one.workspaceDbPath), 'images'));
+
+      await writeFile(
+        path.join(
+          path.dirname(one.workspaceDbPath),
+          'images',
+          'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png',
+        ),
+        'png',
+      );
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('composerData:not a uuid','{}');`,
+      });
+
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'workspace-data', workspace: one }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, false);
+      if (prepared.ok) return;
+      assert.match(prepared.detail, /supported format/);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1702,6 +1747,182 @@ test(
         current.selected.some((entry) => entry.storageId === 'empty'),
         false,
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'a foreign write to the next chat is not absorbed by the new database token',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [
+          { kind: 'workspace-data', workspace: one },
+          { kind: 'workspace-data', workspace: shared },
+        ],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      let changed = false;
+
+      const result = await observeTransfer(
+        {
+          event(entry) {
+            if (
+              entry.action === 'Delete chat' &&
+              entry.status === 'completed' &&
+              entry.chatId === A &&
+              !changed
+            ) {
+              changed = true;
+
+              execFileSync(executable!, [
+                one.globalDbPath,
+                `UPDATE cursorDiskKV SET value='{"newText":"changed after first commit"}' WHERE key='composerData:${B}';`,
+              ]);
+            }
+          },
+        },
+        () =>
+          executeManagedDelete(ctx, {
+            kind: 'delete-managed-data',
+            executable: ctx.executable,
+            initFile: ctx.initFile,
+            plan: prepared.plan,
+            workspaces: [one, empty, shared],
+            emptyWindow: true,
+          }),
+      );
+
+      assert.equal(changed, true);
+      assert.equal(result.outcomes[0]?.storage, 'deleted');
+      assert.notEqual(result.outcomes[1]?.storage, 'deleted');
+
+      const kept = await execSql({
+        ...ctx,
+        database: one.globalDbPath,
+        readOnly: true,
+        sql: `SELECT value FROM cursorDiskKV WHERE key='composerData:${B}';`,
+      });
+
+      assert.match(kept, /changed after first commit/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'an orphan bubble that references an image blocks workspace removal',
+  { skip },
+  async () => {
+    const { root, ctx, one } = await profile();
+    const uuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+    try {
+      const images = attachmentDirectory(one);
+
+      await mkdir(images, { recursive: true });
+      await writeFile(path.join(images, `${uuid}.png`), 'image');
+
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `DELETE FROM cursorDiskKV WHERE key='composerData:${B}'; INSERT INTO cursorDiskKV VALUES('bubbleId:${B}:image',${sqlText(JSON.stringify({ images: [{ uuid }] }))});`,
+      });
+
+      const refusal = await foreignImageRefusal(ctx, one, [A]);
+
+      assert.match(
+        refusal || '',
+        /referenced by another chat/,
+        'No refusal although a foreign bubble references the image',
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'an unrecognized composer version is not classified as empty',
+  { skip },
+  async () => {
+    const { root, ctx, one } = await profile();
+
+    try {
+      await execSqlScript({
+        ...ctx,
+        database: one.globalDbPath,
+        sql: `UPDATE cursorDiskKV SET value='{"_v":999,"futureMessages":[{"text":"keep"}]}' WHERE key='composerData:${A}'; DELETE FROM cursorDiskKV WHERE key='bubbleId:${A}:message';`,
+      });
+
+      assert.notEqual((await assessWorkspaceHistory(ctx, one)).state, 'empty');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'chat deletion removes exclusive chats and reports shared chats as skipped',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      await execSqlScript({
+        ...ctx,
+        database: one.workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A }, { composerId: B }] }))} WHERE key='composer.composerData';`,
+      });
+
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        userDataRoot: root,
+        requests: [{ kind: 'chats', workspace: one, ids: [A, B] }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        executable: ctx.executable,
+        initFile: ctx.initFile,
+        plan: prepared.plan,
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      });
+
+      assert.deepEqual(result.outcomes[0]?.chatIdsDeleted, [A]);
+      assert.deepEqual(result.outcomes[0]?.chatIdsSkipped, [B]);
+
+      const kept = await execSql({
+        ...ctx,
+        database: one.globalDbPath,
+        readOnly: true,
+        sql: `SELECT value FROM cursorDiskKV WHERE key='composerData:${B}';`,
+      });
+
+      assert.equal(kept.trim(), '{}');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

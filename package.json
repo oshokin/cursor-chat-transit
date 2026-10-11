@@ -88,6 +88,20 @@
           "scope": "application",
           "markdownDescription": "Minimum level written to the operation log. `info` shows progress, warnings, and errors. `warn` shows warnings and errors. `error` shows failures only. Each line is marked INFO, WARN, or ERROR."
         },
+        "cursorChatTransit.limits.maxJsonProperties": {
+          "type": "integer",
+          "default": 1000000,
+          "minimum": 100000,
+          "maximum": 5000000,
+          "scope": "machine",
+          "description": "Maximum number of object properties in one JSON payload. This counts properties, not lines, messages, or the total archive size. Increase only when a known chat exceeds this limit. JSON byte and nesting limits still apply. Changes apply to the next operation."
+        },
+        "cursorChatTransit.temporaryDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Directory for temporary archive extraction and transfer files. Leave empty to use the system temporary directory. Choose a local drive with enough free space. Changes apply to the next operation."
+        },
         "cursorChatTransit.export.recoverText": {
           "type": "boolean",
           "default": true,

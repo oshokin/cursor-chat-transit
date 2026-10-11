@@ -41,7 +41,12 @@ export async function inspectChatPresence(
   const raw = await readKvText(conn, `composerData:${id}`);
 
   if (raw === null) return 'missing';
-  const parsed = parseBoundedJson(Buffer.from(raw, 'utf8'), `composer ${id}`);
+
+  const parsed = parseBoundedJson(
+    Buffer.from(raw, 'utf8'),
+    `composer ${id}`,
+    conn.maxJsonProperties,
+  );
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
     return 'unknown';

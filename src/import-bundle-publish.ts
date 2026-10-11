@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import { rewriteImageReferences } from './attachments';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import { ordinalName } from './bundle-names';
@@ -76,7 +76,11 @@ export async function writeOne(opts: {
   opts.ctx.onPhase?.('prepare', { chats: 1 });
   await assertKvCompatible(opts);
   const dir = path.join(opts.root, 'chats', ordinalName(opts.ordinal));
-  const staging = await mkdtemp(path.join(os.tmpdir(), 'cct-write-'));
+
+  const staging = await operationTempDir(
+    'cct-write-',
+    opts.ctx.temporaryDirectory,
+  );
 
   try {
     await copyResources(opts);
@@ -156,7 +160,13 @@ export async function writeOne(opts: {
       );
 
       for (const file of await ndjsonFiles(path.join(dir, 'bubbles'))) {
-        for await (const rec of readNdjson(file, 'bubble', opts.ctx.signal)) {
+        for await (const rec of readNdjson(
+          file,
+          'bubble',
+          opts.ctx.signal,
+          undefined,
+          opts.ctx.maxJsonProperties,
+        )) {
           const bubble = asObject(rec.value, 'bubble');
           const sourceBubble = String(bubble.bubbleId);
 
@@ -415,6 +425,8 @@ export async function assembleComposer(
         file,
         'conversation',
         opts.ctx.signal,
+        undefined,
+        opts.ctx.maxJsonProperties,
       )) {
         const value = await remapValue(opts, row.value, '', '', maps);
 

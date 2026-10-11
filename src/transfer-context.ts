@@ -82,6 +82,8 @@ export function connOf(
     signal: ctx.signal,
     timeoutMs: ctx.timeoutMs,
     busyTimeoutMs: ctx.busyTimeoutMs,
+    maxJsonProperties: ctx.maxJsonProperties,
+    temporaryDirectory: ctx.temporaryDirectory,
   };
 }
 

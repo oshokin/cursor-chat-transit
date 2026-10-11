@@ -1,6 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { rm } from 'node:fs/promises';
+import { operationTempDir } from './operation-temp';
 import { BundleWriter } from './bundle-writer';
 import { bubbleRange, sqlText } from './core';
 import { readChatForExport } from './export-chat';
@@ -36,11 +35,17 @@ export async function exportBundle(opts: {
   const writer = await BundleWriter.open(opts.destPath, {
     signal: opts.ctx.signal,
     source: opts.source,
+    maxJsonProperties: opts.ctx.maxJsonProperties,
   });
 
   const issues: ExportChatIssue[] = [];
   const incomplete: string[] = [];
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'cct-export-'));
+
+  const tmp = await operationTempDir(
+    'cct-export-',
+    opts.ctx.temporaryDirectory,
+  );
+
   let bubbles = 0;
   let exported = 0;
   let recoveryCandidates = 0;

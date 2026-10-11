@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import { readBundleObject } from './bundle-object';
 import { selectChats } from './core';
 import * as db from './db';
@@ -80,7 +80,7 @@ export async function buildExportObject(
   /** Composer ids to keep. An empty list keeps none. */
   selectedIds?: string[],
 ): Promise<ExportObject> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-object-'));
+  const dir = await operationTempDir('cct-object-', ctx.temporaryDirectory);
   const dest = path.join(dir, 'export.cursor-chat.zip');
 
   try {

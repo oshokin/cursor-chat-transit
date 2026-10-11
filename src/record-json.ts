@@ -9,10 +9,13 @@ export function parseBoundedJson(
   bytes: Buffer,
   /** Name used when the value is rejected. */
   label: string,
+  /** Property budget for the user payload. The bubble envelope is not charged. */
+  maxProperties: number = MAX_JSON_KEYS,
 ): unknown {
   if (bytes.length > MAX_JSON_RECORD_BYTES) {
-    throw new Error(
+    throw coded(
       `${label} is ${bytes.length} bytes; the limit is ${MAX_JSON_RECORD_BYTES}.`,
+      'JSON_BYTE_LIMIT',
     );
   }
 
@@ -23,7 +26,7 @@ export function parseBoundedJson(
       bytes,
     );
   } catch {
-    throw new Error(`${label} is not valid UTF-8.`);
+    throw coded(`${label} is not valid UTF-8.`, 'INVALID_UTF8');
   }
 
   let value: unknown;
@@ -31,10 +34,43 @@ export function parseBoundedJson(
   try {
     value = JSON.parse(text);
   } catch {
-    throw new Error(`${label} is not valid JSON.`);
+    throw coded(`${label} is not valid JSON.`, 'INVALID_JSON');
   }
 
-  assertJsonLimits(value, label);
+  assertBoundedRecord(value, label, maxProperties);
+
+  return value;
+}
+
+/**
+ * Check a transfer record.
+ * `{ bubbleId, payload }` counts only `payload` against the property budget.
+ */
+export function assertBoundedRecord(
+  /** JSON value whose size is checked. */
+  value: unknown,
+  /** Name used when the value is rejected. */
+  label: string,
+  /** Property budget for the user payload. */
+  maxProperties: number = MAX_JSON_KEYS,
+): void {
+  assertJsonLimits(recordPayload(value), label, maxProperties);
+}
+
+/** User payload of a known bubble line, or the value itself. */
+function recordPayload(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+
+  if (
+    keys.length === 2 &&
+    keys.includes('bubbleId') &&
+    keys.includes('payload') &&
+    typeof record.bubbleId === 'string' &&
+    record.bubbleId
+  )
+    return record.payload;
 
   return value;
 }
@@ -45,6 +81,8 @@ export function assertJsonLimits(
   value: unknown,
   /** Name used when the value is rejected. */
   label: string,
+  /** Property budget. Defaults to the built-in record limit. */
+  maxProperties: number = MAX_JSON_KEYS,
 ): void {
   let keys = 0;
 
@@ -56,7 +94,10 @@ export function assertJsonLimits(
     depth: number,
   ): void => {
     if (depth > MAX_JSON_DEPTH) {
-      throw new Error(`${label} is nested deeper than ${MAX_JSON_DEPTH}.`);
+      throw coded(
+        `${label} is nested deeper than ${MAX_JSON_DEPTH}.`,
+        'JSON_DEPTH_LIMIT',
+      );
     }
 
     if (!node || typeof node !== 'object') return;
@@ -76,8 +117,11 @@ export function assertJsonLimits(
     for (const key of Object.keys(node)) {
       keys += 1;
 
-      if (keys > MAX_JSON_KEYS) {
-        throw new Error(`${label} has more than ${MAX_JSON_KEYS} properties.`);
+      if (keys > maxProperties) {
+        throw coded(
+          `${label} has more than ${maxProperties} properties.`,
+          'JSON_PROPERTY_LIMIT',
+        );
       }
 
       if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
@@ -89,6 +133,15 @@ export function assertJsonLimits(
   };
 
   visit(value, 1);
+}
+
+/** Error whose `code` stays distinct from the human-readable limit message. */
+function coded(message: string, code: string): Error {
+  const error = new Error(message);
+
+  (error as { code?: string }).code = code;
+
+  return error;
 }
 
 export { MAX_JSON_RECORD_BYTES };

@@ -174,6 +174,36 @@ export function showFail(
     return;
   }
 
+  const propertyLimit =
+    code === 'JSON_PROPERTY_LIMIT' || /more than \d+ properties/u.test(message);
+
+  if (propertyLimit && log) {
+    notifyCompletion(
+      () =>
+        vscode.window.showErrorMessage(
+          message,
+          'Open Settings',
+          'Open Operation Log',
+        ),
+      async (choice) => {
+        if (choice === 'Open Settings') {
+          await vscode.commands.executeCommand(
+            'workbench.action.openSettings',
+            'cursorChatTransit.limits.maxJsonProperties',
+          );
+        }
+
+        if (choice === 'Open Operation Log') await openLog(log);
+      },
+      () =>
+        log.warn(
+          'Unable to show failure notification or open the operation log.',
+        ),
+    );
+
+    return;
+  }
+
   const offerLog = recovery || code === 'PARTIAL' || code === 'NEEDS_ATTENTION';
 
   if (offerLog && log) {

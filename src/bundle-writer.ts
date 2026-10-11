@@ -68,9 +68,16 @@ export class BundleWriter {
     private readonly signal: AbortSignal | undefined,
     /** Provenance stored on the manifest when present. */
     private readonly source: unknown,
+    /** Property budget for one user payload in this archive. */
+    private readonly maxJsonProperties?: number,
   ) {
     this.root = root;
-    this.catalog = new NdjsonPartWriter(path.join(root, 'catalog'), signal);
+
+    this.catalog = new NdjsonPartWriter(
+      path.join(root, 'catalog'),
+      signal,
+      maxJsonProperties,
+    );
   }
 
   /** Create a staging directory next to the destination archive. */
@@ -81,6 +88,8 @@ export class BundleWriter {
       signal?: AbortSignal;
       /** Provenance stored on the manifest when present. */
       source?: unknown;
+      /** Property budget for one user payload in this archive. */
+      maxJsonProperties?: number;
     },
   ): Promise<BundleWriter> {
     const { mkdtemp } = await import('node:fs/promises');
@@ -95,7 +104,13 @@ export class BundleWriter {
     await mkdir(path.join(root, 'catalog'), { recursive: true });
     await mkdir(path.join(root, 'blobs'), { recursive: true });
 
-    return new BundleWriter(destPath, root, opts?.signal, opts?.source);
+    return new BundleWriter(
+      destPath,
+      root,
+      opts?.signal,
+      opts?.source,
+      opts?.maxJsonProperties,
+    );
   }
 
   /** Begin one chat. `header.composerId` is required and is not used as a path. */
@@ -116,16 +131,19 @@ export class BundleWriter {
     this.conversation = new NdjsonPartWriter(
       path.join(this.chatDir, 'conversation'),
       this.signal,
+      this.maxJsonProperties,
     );
 
     this.bubbles = new NdjsonPartWriter(
       path.join(this.chatDir, 'bubbles'),
       this.signal,
+      this.maxJsonProperties,
     );
 
     this.resources = new NdjsonPartWriter(
       path.join(this.chatDir, 'resources'),
       this.signal,
+      this.maxJsonProperties,
     );
 
     await this.catalog.write({

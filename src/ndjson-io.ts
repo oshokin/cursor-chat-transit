@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, open, type FileHandle } from 'node:fs/promises';
 import { partPath } from './bundle-names';
 import { MAX_JSON_RECORD_BYTES, NDJSON_PART_BYTES } from './bundle-limits';
-import { parseBoundedJson } from './record-json';
+import { assertBoundedRecord, parseBoundedJson } from './record-json';
 
 /** One decoded NDJSON value plus the UTF-8 size of its line. */
 export interface NdjsonRecord {
@@ -23,6 +23,8 @@ export async function* readNdjson(
   signal?: AbortSignal,
   /** Called with the number of bytes written. */
   onBytes?: (processed: number) => void,
+  /** Property budget for one user payload. Bubble envelopes are not charged. */
+  maxProperties?: number,
 ): AsyncGenerator<NdjsonRecord> {
   transferEvent({ action: 'Read NDJSON', status: 'started', path: filePath });
   let readBytes = 0;
@@ -52,7 +54,10 @@ export async function* readNdjson(
       );
     }
 
-    yield { value: parseBoundedJson(line, label), bytes: line.length };
+    yield {
+      value: parseBoundedJson(line, label, maxProperties),
+      bytes: line.length,
+    };
   };
 
   try {
@@ -150,6 +155,8 @@ export class NdjsonPartWriter {
     private readonly directory: string,
     /** Cancellation checked before each write. */
     private readonly signal?: AbortSignal,
+    /** Property budget for one user payload. */
+    private readonly maxProperties?: number,
   ) {}
 
   /** Files written so far, in order. */
@@ -163,6 +170,7 @@ export class NdjsonPartWriter {
     value: unknown,
   ): Promise<void> {
     this.signal?.throwIfAborted();
+    assertBoundedRecord(value, 'JSON record', this.maxProperties);
     const line = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
 
     if (line.length > MAX_JSON_RECORD_BYTES) {

@@ -1033,3 +1033,24 @@ test('select empty labels the sidebar as a scan and skips the unchecked note whe
     manager.dispose();
   }
 });
+
+test('cancel deletion keeps uncached chat lists usable', async () => {
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+
+    await manager.deleteSelected(roots[0]);
+
+    const children = await manager.getChildren(roots[0]);
+
+    assert.ok(
+      children.some((node) => node.chat),
+      JSON.stringify(
+        children.map((node) => node.error || node.chat?.composerId),
+      ),
+    );
+  } finally {
+    manager.dispose();
+  }
+});

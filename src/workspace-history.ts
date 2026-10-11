@@ -1,5 +1,5 @@
 import { inspectChatPresence } from './chat-presence';
-import type { TransferContext, WorkspaceEntry } from './types';
+import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
 
 /**
@@ -19,6 +19,8 @@ export async function assessWorkspaceHistory(
   ctx: TransferContext,
   /** Workspace whose global and local indexes are read. */
   entry: WorkspaceEntry,
+  /** Header cache for one scan. A new reader is used when omitted. */
+  headers: WorkspaceHeaderReader = new WorkspaceHeaderReader(ctx),
 ): Promise<{
   /** Classification. `unknown` is not permission to delete. */
   state: WorkspaceHistoryState;
@@ -26,23 +28,21 @@ export async function assessWorkspaceHistory(
   ids: string[];
 }> {
   try {
-    const reader = new WorkspaceHeaderReader(ctx);
+    const rows = await headers.read(entry, true);
 
-    const ids = [
-      ...new Set((await reader.read(entry, true)).map((row) => row.composerId)),
-    ];
+    const ids = [...new Set(rows.map((row) => row.composerId))];
 
     if (!ids.length) return { state: 'empty', ids };
 
     let unreadable = false;
 
-    for (const id of ids) {
+    for (const row of rows) {
       let presence: Awaited<ReturnType<typeof inspectChatPresence>>;
 
       try {
         presence = await inspectChatPresence(
           { ...ctx, database: entry.globalDbPath },
-          id,
+          row.composerId,
           { emptyShell: true },
         );
       } catch (error) {
@@ -54,7 +54,13 @@ export async function assessWorkspaceHistory(
       }
 
       if (presence === 'present') return { state: 'present', ids };
-      if (presence === 'unknown') unreadable = true;
+
+      // A title without a readable body is not proof that the workspace is empty.
+      if (
+        presence === 'unknown' ||
+        (presence === 'missing' && namedHeader(row))
+      )
+        unreadable = true;
     }
 
     return { state: unreadable ? 'unknown' : 'empty', ids };
@@ -63,4 +69,12 @@ export async function assessWorkspaceHistory(
 
     return { state: 'unavailable', ids: [] };
   }
+}
+
+/** True when the header stores a title that may describe chat history. */
+function namedHeader(row: ComposerHeader): boolean {
+  return (
+    (typeof row.name === 'string' && row.name.trim() !== '') ||
+    (typeof row.subtitle === 'string' && row.subtitle.trim() !== '')
+  );
 }

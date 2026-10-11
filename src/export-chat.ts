@@ -76,7 +76,11 @@ export async function readChatForExport(opts: {
     return false;
   }
 
-  const parsed = parseBoundedJson(Buffer.from(body, 'utf8'), `composer ${id}`);
+  const parsed = parseBoundedJson(
+    Buffer.from(body, 'utf8'),
+    `composer ${id}`,
+    opts.conn.maxJsonProperties,
+  );
 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new TransferError(`Chat ${id} composer row is not a JSON object.`);
@@ -130,6 +134,7 @@ export async function readChatForExport(opts: {
     const payload = parseBoundedJson(
       Buffer.from(bubble.value, 'utf8'),
       `bubble ${bubble.bubbleId}`,
+      opts.conn.maxJsonProperties,
     );
 
     if (

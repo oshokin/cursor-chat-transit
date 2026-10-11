@@ -115,7 +115,10 @@ async function run(
 
   if (job.kind === 'workspace-statistics' || job.kind === 'chat-statistics') {
     return runStatistics(
-      job,
+      {
+        ...job,
+        onNote: (note) => sendUpdate({ type: 'note', note }),
+      },
       abort.signal,
       (/** Statistics update. */ statistics) =>
         sendUpdate({ type: 'statistics', statistics }),

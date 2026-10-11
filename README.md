@@ -21,7 +21,7 @@ This is free software. You use it at your own risk. The author is not responsibl
 
 You need a desktop Cursor or VS Code-compatible host with API version 1.125 or later, access to a local Cursor profile, and the `sqlite3` command-line executable. The extension runs on the local computer, including when the project is remote. Browser-only editors are not supported. VS Code can host the extension, but does not provide Cursor's native conversation interface.
 
-Check SQLite with `sqlite3 --version`. Install it with your operating system's package manager or the [official SQLite tools](https://www.sqlite.org/download.html). If it is not on `PATH`, set `cursorChatTransit.sqlitePath` to its absolute path.
+Check SQLite with `sqlite3 --version`. Install it with your operating system's package manager or the [official SQLite tools](https://www.sqlite.org/download.html). If it is not on `PATH`, set `cursorChatTransit.sqlitePath` to its absolute path. `cursorChatTransit.limits.maxJsonProperties` limits object properties in one JSON payload (default 1,000,000). `cursorChatTransit.temporaryDirectory` chooses the disk used for temporary archive files; leave it empty to use the system temporary directory. Neither setting changes Cursor's databases, and neither restores missing message text.
 
 To install a release:
 

@@ -126,6 +126,10 @@ export async function inspectChatHealth(
       available,
     );
   } catch {
+    ctx.onNote?.(
+      `Incomplete chat ${header.name || id}: a referenced message is not stored`,
+    );
+
     return 'incomplete';
   }
 
@@ -157,7 +161,14 @@ export async function inspectChatHealth(
       const type = messageTypes.get(ref.bubbleId);
 
       if (type === undefined) return 'unknown';
-      if (type !== ref.type) return 'incomplete';
+
+      if (type !== ref.type) {
+        ctx.onNote?.(
+          `Incomplete chat ${header.name || id}: message role does not match the stored record`,
+        );
+
+        return 'incomplete';
+      }
     }
 
     return 'ready';

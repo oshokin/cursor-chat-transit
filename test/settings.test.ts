@@ -68,6 +68,8 @@ test('Transit settings use documented defaults and only the new namespace', () =
     timeoutMs: 600000,
     busyTimeoutMs: 5000,
     plansDir: undefined,
+    maxJsonProperties: 1000000,
+    temporaryDirectory: undefined,
   });
 
   assert.equal('importAllowPartial' in settings, false);
@@ -102,9 +104,17 @@ test('workspace overrides cannot redirect a valid user path or silently enable r
 
   values.set('import.allowPartial', { workspaceValue: true });
   values.set('sqlite.operationTimeoutSeconds', { workspaceValue: 999 });
+  values.set('limits.maxJsonProperties', { workspaceValue: 2000000 });
+
+  values.set('temporaryDirectory', {
+    workspaceFolderValue: path.resolve('repo-temp'),
+  });
+
   assert.deepEqual(settings.config(), { userDataDir: userDir, sqlitePath: '' });
   assert.equal('importAllowPartial' in settings, false);
   assert.equal(settings.transferSettings().timeoutMs, 600000);
+  assert.equal(settings.transferSettings().maxJsonProperties, 1000000);
+  assert.equal(settings.transferSettings().temporaryDirectory, undefined);
 });
 
 test('settings convert seconds once and validate JSON values as well as Settings UI values', () => {
@@ -135,7 +145,7 @@ test('all contributed settings use Transit prefix and retain appropriate scopes'
 
   const properties = manifest.contributes.configuration.properties;
 
-  assert.equal(Object.keys(properties).length, 7);
+  assert.equal(Object.keys(properties).length, 9);
 
   assert.ok(
     Object.keys(properties).every((name) =>
@@ -205,6 +215,8 @@ test('every declared setting has a working user value and defaults consistent wi
     plansDir: paths.plansDirectory,
     timeoutMs: 3600000,
     busyTimeoutMs: 30000,
+    maxJsonProperties: 1000000,
+    temporaryDirectory: undefined,
   });
 
   assert.equal(settings.operationLogLevel(), 'error');
@@ -218,7 +230,12 @@ test('every declared setting has a working user value and defaults consistent wi
 });
 
 test('all path settings reject relative paths and control characters; both deadlines reject invalid values', () => {
-  for (const key of ['userDataDir', 'sqlitePath', 'plansDirectory'])
+  for (const key of [
+    'userDataDir',
+    'sqlitePath',
+    'plansDirectory',
+    'temporaryDirectory',
+  ])
     for (const bad of [
       'relative',
       path.resolve('bad') + '\n',
@@ -231,7 +248,7 @@ test('all path settings reject relative paths and control characters; both deadl
 
       assert.throws(
         () =>
-          key === 'plansDirectory'
+          key === 'plansDirectory' || key === 'temporaryDirectory'
             ? settings.transferSettings()
             : settings.config(),
         /absolute path/,
@@ -241,6 +258,7 @@ test('all path settings reject relative paths and control characters; both deadl
   for (const [key, invalid] of [
     ['sqlite.busyTimeoutSeconds', [-1, 31, 0.5, '5', null, NaN]],
     ['sqlite.operationTimeoutSeconds', [0, 29, 3601, Infinity, '600']],
+    ['limits.maxJsonProperties', [99999, 5000001, 1.5, '1000000', null, NaN]],
   ] as const)
     for (const bad of invalid) {
       values.clear();

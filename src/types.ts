@@ -113,6 +113,10 @@ export interface SqliteConn {
   timeoutMs?: number;
   /** SQLite busy timeout applied through the init file. */
   busyTimeoutMs?: number;
+  /** Object-property budget for one JSON payload during this operation. */
+  maxJsonProperties?: number;
+  /** Absolute parent for this operation's private scratch directory. */
+  temporaryDirectory?: string;
 }
 
 /** Named stage reported to the sidebar and operation log. */
@@ -183,6 +187,10 @@ export interface TransferContext {
   onNote?: (message: string) => void;
   /** Local plans directory; default `~/.cursor/plans`. */
   plansDir?: string;
+  /** Object-property budget for one JSON payload during this operation. */
+  maxJsonProperties?: number;
+  /** Absolute parent for this operation's private scratch directory. */
+  temporaryDirectory?: string;
   /**
    * Canvas directory for this transfer.
    * Unset uses `~/.cursor/projects/{slug}/canvases` for the workspace.

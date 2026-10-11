@@ -13,6 +13,19 @@ export const MIN_WALKED_COMPOSER_VERSION = 13;
 /** Newest composer `_v` checked against that walker. */
 export const SUPPORTED_COMPOSER_VERSION = 18;
 
+/** Versions 10 and 11 are known empty shells. 13–18 are walked. Other versions are not empty. */
+function supportedComposerVersion(version: unknown): boolean {
+  if (version === undefined) return true;
+
+  if (typeof version !== 'number' || !Number.isInteger(version)) return false;
+  if (version === 10 || version === 11) return true;
+
+  return (
+    version >= MIN_WALKED_COMPOSER_VERSION &&
+    version <= SUPPORTED_COMPOSER_VERSION
+  );
+}
+
 /** `agentKv:blob:` plus a 64-character lowercase hex digest. */
 export const BLOB_KEY = /^agentKv:blob:[0-9a-f]{64}$/;
 
@@ -49,6 +62,12 @@ export function blobKeysFromComposerBody(bodyText: string): {
   const rec = body as Record<string, unknown>;
   const version = rec._v;
   const state = rec.conversationState;
+
+  if (!supportedComposerVersion(version))
+    return { status: 'unsupported', keys: [] };
+
+  if (Array.isArray(rec.futureMessages) && rec.futureMessages.length > 0)
+    return { status: 'unsupported', keys: [] };
 
   if (
     state === undefined ||

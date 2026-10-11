@@ -23,6 +23,10 @@ export interface TransferJob {
   timeoutMs?: number;
   busyTimeoutMs?: number;
   plansDir?: string;
+  /** Object-property budget for one JSON payload during this operation. */
+  maxJsonProperties?: number;
+  /** Absolute parent for this operation's private scratch directory. */
+  temporaryDirectory?: string;
   /** Canvas directory override. */
   canvasesDir?: string;
   /** Source or destination workspace. */

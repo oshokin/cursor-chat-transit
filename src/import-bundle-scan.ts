@@ -66,7 +66,13 @@ export async function scanAll(opts: {
   const receipts = await opts.journal.receipts();
 
   for (const file of await ndjsonFiles(path.join(opts.root, 'catalog'))) {
-    for await (const row of readNdjson(file, 'catalog', opts.ctx.signal)) {
+    for await (const row of readNdjson(
+      file,
+      'catalog',
+      opts.ctx.signal,
+      undefined,
+      opts.ctx.maxJsonProperties,
+    )) {
       const rec = asObject(row.value, 'catalog row');
       const ordinal = rec.ordinal;
       const sourceId = rec.sourceComposerId;

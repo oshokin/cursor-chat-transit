@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import { attachmentDirectory, resolveAttachmentPath } from './attachments';
 import { canvasFilePath, readCanvasFile } from './canvases';
 import { sqlText } from './core';
@@ -470,7 +470,7 @@ export async function restoreHexEncodedBlob(
     decoded: Buffer;
   },
 ): Promise<void> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-blob-'));
+  const dir = await operationTempDir('cct-blob-', conn.temporaryDirectory);
   const previousPath = path.join(dir, 'previous.bin');
   const decodedPath = path.join(dir, 'decoded.bin');
 

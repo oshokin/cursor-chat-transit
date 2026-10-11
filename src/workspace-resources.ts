@@ -7,13 +7,16 @@ import type { TransferContext, WorkspaceEntry } from './types';
 /** Image files beyond this are refused instead of scanned. */
 const IMAGE_PROOF_LIMIT = 32;
 
+/** Foreign composers searched in one statement. */
+const IMAGE_ID_BATCH = 32;
+
 /** UUID embedded in a workspace image filename. */
 const UUID_IN_NAME =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
 /**
  * Refuse workspace removal when another chat's messages reference an image in this directory.
- * Only known composer ids are probed. An unknown dependency is a refusal, not a guess.
+ * Orphan bubbles are included. An unknown id or a read error is a refusal, not proof of absence.
  */
 export async function foreignImageRefusal(
   /** Transfer hooks, timeouts, and cancellation. */
@@ -35,7 +38,7 @@ export async function foreignImageRefusal(
 
     if (code === 'ENOENT') return undefined;
 
-    throw error;
+    return `Cannot confirm image ownership: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   const uuids = [
@@ -47,52 +50,106 @@ export async function foreignImageRefusal(
   ];
 
   if (!uuids.length) return undefined;
+
   if (uuids.length > IMAGE_PROOF_LIMIT)
     return 'This workspace has too many image files to prove they are not used by another chat. Nothing was deleted.';
 
-  const listed = await execSql({
-    ...ctx,
-    database: entry.globalDbPath,
-    readOnly: true,
-    sql: `SELECT key FROM cursorDiskKV WHERE key >= 'composerData:' AND key < 'composerData;';`,
-  });
+  let foreign: string[];
 
-  const own = new Set(ownIds);
+  try {
+    foreign = await foreignComposerIds(ctx, entry, ownIds);
+  } catch (error) {
+    return `Cannot confirm image ownership: ${error instanceof Error ? error.message : String(error)}`;
+  }
 
-  const others = listed
-    .split('\n')
-    .map((key) => key.trim())
-    .filter(
-      (key) =>
-        key.startsWith('composerData:') &&
-        !key.slice('composerData:'.length).includes(':'),
-    )
-    .map((key) => key.slice('composerData:'.length))
-    .filter((id) => id && !own.has(id));
+  const known: Array<{ id: string; lower: string; upper: string }> = [];
 
-  for (const id of others) {
-    let range: { lower: string; upper: string };
-
+  for (const id of foreign) {
     try {
-      range = bubbleRange(id);
+      const range = bubbleRange(id);
+
+      known.push({ id, lower: range.lower, upper: range.upper });
     } catch (error) {
-      if (error instanceof TypeError) continue;
+      if (error instanceof TypeError)
+        return `Cannot confirm image ownership because composer id ${JSON.stringify(id.slice(0, 80))} is not a supported format. Nothing was deleted.`;
 
       throw error;
     }
+  }
 
-    for (const uuid of uuids) {
+  const needle = uuids
+    .map((uuid) => `instr(lower(CAST(value AS TEXT)), ${sqlText(uuid)})`)
+    .join(' OR ');
+
+  try {
+    for (let start = 0; start < known.length; start += IMAGE_ID_BATCH) {
+      const batch = known.slice(start, start + IMAGE_ID_BATCH);
+
+      const where = batch
+        .map(
+          (item) =>
+            `(key>=${sqlText(item.lower)} AND key<${sqlText(item.upper)}) OR key=${sqlText(`composerData:${item.id}`)}`,
+        )
+        .join(' OR ');
+
       const hit = await execSql({
         ...ctx,
         database: entry.globalDbPath,
         readOnly: true,
-        sql: `SELECT 1 FROM cursorDiskKV WHERE key >= ${sqlText(range.lower)} AND key < ${sqlText(range.upper)} AND instr(lower(CAST(value AS TEXT)), ${sqlText(uuid)}) LIMIT 1;`,
+        sql: `SELECT 1 FROM cursorDiskKV WHERE (${where}) AND (${needle}) LIMIT 1;`,
       });
 
       if (hit.trim())
         return 'This workspace contains an image referenced by another chat. Nothing was deleted.';
     }
+  } catch (error) {
+    return `Cannot confirm image ownership: ${error instanceof Error ? error.message : String(error)}`;
   }
 
   return undefined;
+}
+
+/** Composer ids stored as bubbles or composer rows and not deleted with this workspace. */
+async function foreignComposerIds(
+  ctx: TransferContext,
+  entry: WorkspaceEntry,
+  ownIds: string[],
+): Promise<string[]> {
+  const own = new Set(ownIds);
+
+  const [composers, bubbles] = await Promise.all([
+    execSql({
+      ...ctx,
+      database: entry.globalDbPath,
+      readOnly: true,
+      sql: `SELECT key FROM cursorDiskKV WHERE key >= 'composerData:' AND key < 'composerData;';`,
+    }),
+    execSql({
+      ...ctx,
+      database: entry.globalDbPath,
+      readOnly: true,
+      sql: `SELECT DISTINCT substr(key, 10, instr(substr(key, 10), ':') - 1) FROM cursorDiskKV WHERE key >= 'bubbleId:' AND key < 'bubbleId;' AND instr(substr(key, 10), ':') > 0;`,
+    }),
+  ]);
+
+  const ids = new Set<string>();
+
+  for (const key of composers.split('\n')) {
+    const trimmed = key.trim();
+
+    if (!trimmed.startsWith('composerData:')) continue;
+    const id = trimmed.slice('composerData:'.length);
+
+    if (!id || id.includes(':') || own.has(id)) continue;
+    ids.add(id);
+  }
+
+  for (const line of bubbles.split('\n')) {
+    const id = line.trim();
+
+    if (!id || own.has(id)) continue;
+    ids.add(id);
+  }
+
+  return [...ids];
 }

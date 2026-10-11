@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import { decodeAttachment } from './attachments';
 import { isBlobKey } from './chat-dependencies';
 import { BundleWriter } from './bundle-writer';
@@ -26,7 +26,7 @@ export async function writeObjectBundle(
     source: exportObj.source,
   });
 
-  const tmp = await mkdtemp(path.join(os.tmpdir(), 'cct-fixture-'));
+  const tmp = await operationTempDir('cct-fixture-');
 
   try {
     for (const header of exportObj.allComposers) {

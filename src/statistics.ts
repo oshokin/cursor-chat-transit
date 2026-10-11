@@ -14,7 +14,7 @@ import { WorkspaceHeaderReader } from './workspace-header-reader';
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
   TransferContext,
-  'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
+  'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs' | 'onNote'
 > & {
   /** Source assessment: presence for workspace filtering, full health for chat selection. */
   deepCheck?: boolean;
@@ -281,10 +281,17 @@ export async function runStatistics(
               sql: `SELECT length(CAST(value AS BLOB)) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${row.composerId}`)};`,
             });
 
-            if (!size.trim())
-              throw Object.assign(new Error('Chat metadata is missing.'), {
-                code: 'CHAT_METADATA_MISSING',
-              });
+            if (!size.trim()) {
+              const health = job.deepCheck
+                ? await inspectChatHealth(ctx, workspace, view.conn, row)
+                : 'missing';
+
+              chatHealth = health;
+              eligible = false;
+
+              return healthLabel[health];
+            }
+
             if (Number(size.trim()) > MAX_SQLITE_VALUE_BYTES)
               throw Object.assign(
                 new Error('Chat metadata exceeds the supported record size.'),

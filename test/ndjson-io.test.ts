@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readNdjson } from '../src/ndjson-io';
+import { NdjsonPartWriter, readNdjson } from '../src/ndjson-io';
 import { assertJsonLimits, parseBoundedJson } from '../src/record-json';
 import { MAX_JSON_KEYS, MAX_JSON_RECORD_BYTES } from '../src/bundle-limits';
 
@@ -131,6 +131,34 @@ test('NDJSON preserves a multi-chunk record, CRLF and final line without newline
       },
       { name: 'AbortError' },
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a payload at the property limit survives the bubble envelope', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-json-boundary-'));
+
+  try {
+    const payload = {
+      entries: Array.from({ length: 999_999 }, () => ({ x: 0 })),
+    };
+
+    parseBoundedJson(Buffer.from(JSON.stringify(payload)), 'source bubble');
+
+    const writer = new NdjsonPartWriter(dir);
+
+    await writer.write({
+      bubbleId: '11111111-1111-4111-8111-111111111111',
+      payload,
+    });
+
+    await writer.finish();
+
+    for (const file of writer.files()) {
+      for await (const row of readNdjson(file, 'exported bubble'))
+        assert.ok(row);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -151,12 +151,17 @@ export async function doImport(opts: {
           }
         }
 
+        const settings = transferSettings();
+
         log.file(src.fsPath, bytes);
-        const zipPath = await localBundlePath(src, signal);
+
+        const zipPath = await localBundlePath(
+          src,
+          signal,
+          settings.temporaryDirectory,
+        );
 
         try {
-          const settings = transferSettings();
-
           await rememberImportDir(opts.context, src);
           onPhase('validate');
 
@@ -168,6 +173,8 @@ export async function doImport(opts: {
               timeoutMs: settings.timeoutMs,
               busyTimeoutMs: settings.busyTimeoutMs,
               plansDir: settings.plansDir,
+              maxJsonProperties: settings.maxJsonProperties,
+              temporaryDirectory: settings.temporaryDirectory,
               workspace: destination,
               filePath: zipPath,
               interactiveRecovery: true,

@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
+import { operationTempDir } from './operation-temp';
 import { writeObjectBundle } from './bundle-from-object';
 import { importFromBundle } from './import-bundle';
 import {
@@ -29,7 +29,11 @@ export async function importFromObject(
     lockDir?: string;
   },
 ): Promise<ImportResult> {
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-fixture-zip-'));
+  const dir = await operationTempDir(
+    'cct-fixture-zip-',
+    ctx.temporaryDirectory,
+  );
+
   const zipPath = path.join(dir, 'fixture.cursor-chat.zip');
 
   try {

@@ -15,7 +15,8 @@ type OperationKind =
   | 'search managed chats'
   | 'prepare managed workspaces'
   | 'check managed chats'
-  | 'delete managed chats';
+  | 'delete managed chats'
+  | 'find empty workspaces';
 
 /** Terminal outcome written once at finish. */
 type Result = 'completed' | 'incomplete' | 'cancelled' | 'failed' | 'partial';

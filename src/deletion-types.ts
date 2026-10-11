@@ -6,6 +6,8 @@ export interface DeleteTarget {
   workspace: WorkspaceEntry;
   /** Duplicate IDs are normalized before any mutation. */
   ids: string[];
+  /** Confirmed hash of this target's global chat rows. Checked inside the write transaction. */
+  chatFingerprint?: string;
 }
 
 /** Known committed outcomes; cancellation never hides already completed workspaces. */

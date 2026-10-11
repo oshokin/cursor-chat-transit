@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
-import { bubbleRange, sqlText } from './core';
+import { bubbleRange } from './core';
+import { chatSelectionFingerprint } from './chat-fingerprint';
 import { deleteSelectedChats } from './chat-deletion';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import type {
@@ -23,7 +23,6 @@ import {
   removeWorkspaceDirectory,
   workspaceDataRefusal,
 } from './workspace-removal';
-import { execSql, execSqlHexRows } from './sqlite';
 import { transferEvent } from './transfer-events';
 import type { TransferContext, WorkspaceEntry } from './types';
 
@@ -537,11 +536,20 @@ export async function executeManagedDelete(
     if (pending.length) {
       ownership = await inspectDeletionOwnership(ctx, job.workspaces, pending);
 
-      for (const target of pending)
+      const wholeDirectories = new Set(
+        job.plan.targets
+          .filter((target) => target.kind === 'workspace-data')
+          .map((target) => target.workspace.workspaceDbPath),
+      );
+
+      for (const target of pending) {
+        if (!wholeDirectories.has(target.workspace.workspaceDbPath)) continue;
+
         if (!exclusivelyOwned(ownership.owners, target.workspace, target.ids))
           throw new Error(
             'A selected workspace contains chat history also referenced by another workspace.',
           );
+      }
     }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
@@ -599,7 +607,13 @@ export async function executeManagedDelete(
         const deleted = await deleteSelectedChats(
           quiet,
           live,
-          [{ workspace: read.entry, ids: target.ids }],
+          [
+            {
+              workspace: read.entry,
+              ids: target.ids,
+              chatFingerprint: target.chatFingerprint,
+            },
+          ],
           ownership,
         );
 
@@ -645,7 +659,13 @@ export async function executeManagedDelete(
         const deleted = await deleteSelectedChats(
           quiet,
           live,
-          [{ workspace: read.entry, ids: read.ids }],
+          [
+            {
+              workspace: read.entry,
+              ids: read.ids,
+              chatFingerprint: target.chatFingerprint,
+            },
+          ],
           ownership,
         );
 
@@ -856,6 +876,7 @@ export async function findEmptyWorkspaces(
 ): Promise<EmptyWorkspaceScan> {
   let unchecked = 0;
   let candidates = 0;
+  const headers = new WorkspaceHeaderReader(ctx);
   const empties: Array<{ workspace: WorkspaceEntry; ids: string[] }> = [];
 
   transferEvent({
@@ -867,13 +888,13 @@ export async function findEmptyWorkspaces(
   for (const [index, entry] of job.workspaces.entries()) {
     ctx.signal?.throwIfAborted();
 
+    const history = await assessWorkspaceHistory(ctx, entry, headers);
+
     ctx.onPhase?.('prepare', {
       processed: index + 1,
       total: job.workspaces.length,
       unit: 'workspaces',
     });
-
-    const history = await assessWorkspaceHistory(ctx, entry);
 
     if (history.state === 'unknown' || history.state === 'unavailable') {
       unchecked += 1;
@@ -899,16 +920,20 @@ export async function findEmptyWorkspaces(
       owned.map((item) => ({ workspace: item.workspace, ids: item.ids })),
     );
 
-  for (const item of empties) {
-    if (
-      item.ids.length &&
-      (!ownership ||
-        !exclusivelyOwned(ownership.owners, item.workspace, item.ids))
-    )
-      continue;
+  for (const [index, item] of empties.entries()) {
+    const allowed =
+      !item.ids.length ||
+      (ownership &&
+        exclusivelyOwned(ownership.owners, item.workspace, item.ids));
 
-    if (await foreignImageRefusal(ctx, item.workspace, item.ids)) continue;
-    selected.push(item.workspace);
+    if (allowed && !(await foreignImageRefusal(ctx, item.workspace, item.ids)))
+      selected.push(item.workspace);
+
+    ctx.onPhase?.('validate', {
+      processed: index + 1,
+      total: empties.length,
+      unit: 'workspaces',
+    });
   }
 
   transferEvent({
@@ -918,75 +943,4 @@ export async function findEmptyWorkspaces(
   });
 
   return { selected, unchecked, candidates };
-}
-
-/**
- * Hash the selected global chat rows.
- * Unrelated Cursor writes, including `agentKv` and editor state, are not part of the hash.
- */
-async function chatSelectionFingerprint(
-  /** Transfer hooks and the sqlite binary. */
-  ctx: TransferContext,
-  /** Global database that stores the chat rows. */
-  database: string,
-  /** Composer ids approved for this target. */
-  ids: string[],
-): Promise<string> {
-  const hash = createHash('sha256');
-  const sorted = [...new Set(ids)].sort();
-
-  hash.update(sorted.join('\n'));
-
-  if (!sorted.length) return hash.digest('hex');
-
-  const hasTable = (
-    await execSql({
-      ...ctx,
-      database,
-      readOnly: true,
-      sql: `SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='composerHeaders';`,
-    })
-  ).trim();
-
-  if (hasTable === '1') {
-    await execSqlHexRows({
-      ...ctx,
-      database,
-      readOnly: true,
-      sql: `SELECT hex(composerId), hex(COALESCE(CAST(value AS BLOB), X'')) FROM composerHeaders WHERE composerId IN (${sorted.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
-      cols: 2,
-      onRow: (fields) => {
-        hash.update(fields[0]);
-        hash.update(fields[1]);
-      },
-    });
-  }
-
-  const batchSize = 64;
-
-  for (let start = 0; start < sorted.length; start += batchSize) {
-    const batch = sorted.slice(start, start + batchSize);
-
-    const where = batch
-      .map((id) => {
-        const range = bubbleRange(id);
-
-        return `key=${sqlText(`composerData:${id}`)} OR key=${sqlText(`composerRootWriterDiagnostic:${id}`)} OR (key>=${sqlText(range.lower)} AND key<${sqlText(range.upper)})`;
-      })
-      .join(' OR ');
-
-    await execSqlHexRows({
-      ...ctx,
-      database,
-      readOnly: true,
-      sql: `SELECT hex(key), hex(COALESCE(CAST(value AS BLOB), X'')) FROM cursorDiskKV WHERE ${where} ORDER BY key;`,
-      cols: 2,
-      onRow: (fields) => {
-        hash.update(fields[0]);
-        hash.update(fields[1]);
-      },
-    });
-  }
-
-  return hash.digest('hex');
 }
