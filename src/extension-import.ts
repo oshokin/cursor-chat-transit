@@ -19,6 +19,12 @@ import {
   setUi,
 } from './extension-state';
 import { hostState, pickWorkspace } from './extension-workspaces';
+import * as paths from './paths';
+import {
+  annotateOpening,
+  importStoragePrompt,
+  recheckDestination,
+} from './workspace-opening';
 import { importDialogOptions, localBundlePath } from './file-dialogs';
 import { runTransfer } from './transfer-process';
 import { startOperationLog } from './operation-log';
@@ -69,7 +75,10 @@ export async function doImport(opts: {
     });
 
     const src = open[0];
-    const { sqlite, entries, identity } = await hostState(opts.context);
+
+    const { sqlite, userDir, entries, identity } = await hostState(
+      opts.context,
+    );
 
     const resolved = resolveSelectedWorkspace(
       opts.destination || runtime.sourceWorkspace,
@@ -116,13 +125,64 @@ export async function doImport(opts: {
       return;
     }
 
+    const prompt = importStoragePrompt(workspace, entries);
+    let destination = workspace;
+    let keptSelection = false;
+
+    if (prompt.kind !== 'ok') {
+      const keep = 'Keep Selected Storage';
+      const use = prompt.kind === 'switch' ? prompt.useLabel : undefined;
+
+      const choice = await vscode.window.showWarningMessage(
+        prompt.message,
+        { modal: true },
+        ...(use ? [use, keep, 'Cancel'] : [keep, 'Cancel']),
+      );
+
+      if (prompt.kind === 'switch' && choice === prompt.useLabel)
+        destination = prompt.expected;
+      else if (choice === keep) keptSelection = true;
+      else {
+        log.finish('cancelled');
+
+        setUi({
+          status: 'cancelled',
+          statusTitle: 'Import cancelled',
+          statusDetail: 'No destination workspace selected.',
+        });
+
+        return;
+      }
+    }
+
+    if (destination.workspaceDbPath) {
+      const fresh = await annotateOpening(paths.listWorkspaceEntries(userDir));
+      const checked = recheckDestination(destination, fresh, keptSelection);
+
+      if (checked.status === 'stop') {
+        log.finish('failed', 'STALE_WORKSPACE');
+
+        setUi({
+          status: 'failed',
+          statusTitle: 'Workspace unavailable',
+          statusDetail: 'Selected workspace storage changed. Choose it again.',
+        });
+
+        vscode.window.showErrorMessage(
+          'The selected workspace storage changed. Choose a workspace and try again.',
+        );
+
+        return;
+      }
+
+      destination = checked.entry;
+    }
+
     setUi({
       status: 'running',
       statusTitle: 'Importing…',
       statusDetail: 'Reading export file…',
     });
-
-    const destination = workspace;
 
     const result = await vscode.window.withProgress(
       {

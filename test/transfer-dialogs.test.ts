@@ -40,6 +40,14 @@ const host = {
   exports: 0,
   /** How many times the stub import path ran. */
   imports: 0,
+  /** Entries returned by the stubbed host inventory. */
+  entries: undefined as Array<Record<string, unknown>> | undefined,
+  /** Button chosen on the other-storage import prompt. */
+  importChoice: undefined as string | undefined,
+  /** Other-storage prompts observed before any write. */
+  importPrompts: [] as Array<{ message: string; buttons: string[] }>,
+  /** Storage id passed into the export or import worker. */
+  transferredId: '',
   /** Optional hook invoked while the export mode picker is open. */
   onMode: undefined as (() => Promise<void>) | undefined,
 };
@@ -117,7 +125,18 @@ const fakeVscode = {
       );
     },
     showInformationMessage: async () => undefined,
-    showWarningMessage: async () => {
+    showWarningMessage: async (message: string, ...items: unknown[]) => {
+      if (message.includes('Import into')) {
+        host.importPrompts.push({
+          message,
+          buttons: items.filter(
+            (item): item is string => typeof item === 'string',
+          ),
+        });
+
+        return host.importChoice;
+      }
+
       host.recoveryPrompts++;
       if (host.noRecovery) return new Promise<undefined>(() => {});
 
@@ -131,7 +150,12 @@ const fakeVscode = {
 const workspaces = {
   /** Return the fixture workspace without scanning disk. */
   async hostState() {
-    return { sqlite: {}, userDir: '/fixture', entries: [workspace] };
+    return {
+      sqlite: {},
+      userDir: '/fixture',
+      entries: host.entries || [workspace],
+      identity: undefined,
+    };
   },
   /** Return the fixture workspace unless the test cancels the picker. */
   async pickWorkspace() {
@@ -268,6 +292,17 @@ loader._load = function (id, parent, isMain) {
           },
         ) {
           if (job.kind === 'list-chats') return transfer.listWorkspaceChats();
+
+          if (job.kind === 'export' || job.kind === 'import') {
+            host.transferredId =
+              (
+                job as {
+                  /** Destination or source chosen for this job. */
+                  workspace?: { storageId?: string };
+                }
+              ).workspace?.storageId || '';
+          }
+
           if (job.kind === 'export') return transfer.exportToFile();
 
           if (host.noRecovery) {
@@ -331,6 +366,10 @@ beforeEach(() => {
     states: [],
     exports: 0,
     imports: 0,
+    entries: undefined,
+    importChoice: undefined,
+    importPrompts: [],
+    transferredId: '',
     onMode: undefined,
   });
 
@@ -347,7 +386,11 @@ beforeEach(() => {
 });
 
 /** Exercise the real lock lifecycle around a command and remove its temporary files. */
-async function run(kind: 'export' | 'import', allChats = false): Promise<void> {
+async function run(
+  kind: 'export' | 'import',
+  allChats = false,
+  chosen?: { storageId: string },
+): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transit-dialogs-'));
 
   const context = {
@@ -366,9 +409,14 @@ async function run(kind: 'export' | 'import', allChats = false): Promise<void> {
         (kind === 'export' ? doExport : doImport)({
           context,
           operations,
-          ...(allChats
-            ? { workspace: workspace as never, allChats: true }
-            : {}),
+          ...(chosen
+            ? {
+                workspace: chosen as never,
+                ...(allChats ? { allChats: true } : {}),
+              }
+            : allChats
+              ? { workspace: workspace as never, allChats: true }
+              : {}),
         }),
       )
       .catch((error: unknown) => showFail(kind, error, operations));
@@ -536,6 +584,80 @@ test('unrecoverable archive reports missing data instead of cancellation or succ
   );
 
   assert.equal(state.runtime.uiState.importNeedsRestart, false);
+});
+
+function duplicatePair() {
+  const identity = {
+    kind: 'folder' as const,
+    uri: {
+      scheme: 'file',
+      authority: '',
+      path: '/repo',
+      query: '',
+      fragment: '',
+    },
+  };
+
+  const opening = { expectedId: 'newer', duplicate: true };
+
+  return {
+    other: { storageId: 'older', storageRoot: '/fixture', identity, opening },
+    expected: {
+      storageId: 'newer',
+      storageRoot: '/fixture',
+      identity,
+      opening,
+    },
+  };
+}
+
+test('export of another storage reads that storage', async () => {
+  const { other, expected } = duplicatePair();
+
+  host.entries = [expected, other];
+  state.runtime.sourceWorkspace = expected as never;
+  await run('export', true, other);
+  assert.equal(host.exports, 1);
+  assert.equal(host.transferredId, 'older');
+});
+
+test('import into the expected storage does not ask, and other storage asks once', async () => {
+  const { other, expected } = duplicatePair();
+
+  host.entries = [other, expected];
+  state.runtime.sourceWorkspace = expected as never;
+  await run('import');
+  assert.equal(host.importPrompts.length, 0);
+  assert.equal(host.imports, 1);
+  assert.equal(host.transferredId, 'newer');
+
+  host.imports = 0;
+  host.transferredId = '';
+  state.runtime.sourceWorkspace = other as never;
+  await run('import');
+  assert.equal(host.importPrompts.length, 1);
+  assert.equal(host.imports, 0);
+  assert.match(host.importPrompts[0].message, /folder’s storage/);
+
+  assert.deepEqual(host.importPrompts[0].buttons, [
+    'Use Folder Storage',
+    'Keep Selected Storage',
+    'Cancel',
+  ]);
+
+  host.importPrompts.length = 0;
+  host.importChoice = 'Keep Selected Storage';
+  await run('import');
+  assert.equal(host.importPrompts.length, 1);
+  assert.equal(host.imports, 1);
+  assert.equal(host.transferredId, 'older');
+
+  host.imports = 0;
+  host.importPrompts.length = 0;
+  host.importChoice = 'Use Folder Storage';
+  await run('import');
+  assert.equal(host.imports, 1);
+  assert.equal(host.transferredId, 'newer');
 });
 
 test('whole-workspace export opens Save directly without a mode or chat picker', async () => {

@@ -16,6 +16,7 @@ import {
 import { ensureInitFile, findSqliteExecutable } from './sqlite';
 import type { WorkspaceEntry, WorkspaceIdentity } from './types';
 import { workspacePresentation } from './workspace-presentation';
+import { annotateOpening, destinationStaysVisible } from './workspace-opening';
 
 /** Resolve sqlite3 and an empty `-init` file in globalStorage. */
 export async function prepareSqlite(
@@ -86,8 +87,14 @@ export async function hostState(
   identity: WorkspaceIdentity | undefined;
 }> {
   const sqlite = await prepareSqlite(context);
+  const listed = listHostEntries();
 
-  return { sqlite, ...listHostEntries() };
+  return {
+    sqlite,
+    userDir: listed.userDir,
+    identity: listed.identity,
+    entries: await annotateOpening(listed.entries),
+  };
 }
 
 /** Local physical workspace database reported by the host, including profile isolation. */
@@ -122,12 +129,16 @@ export async function pickWorkspace(
     );
   }
 
+  const rows = workspacePickItems(
+    entries,
+    current,
+    currentWorkspaceDatabase(analysis.context),
+  );
+
+  const currentProject = rows.filter((item) => item.inCurrentGroup).length > 1;
+
   const picked = await pickWithStatistics({
-    items: workspacePickItems(
-      entries,
-      current,
-      currentWorkspaceDatabase(analysis.context),
-    ).flatMap(
+    items: rows.flatMap(
       (
         item,
         index,
@@ -136,14 +147,18 @@ export async function pickWorkspace(
       ) => {
         const previous = items[index - 1];
 
-        const group = item.isCurrent
-          ? 'Current workspace'
+        const group = item.inCurrentGroup
+          ? currentProject
+            ? 'Current project'
+            : 'Current workspace'
           : workspacePresentation(item.entry).group;
 
         const previousGroup =
           previous &&
-          (previous.isCurrent
-            ? 'Current workspace'
+          (previous.inCurrentGroup
+            ? currentProject
+              ? 'Current project'
+              : 'Current workspace'
             : workspacePresentation(previous.entry).group);
 
         return group === previousGroup
@@ -170,7 +185,17 @@ export async function pickWorkspace(
             ).entry,
           )
         : undefined,
-    keepVisible: (item) => 'isCurrent' in item && item.isCurrent === true,
+    keepVisible: (item) =>
+      'entry' in item &&
+      destinationStaysVisible(
+        (
+          item as {
+            /** Workspace the user picked. */
+            entry: WorkspaceEntry;
+          }
+        ).entry,
+        'isCurrent' in item && item.isCurrent === true,
+      ),
     buttonLabel: 'Count chats in each workspace',
     operations: analysis.operations,
     job: async () => ({

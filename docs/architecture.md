@@ -42,6 +42,8 @@ The local storage root, project URI, and archive location are separate concepts.
 
 `workspaceKey()` includes the workspace kind and URI scheme, authority, path, query, and fragment. A readable project name is never a storage key. Duplicate-looking storage entries remain separate. A configured user-data directory is authoritative; missing databases do not cause a silent switch to another profile.
 
+The storage id Cursor assigns when a workspace opens is a separate fact from database mtime and from the database this window already has open. `workspace-opening.ts` reproduces that id for Cursor 3.23.12 (`2d29876d567da1607532b23bbf2cd5ddbca496f0`): Linux hashes the folder path plus the decimal inode, macOS hashes the path plus `birthtime.getTime()`, and Windows hashes the path plus `Math.floor(birthtimeMs)`, falling back to `birthtime.getTime()`. A saved workspace hashes its path, lowercased outside Linux. A non-file folder hashes the original URI string. The extension does not parse Cursor's bundle at runtime. Linux folder ids were checked against one local folder. Windows and macOS follow that bundle and VS Code `workspaces.ts`; they were not opened on those systems in this repository.
+
 ## Cursor storage contract
 
 The adapter inspects the actual schema before operating. A Cursor version string alone does not establish support.

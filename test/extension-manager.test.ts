@@ -13,6 +13,16 @@ import type { ManagedSearchItem } from '../src/managed-search';
 import type { TransferJob } from '../src/transfer-process';
 import type { StatisticsJob, StatisticsUpdate } from '../src/statistics';
 import { workspaceStatisticsKey } from '../src/statistics';
+import { orderWorkspaceEntries } from '../src/workspace-opening';
+
+/** Drop snapshot-only opening facts before comparing a row with its fixture. */
+function withoutOpening(entry: WorkspaceEntry): WorkspaceEntry {
+  const copy = { ...entry };
+
+  delete copy.opening;
+
+  return copy;
+}
 
 const entries = ['a', 'b'].map(
   (id) =>
@@ -79,7 +89,9 @@ function createSearchPicker() {
 
   const picker = {
     busy: true,
-    items: [] as ManagedSearchItem[],
+    title: '',
+    ignoreFocusOut: false,
+    items: [] as Array<ManagedSearchItem & { description?: string }>,
     activeItems: [] as ManagedSearchItem[],
     selectedItems: [] as ManagedSearchItem[],
     onDidAccept: (fn: () => void) => {
@@ -126,10 +138,16 @@ const log = {
   dispose() {},
 } as TransitLog;
 
+let savedSort: unknown;
+
 const context = {
   globalState: {
-    get: () => ['obsolete hidden state'],
-    update: () => assert.fail('No manual hiding writes'),
+    get: (key?: string) =>
+      key === 'manageWorkspaceSort' ? savedSort : ['obsolete hidden state'],
+    update: (key: string, value: unknown) => {
+      if (key !== 'manageWorkspaceSort') assert.fail('No manual hiding writes');
+      savedSort = value;
+    },
   },
   subscriptions: [],
 } as unknown as vscode.ExtensionContext;
@@ -372,6 +390,7 @@ beforeEach(() => {
   holdScan = undefined;
   lockStatuses.length = 0;
   currentDatabase = undefined;
+  savedSort = undefined;
   searchPickers = [];
   listedComposers = [{ composerId: 'chat', name: 'Example' }];
   clearInterval(mockRuntime.progressTimer);
@@ -426,7 +445,7 @@ test('cleanup hides empty roots and toggles unavailable workspaces without a res
     hideFirst = true;
 
     assert.deepEqual(
-      (await manager.getChildren()).map((n) => n.workspace),
+      (await manager.getChildren()).map((n) => withoutOpening(n.workspace)),
       [entries[1]],
     );
 
@@ -455,8 +474,12 @@ test('refresh aborts an old root scan and never applies its partial filter', asy
 
   try {
     const old = manager.getChildren();
+    const deadline = Date.now() + 2000;
 
-    await new Promise((resolve) => setImmediate(resolve));
+    while (!release && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+    assert.equal(typeof release, 'function');
     manager.refresh();
     holdScan = undefined;
     release();
@@ -473,7 +496,7 @@ test('manager lists workspaces by name instead of pinning the current window', a
 
   try {
     assert.deepEqual(
-      (await manager.getChildren()).map((n) => n.workspace),
+      (await manager.getChildren()).map((n) => withoutOpening(n.workspace)),
       [entries[0], entries[1]],
     );
   } finally {
@@ -617,7 +640,7 @@ test('select all uses only visible workspaces and clear also removes hidden sele
     await manager.selectAll();
 
     assert.deepEqual(
-      manager.selection.values().map((node) => node.workspace),
+      manager.selection.values().map((node) => withoutOpening(node.workspace)),
       [entries[1]],
     );
 
@@ -1162,39 +1185,103 @@ test('inline parent check includes confirmed descendants', async () => {
   }
 });
 
-test('name order prefers a newer workspace and a local workspace', async () => {
-  const manager = new Manager(context, log);
+test('name order prefers a newer workspace and a local workspace', () => {
+  const older = { ...entries[0], mtime: 1000 };
+  const newer = { ...entries[1], mtime: 2000 };
 
-  const older = { workspace: { ...entries[0], mtime: 1000 } };
-  const newer = { workspace: { ...entries[1], mtime: 2000 } };
+  const named = orderWorkspaceEntries([older, newer], { mode: 'name' });
+
+  assert.equal(named[0].workspaceDbPath, newer.workspaceDbPath);
 
   const local = {
-    workspace: {
-      ...entries[0],
-      identity: {
-        kind: 'folder' as const,
-        uri: { scheme: 'file', authority: '', path: '/z/project' },
-      },
+    ...entries[0],
+    identity: {
+      kind: 'folder' as const,
+      uri: { scheme: 'file', authority: '', path: '/z/project' },
     },
   };
 
   const ssh = {
-    workspace: {
-      ...entries[1],
-      identity: {
-        kind: 'folder' as const,
-        uri: {
-          scheme: 'vscode-remote',
-          authority: 'ssh-remote+host',
-          path: '/a/project',
-        },
+    ...entries[1],
+    identity: {
+      kind: 'folder' as const,
+      uri: {
+        scheme: 'vscode-remote',
+        authority: 'ssh-remote+host',
+        path: '/a/project',
       },
     },
   };
 
+  const located = orderWorkspaceEntries([ssh, local], { mode: 'name' });
+
+  assert.equal(located[0].identity?.uri.scheme, 'file');
+});
+
+test('sort picker keeps the current mode until accept and does not rescan', async () => {
+  const manager = new Manager(context, log);
+
   try {
-    assert.ok(manager['compareWorkspaces'](newer, older) < 0);
-    assert.ok(manager['compareWorkspaces'](local, ssh) < 0);
+    const roots = await manager.getChildren();
+
+    await manager.select(roots[1], true);
+    const jobsBefore = jobs.length;
+
+    const checked = manager.selection
+      .values()
+      .map((node) => node.workspace.workspaceDbPath);
+
+    const dismissed = manager.chooseWorkspaceSort();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    const picker = searchPickers.at(-1);
+
+    assert.ok(picker);
+    assert.equal(picker.ignoreFocusOut, true);
+    assert.equal(picker.items[0]?.description, 'Current');
+    assert.equal(picker.items[1]?.description, '');
+    picker.hide();
+    await dismissed;
+    assert.equal(savedSort, undefined);
+
+    assert.deepEqual(
+      manager.selection.values().map((node) => node.workspace.workspaceDbPath),
+      checked,
+    );
+
+    const applied = manager.chooseWorkspaceSort();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    searchPickers.at(-1)?.accept(1);
+    await applied;
+    assert.equal(savedSort, 'recent');
+    assert.equal(jobs.length, jobsBefore);
+    assert.equal(lockStatuses.length, 0);
+
+    assert.deepEqual(
+      manager.selection.values().map((node) => node.workspace.workspaceDbPath),
+      checked,
+    );
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a statistics detail does not replace the storage mark', async () => {
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+
+    roots[0].workspace.opening = {
+      expectedId: roots[0].workspace.storageId,
+      duplicate: true,
+    };
+
+    const description = String(manager.getTreeItem(roots[0]).description);
+
+    assert.match(description, /^Opens with this folder · /);
+    assert.match(description, /Empty/);
   } finally {
     manager.dispose();
   }

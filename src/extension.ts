@@ -3,9 +3,17 @@ import { registerManager } from './extension-manager';
 import { openLog, showFail, recoverStaleTransfer } from './extension-errors';
 import { operationLogLevel } from './extension-settings';
 import { runtime, setSource, setUi, withLock } from './extension-state';
-import { listHostEntries, pickWorkspace } from './extension-workspaces';
+import {
+  currentWorkspaceDatabase,
+  listHostEntries,
+  pickWorkspace,
+} from './extension-workspaces';
 import { asTransitLog, gateOperationLog, type TransitLog } from './output-ui';
-import * as paths from './paths';
+import {
+  annotateOpening,
+  resolveAutomaticWorkspace,
+  sameDatabasePath,
+} from './workspace-opening';
 import { canQuitCursor, createQuitCursorAction } from './quit-cursor';
 import { TransferSidebar, type SidebarAction } from './sidebar-provider';
 
@@ -201,17 +209,29 @@ export function activate(
   );
 
   setImmediate(() => {
-    try {
-      const listed = listHostEntries();
+    void (async () => {
+      try {
+        const listed = listHostEntries();
+        const entries = await annotateOpening(listed.entries);
 
-      const current =
-        listed.identity &&
-        paths.findWorkspaceByIdentity(listed.userDir, listed.identity);
+        const current = resolveAutomaticWorkspace(
+          entries,
+          currentWorkspaceDatabase(context),
+          listed.identity,
+        );
 
-      if (current) setSource(current);
-    } catch {
-      /* diagnostics remain available */
-    }
+        if (!current) return;
+        const database = currentWorkspaceDatabase(context);
+
+        setSource(current, {
+          currentWindow: Boolean(
+            database && sameDatabasePath(current.workspaceDbPath, database),
+          ),
+        });
+      } catch {
+        /* diagnostics remain available */
+      }
+    })();
   });
 }
 

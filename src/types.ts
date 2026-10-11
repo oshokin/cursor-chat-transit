@@ -25,6 +25,24 @@ export interface WorkspaceIdentity {
   kind: WorkspaceKind;
   /** Canonical URI parts for this workspace. */
   uri: UriParts;
+  /**
+   * URI text from `workspace.json`, unchanged.
+   * Remote opening ids hash this string. It is not part of `workspaceKey()`.
+   */
+  sourceUri?: string;
+}
+
+/**
+ * Cursor's opening id for one identity, computed once per inventory snapshot.
+ * Absence is not a guess from database mtime.
+ */
+export interface WorkspaceOpening {
+  /** Storage id the compatible algorithm produced, when it could. */
+  expectedId?: string;
+  /** Why no id was produced. */
+  reason?: 'stat-unavailable' | 'untitled' | 'unsupported' | 'missing-uri';
+  /** Another physical storage in this profile shares the identity. */
+  duplicate: boolean;
 }
 
 /** Cursor's stored workspace pointer on a composer header; fields may be missing or extra. */
@@ -108,6 +126,8 @@ export interface WorkspaceEntry {
   identity?: WorkspaceIdentity;
   /** Stable picker/import key for this entry. */
   key: string;
+  /** Opening id for this snapshot. Unset until `annotateOpening` runs. */
+  opening?: WorkspaceOpening;
 }
 
 /** sqlite3 CLI invocation bound to one database file. */

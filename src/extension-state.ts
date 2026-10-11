@@ -11,6 +11,7 @@ import type {
   WorkspaceEntry,
 } from './types';
 import { workspacePresentation } from './workspace-presentation';
+import { storageExplanation, storageMark } from './workspace-opening';
 
 /** Process-wide transfer UI: busy flag, cancellation, and the chosen workspace. */
 export const runtime: {
@@ -140,7 +141,15 @@ export function setUi(
 }
 
 /** Apply a selected source workspace to the sidebar card. */
-export function setSource(entry: WorkspaceEntry | undefined): void {
+export function setSource(
+  /** Selected workspace, or none. */
+  entry: WorkspaceEntry | undefined,
+  /** Current window is a physical fact, not a URI match. */
+  options?: {
+    /** This entry is the open window's database. */
+    currentWindow?: boolean;
+  },
+): void {
   runtime.sourceWorkspace = entry;
 
   if (!entry) {
@@ -155,11 +164,16 @@ export function setSource(entry: WorkspaceEntry | undefined): void {
   }
 
   const label = workspacePresentation(entry);
+  const currentWindow = options?.currentWindow === true;
+  const mark = storageMark(entry, currentWindow);
+  const explanation = storageExplanation(entry, currentWindow);
 
   setUi({
     workspaceName: label.name,
-    workspaceDetail: label.path,
-    workspaceLocation: label.location,
+    workspaceDetail: explanation
+      ? `${label.path} — ${explanation}`
+      : label.path,
+    workspaceLocation: [mark, label.location].filter(Boolean).join(' · '),
     sourceAvailable: true,
   });
 }

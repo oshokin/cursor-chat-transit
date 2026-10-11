@@ -23,13 +23,17 @@ import {
   setSource,
   setUi,
 } from './extension-state';
-import { hostState, pickWorkspace } from './extension-workspaces';
+import {
+  currentWorkspaceDatabase,
+  hostState,
+  pickWorkspace,
+} from './extension-workspaces';
+import { resolveAutomaticWorkspace } from './workspace-opening';
 import { ZIP_FILTER } from './file-dialogs';
 import { runTransfer } from './transfer-process';
 import { startOperationLog } from './operation-log';
 import { formatIncompleteExportNotice } from './operation-ui';
 import { type TransitLog } from './output-ui';
-import * as paths from './paths';
 import {
   buildFamily,
   descendantCount,
@@ -63,15 +67,15 @@ export async function doExport(opts: {
   });
 
   try {
-    const { sqlite, userDir, entries, identity } = await hostState(
-      opts.context,
-    );
+    const { sqlite, entries, identity } = await hostState(opts.context);
 
-    let workspace = opts.workspace || runtime.sourceWorkspace;
-
-    if (opts.preferCurrent && identity) {
-      workspace = paths.findWorkspaceByIdentity(userDir, identity) || workspace;
-    }
+    let workspace = opts.preferCurrent
+      ? resolveAutomaticWorkspace(
+          entries,
+          currentWorkspaceDatabase(opts.context),
+          identity,
+        )
+      : opts.workspace || runtime.sourceWorkspace;
 
     if (!workspace) {
       setUi({

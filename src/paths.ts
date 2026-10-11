@@ -242,20 +242,6 @@ export function listWorkspaceEntries(
   return results;
 }
 
-/** Find storage whose identity matches kind+URI. */
-export function findWorkspaceByIdentity(
-  /** Cursor user-data directory. */
-  userDir: string,
-  identity: WorkspaceIdentity | undefined,
-): WorkspaceEntry | undefined {
-  if (!identity) return undefined;
-  const want = workspaceKey(identity.kind, identity.uri);
-
-  return listWorkspaceEntries(userDir).find(
-    (e) => e.identity && workspaceKey(e.identity.kind, e.identity.uri) === want,
-  );
-}
-
 /** Human-readable label; SSH host aliases never replace workspace identity. */
 export function displayLabel(entry: WorkspaceEntry): string {
   const label = workspacePresentation(entry);

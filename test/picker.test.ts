@@ -162,7 +162,7 @@ test('export and import workspace pickers use different titles', () => {
   assert.notEqual(workspacePickTitle('export'), workspacePickTitle('import'));
 });
 
-test('Current is only set for a confirmed identity match', () => {
+test('Current window is the physical database, not the only URI match', () => {
   const current: WorkspaceIdentity = {
     kind: 'folder',
     uri: uri('ssh-remote+host-a'),
@@ -170,18 +170,32 @@ test('Current is only set for a confirmed identity match', () => {
 
   const matched = entry('old', current);
 
+  matched.workspaceDbPath = '/tmp/old/state.vscdb';
+
   const other = entry('new', {
     kind: 'folder',
     uri: uri('ssh-remote+host-b'),
   });
 
+  other.workspaceDbPath = '/tmp/new/state.vscdb';
+
   const items = workspacePickItems([other, matched], current);
 
-  assert.equal(items[0].isCurrent, true);
   assert.equal(items[0].entry.storageId, 'old');
-  assert.match(items[0].description, /^Current · /);
-  assert.equal(items[1].isCurrent, false);
-  assert.doesNotMatch(items[1].description, /^Current · /);
+  assert.equal(items[0].isCurrent, false);
+  assert.equal(items[0].inCurrentGroup, true);
+  assert.doesNotMatch(items[0].description, /Current window/);
+
+  const labeled = workspacePickItems(
+    [other, matched],
+    current,
+    matched.workspaceDbPath,
+  );
+
+  assert.equal(labeled[0].isCurrent, true);
+  assert.match(labeled[0].description, /^Current window · /);
+  assert.equal(labeled[1].isCurrent, false);
+  assert.doesNotMatch(labeled[1].description, /Current window/);
 });
 
 test('the newest unidentified folder is not treated as Current', () => {

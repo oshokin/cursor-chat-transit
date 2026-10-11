@@ -1,21 +1,18 @@
-import { workspaceKey } from './core';
-import path from 'node:path';
-import {
-  chatActivityLabel,
-  compareText,
-  recentChats,
-  validTimestamp,
-} from './activity';
-import {
-  LOCATION_ORDER,
-  workspaceLocation,
-  workspacePresentation,
-} from './workspace-presentation';
+import { chatActivityLabel, recentChats } from './activity';
 import type {
   ComposerHeader,
   WorkspaceEntry,
   WorkspaceIdentity,
 } from './types';
+import { workspacePresentation } from './workspace-presentation';
+import {
+  currentWorkspaceGroupKey,
+  orderWorkspaceEntries,
+  sameDatabasePath,
+  storageExplanation,
+  storageMark,
+  workspaceGroupKey,
+} from './workspace-opening';
 
 /** QuickPick action that chooses the workspace step title. */
 export type WorkspacePickAction = 'export' | 'import' | 'select';
@@ -30,8 +27,10 @@ export interface WorkspacePickItem {
   detail: string;
   /** Storage entry this row represents. */
   entry: WorkspaceEntry;
-  /** True when this row is the current window's workspace. */
+  /** True when this row is the current window's database. */
   isCurrent: boolean;
+  /** True when this row belongs to the pinned current project group. */
+  inCurrentGroup: boolean;
 }
 
 /** Chat QuickPick row: title, activity, and the composer id. */
@@ -74,7 +73,10 @@ export function chatListLabel(name: unknown): string {
   return hasChatTitle(name) ? name : 'Untitled chat';
 }
 
-/** Native QuickPick rows for workspaceStorage entries. Current only when identity matches. */
+/**
+ * Native QuickPick rows.
+ * `Current window` is the physical database only. A URI match does not get that label.
+ */
 export function workspacePickItems(
   /** Entries to turn into picker rows. */
   entries: WorkspaceEntry[],
@@ -83,50 +85,36 @@ export function workspacePickItems(
   /** Database path of the workspace that is open now. */
   currentDatabase?: string,
 ): WorkspacePickItem[] {
-  const currentKey = current ? workspaceKey(current.kind, current.uri) : null;
+  const ordered = orderWorkspaceEntries(entries, {
+    mode: 'activity',
+    current,
+    currentDatabase,
+  });
 
-  const identityMatches = entries.filter(
-    (entry) =>
-      currentKey &&
-      entry.identity &&
-      workspaceKey(entry.identity.kind, entry.identity.uri) === currentKey,
-  );
+  const pinnedKey = currentWorkspaceGroupKey(entries, {
+    current,
+    currentDatabase,
+  });
 
-  /** Compare database paths independent of platform case. */
-  const normalize = (
-    /** Database path to compare. */
-    file: string,
-  ) =>
-    process.platform === 'win32'
-      ? path.resolve(file).toLowerCase()
-      : path.resolve(file);
-
-  const items = entries.map((entry) => {
+  const items = ordered.map((entry) => {
     const isCurrent = currentDatabase
-      ? normalize(entry.workspaceDbPath) === normalize(currentDatabase)
-      : identityMatches.length === 1 && identityMatches[0] === entry;
+      ? sameDatabasePath(entry.workspaceDbPath, currentDatabase)
+      : false;
 
     const label = workspacePresentation(entry);
+    const mark = storageMark(entry, isCurrent);
 
     return {
       label: label.name,
-      description: isCurrent ? `Current · ${label.location}` : label.location,
+      description: [mark, label.location].filter(Boolean).join(' · '),
       detail: label.path,
       entry,
       isCurrent,
+      inCurrentGroup: pinnedKey
+        ? workspaceGroupKey(entry) === pinnedKey
+        : false,
     };
   });
-
-  items.sort(
-    (a, b) =>
-      Number(b.isCurrent) - Number(a.isCurrent) ||
-      LOCATION_ORDER[workspaceLocation(a.entry)] -
-        LOCATION_ORDER[workspaceLocation(b.entry)] ||
-      validTimestamp(b.entry.mtime) - validTimestamp(a.entry.mtime) ||
-      a.label.localeCompare(b.label) ||
-      compareText(a.entry.key, b.entry.key) ||
-      compareText(a.entry.storageId, b.entry.storageId),
-  );
 
   // Distinct storage entries can have the same human name/path (notably containers).
   // Add an identifier only for ambiguous rows; never merge their databases.
@@ -137,6 +125,12 @@ export function workspacePickItems(
       item.detail += ` · Storage ${id}`;
     },
   );
+
+  for (const item of items) {
+    const explanation = storageExplanation(item.entry, item.isCurrent);
+
+    if (explanation) item.detail += `\n${explanation}`;
+  }
 
   return items;
 }

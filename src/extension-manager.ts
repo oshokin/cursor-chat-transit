@@ -31,12 +31,13 @@ import {
   topLevelChats,
   type FamilyGraph,
 } from './chat-family';
-import { compareText, validTimestamp } from './activity';
+import { workspacePresentation } from './workspace-presentation';
 import {
-  LOCATION_ORDER,
-  workspaceLocation,
-  workspacePresentation,
-} from './workspace-presentation';
+  annotateOpening,
+  orderWorkspaceEntries,
+  storageExplanation,
+  storageMark,
+} from './workspace-opening';
 
 /** A native, lazy tree. Its lifetime and its jobs do not depend on keyboard focus. */
 export class ChatManager
@@ -676,6 +677,55 @@ export class ChatManager
     this.changed.fire(undefined);
   }
 
+  /**
+   * Ask which workspace order to use.
+   * Escape and focus loss leave the current mode. This does not scan chats.
+   */
+  async chooseWorkspaceSort(): Promise<void> {
+    const pick = vscode.window.createQuickPick();
+
+    pick.title = 'Sort workspaces';
+    pick.ignoreFocusOut = true;
+    pick.matchOnDetail = true;
+
+    const name = {
+      label: 'Name (A–Z)',
+      description: this.workspaceSort === 'name' ? 'Current' : '',
+      detail: 'Sort by name, then location.',
+    };
+
+    const recent = {
+      label: 'Recently active',
+      description: this.workspaceSort === 'recent' ? 'Current' : '',
+      detail:
+        'Based on database activity, not the last time a workspace was opened.',
+    };
+
+    pick.items = [name, recent];
+    pick.activeItems = [this.workspaceSort === 'name' ? name : recent];
+
+    await new Promise<void>((resolve) => {
+      let accepted = false;
+
+      pick.onDidAccept(() => {
+        accepted = true;
+        const label = pick.selectedItems[0]?.label;
+
+        pick.hide();
+        if (label === name.label) this.sortWorkspaces('name');
+        else if (label === recent.label) this.sortWorkspaces('recent');
+        resolve();
+      });
+
+      pick.onDidHide(() => {
+        pick.dispose();
+        if (!accepted) resolve();
+      });
+
+      pick.show();
+    });
+  }
+
   /** Remember the workspace order without rereading Cursor. */
   sortWorkspaces(mode: 'name' | 'recent'): void {
     this.workspaceSort = mode;
@@ -839,55 +889,32 @@ export class ChatManager
     };
   }
 
-  /** Name order is cached for one visible array. Recent keeps the loader order. */
+  /**
+   * Name order regroups the visible rows. Recent keeps the loader order.
+   * Neither path stats or reads SQLite; opening facts are already on the rows.
+   */
   private orderRoots(visible: ManagedNode[]): ManagedNode[] {
     if (this.workspaceSort !== 'name') return visible;
     if (this.orderedRoots?.source === visible) return this.orderedRoots.value;
 
-    const value = [...visible].sort((left, right) =>
-      this.compareWorkspaces(left, right),
+    const ordered = orderWorkspaceEntries(
+      visible.map((node) => node.workspace),
+      { mode: 'name' },
     );
+
+    const byPath = new Map(
+      visible.map((node) => [node.workspace.workspaceDbPath, node]),
+    );
+
+    const value = ordered.flatMap((entry) => {
+      const node = byPath.get(entry.workspaceDbPath);
+
+      return node ? [node] : [];
+    });
 
     this.orderedRoots = { source: visible, value };
 
     return value;
-  }
-
-  /** Name, then location, host, recency, path, and storage identity. */
-  private compareWorkspaces(left: ManagedNode, right: ManagedNode): number {
-    const a = workspacePresentation(left.workspace);
-    const b = workspacePresentation(right.workspace);
-    const name = workspaceNameCollator.compare(a.name, b.name);
-
-    if (name) return name;
-
-    const location =
-      LOCATION_ORDER[workspaceLocation(left.workspace)] -
-      LOCATION_ORDER[workspaceLocation(right.workspace)];
-
-    if (location) return location;
-
-    const host = compareText(
-      left.workspace.identity?.uri.authority || '',
-      right.workspace.identity?.uri.authority || '',
-    );
-
-    if (host) return host;
-
-    const recency =
-      validTimestamp(right.workspace.mtime) -
-      validTimestamp(left.workspace.mtime);
-
-    if (recency) return recency;
-
-    const pathOrder = workspaceNameCollator.compare(a.path, b.path);
-
-    if (pathOrder) return pathOrder;
-
-    return compareText(
-      left.workspace.workspaceDbPath,
-      right.workspace.workspaceDbPath,
-    );
   }
 
   /** Stable identity for a workspace row or one of its chats. */
@@ -955,7 +982,7 @@ export class ChatManager
             .filter(Boolean)
             .join(' · ')
         : [
-            current ? 'Current window' : undefined,
+            storageMark(node.workspace, current),
             workspaceSelected ? 'Workspace data selected' : result?.detail,
             presentation.location,
             node.workspace.storageId.slice(0, 8),
@@ -971,6 +998,7 @@ export class ChatManager
       partial
         ? `This chat is selected; ${partial.unselected} subagent${partial.unselected === 1 ? ' is' : 's are'} not selected`
         : '',
+      storageExplanation(node.workspace, current),
       current
         ? 'Its chats can be selected and deleted. Workspace storage is kept while this window is open.'
         : workspaceSelected
@@ -1104,8 +1132,12 @@ export class ChatManager
   ): Promise<ManagedNode[]> {
     const host = listHostEntries();
 
+    const annotated = await annotateOpening(host.entries, { signal });
+
+    if (signal.aborted) return [];
+
     const entries = workspacePickItems(
-      host.entries,
+      annotated,
       host.identity,
       currentWorkspaceDatabase(this.context),
     ).map((row) => row.entry);
@@ -1446,12 +1478,6 @@ export class ChatManager
   }
 }
 
-/** Display label for a stored subagent type. Unknown names stay as stored. */
-const workspaceNameCollator = new Intl.Collator(undefined, {
-  numeric: true,
-  sensitivity: 'base',
-});
-
 /** One database path on Windows, without treating two storages as the same project. */
 function sameDatabasePath(left: string, right: string): boolean {
   const normalize = (file: string) =>
@@ -1574,6 +1600,7 @@ export function registerManager(
           view.reveal(node, { select: true, focus: true, expand: true }),
         ),
       manageRefresh: () => manager.refresh(),
+      manageSortWorkspaces: () => manager.chooseWorkspaceSort(),
       manageSortName: () => manager.sortWorkspaces('name'),
       manageSortRecent: () => manager.sortWorkspaces('recent'),
       manageCheck: (node) => manager.check(node || view.selection[0]),

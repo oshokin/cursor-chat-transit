@@ -167,6 +167,7 @@ test('activation still registers all commands, one operation log and the sidebar
         'manageSelectAll',
         'manageSelectIssues',
         'manageSelectEmpty',
+        'manageSortWorkspaces',
         'manageSortName',
         'manageSortRecent',
         'manageClearSelection',

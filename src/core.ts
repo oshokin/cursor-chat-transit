@@ -115,11 +115,19 @@ export function identityFromWorkspaceJson(
   const rec = meta as Record<string, unknown>;
 
   if (typeof rec.workspace === 'string') {
-    return { kind: 'workspace', uri: uriFromString(rec.workspace) };
+    return {
+      kind: 'workspace',
+      uri: uriFromString(rec.workspace),
+      sourceUri: rec.workspace,
+    };
   }
 
   if (typeof rec.folder === 'string') {
-    return { kind: 'folder', uri: uriFromString(rec.folder) };
+    return {
+      kind: 'folder',
+      uri: uriFromString(rec.folder),
+      sourceUri: rec.folder,
+    };
   }
 
   throw new Error('Workspace metadata has neither folder nor workspace URI');

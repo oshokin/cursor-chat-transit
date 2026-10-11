@@ -180,6 +180,11 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "cursorChatTransit.manageSortWorkspaces",
+        "title": "Sort workspaces\u2026",
+        "category": "Cursor Chat Transit"
+      },
+      {
         "command": "cursorChatTransit.manageSortName",
         "title": "Name (A\u2013Z)",
         "category": "Cursor Chat Transit"
@@ -275,14 +280,9 @@
           "group": "1_overflow@1"
         },
         {
-          "command": "cursorChatTransit.manageSortName",
+          "command": "cursorChatTransit.manageSortWorkspaces",
           "when": "view == cursorChatTransit.manage",
           "group": "1_overflow@2"
-        },
-        {
-          "command": "cursorChatTransit.manageSortRecent",
-          "when": "view == cursorChatTransit.manage",
-          "group": "1_overflow@3"
         },
         {
           "command": "cursorChatTransit.manageSelectIssues",
