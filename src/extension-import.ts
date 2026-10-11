@@ -27,6 +27,7 @@ import {
   annotateOpening,
   importStoragePrompt,
   recheckDestination,
+  retainOpeningContext,
 } from './workspace-opening';
 import { importDialogOptions, localBundlePath } from './file-dialogs';
 import { runTransfer } from './transfer-process';
@@ -184,7 +185,7 @@ export async function doImport(opts: {
         return;
       }
 
-      destination = checked.entry;
+      destination = retainOpeningContext(destination, checked.entry);
     }
 
     rememberSource(opts.context, destination);

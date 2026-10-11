@@ -362,9 +362,9 @@ export function exportConversationHeaders(
 /** Headers that belong on the workspace row: roots and unresolved chats. */
 export function topLevelChats(
   headers: readonly ComposerHeader[],
+  /** Graph already built for this header list. */
+  graph: FamilyGraph = buildFamily(headers),
 ): ComposerHeader[] {
-  const graph = buildFamily(headers);
-
   return headers.filter((header) => {
     const node = graph.nodes.get(header.composerId);
 

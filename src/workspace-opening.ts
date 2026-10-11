@@ -80,8 +80,9 @@ export function openingPlatform(
 
 /**
  * Filesystem path Cursor hashes for a `file` URI.
- * Windows drive and UNC forms follow `fsPath`. This is not a WHATWG round-trip
- * and does not call `realpath` or change case.
+ * A Windows drive letter is lowercased, matching `URI.fsPath`.
+ * Other characters keep their case. A file authority is kept as a UNC path.
+ * This is not a WHATWG round-trip and does not call `realpath`.
  */
 export function cursorFsPath(
   /** Parsed file URI. */
@@ -89,17 +90,23 @@ export function cursorFsPath(
   /** Platform whose path form is required. */
   platform: OpeningPlatform,
 ): string {
-  if (platform !== 'win32') return uri.path;
-  if (uri.authority)
-    return `\\\\${uri.authority}${uri.path.replaceAll('/', '\\')}`;
+  if (platform === 'win32') {
+    if (uri.authority)
+      return `\\\\${uri.authority}${uri.path.replaceAll('/', '\\')}`;
 
-  if (/^\/[A-Za-z]:(?:\/|$)/.test(uri.path)) {
-    const drivePath = uri.path.slice(1).replaceAll('/', '\\');
+    if (/^\/[A-Za-z]:(?:\/|$)/.test(uri.path)) {
+      const drivePath = uri.path.slice(1).replaceAll('/', '\\');
 
-    return drivePath[0].toLowerCase() + drivePath.slice(1);
+      return drivePath[0].toLowerCase() + drivePath.slice(1);
+    }
+
+    return uri.path.replaceAll('/', '\\');
   }
 
-  return uri.path.replaceAll('/', '\\');
+  if (uri.scheme === 'file' && uri.authority)
+    return `//${uri.authority}${uri.path}`;
+
+  return uri.path;
 }
 
 /**
@@ -279,9 +286,11 @@ export function orderWorkspaceEntries(
     else groups.set(key, [entry]);
   }
 
-  const ordered = [...groups.values()].map((group) =>
-    [...group].sort(compareInsideGroup),
-  );
+  const ordered = [...groups.values()].map((group) => {
+    const rows = [...group].sort(compareInsideGroup);
+
+    return summarizeGroup(rows);
+  });
 
   const pinned =
     options.mode === 'activity'
@@ -290,16 +299,16 @@ export function orderWorkspaceEntries(
 
   ordered.sort((left, right) => {
     if (pinned) {
-      const leftPin = workspaceGroupKey(left[0]) === pinned;
-      const rightPin = workspaceGroupKey(right[0]) === pinned;
+      const leftPin = left.key === pinned;
+      const rightPin = right.key === pinned;
 
       if (leftPin !== rightPin) return leftPin ? -1 : 1;
     }
 
-    return compareGroups(left, right, options.mode);
+    return compareSummaries(left, right, options.mode);
   });
 
-  return ordered.flat();
+  return ordered.flatMap((group) => group.rows);
 }
 
 /**
@@ -673,41 +682,84 @@ function compareInsideGroup(
   );
 }
 
-/** Name, location, host, then the newest physical row in the group. */
-function compareGroups(
-  left: WorkspaceEntry[],
-  right: WorkspaceEntry[],
+/** Facts compared between groups. Computed once, not inside the comparator. */
+interface GroupSummary {
+  /** Rows of one identity, already ordered inside the group. */
+  rows: WorkspaceEntry[];
+  /** Display name. */
+  name: string;
+  /** Location rank. Lower is earlier. */
+  location: number;
+  /** SSH or remote authority. A tie-break, not an identity. */
+  authority: string;
+  /** Newest finite DB/WAL time in the group. */
+  freshness: number;
+  /** Stable group key. */
+  key: string;
+}
+
+/** Name, location, and freshness for one group. */
+function summarizeGroup(rows: WorkspaceEntry[]): GroupSummary {
+  const first = rows[0];
+
+  return {
+    rows,
+    name: workspacePresentation(first).name,
+    location: LOCATION_ORDER[workspaceLocation(first)],
+    authority: first.identity?.uri.authority || '',
+    freshness: groupFreshness(rows),
+    key: workspaceGroupKey(first),
+  };
+}
+
+/**
+ * Name, then location, then freshness, then authority.
+ * Authority does not outrank a newer group with the same name and location.
+ */
+function compareSummaries(
+  left: GroupSummary,
+  right: GroupSummary,
   mode: WorkspaceOrderMode,
 ): number {
-  const a = workspacePresentation(left[0]);
-  const b = workspacePresentation(right[0]);
-
   if (mode === 'name') {
-    const name = NAME_COLLATOR.compare(a.name, b.name);
+    const name = NAME_COLLATOR.compare(left.name, right.name);
 
     if (name) return name;
   }
 
-  const location =
-    LOCATION_ORDER[workspaceLocation(left[0])] -
-    LOCATION_ORDER[workspaceLocation(right[0])];
+  if (left.location !== right.location) return left.location - right.location;
 
-  if (location) return location;
+  if (left.freshness !== right.freshness)
+    return right.freshness - left.freshness;
 
   if (mode === 'name') {
-    const host = compareText(
-      left[0].identity?.uri.authority || '',
-      right[0].identity?.uri.authority || '',
-    );
+    const host = compareText(left.authority, right.authority);
 
     if (host) return host;
   }
 
-  const freshness = groupFreshness(right) - groupFreshness(left);
+  return compareText(left.key, right.key);
+}
 
-  if (freshness) return freshness;
+/**
+ * Keep the duplicate flag from the full inventory.
+ * A one-row reread would otherwise look like a singleton.
+ */
+export function retainOpeningContext(
+  /** Row from the prepared inventory, including its duplicate flag. */
+  prepared: WorkspaceEntry,
+  /** Fresh target facts for that same physical storage. */
+  fresh: WorkspaceEntry,
+): WorkspaceEntry {
+  if (!fresh.opening) return { ...fresh, opening: prepared.opening };
 
-  return compareText(workspaceGroupKey(left[0]), workspaceGroupKey(right[0]));
+  return {
+    ...fresh,
+    opening: {
+      ...fresh.opening,
+      duplicate: prepared.opening?.duplicate ?? fresh.opening.duplicate,
+    },
+  };
 }
 
 /** Newest finite activity in the group. Invalid times sort as zero. */

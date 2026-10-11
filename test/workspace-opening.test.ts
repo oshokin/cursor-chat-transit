@@ -12,6 +12,7 @@ import {
   openingStorageId,
   orderWorkspaceEntries,
   recheckDestination,
+  retainOpeningContext,
   resolveAutomaticWorkspace,
   storageExplanation,
   storageMark,
@@ -214,6 +215,18 @@ test('Windows drive and UNC paths use fsPath, not a URL string', () => {
     ),
     '\\\\server\\share\\folder',
   );
+
+  assert.equal(
+    cursorFsPath(
+      {
+        scheme: 'file',
+        authority: 'server',
+        path: '/share/project',
+      },
+      'linux',
+    ),
+    '//server/share/project',
+  );
 });
 
 test('a lowercase Windows drive is the independent folder hash input', () => {
@@ -378,6 +391,61 @@ test('the A/B/C activity cycle is the same for every input order', () => {
       ['a', 'b', 'c'],
     );
   }
+});
+
+test('the same SSH name lists the newer host before an older authority', () => {
+  const ssh = (authority: string, storageId: string, mtime: number) =>
+    entry(
+      storageId,
+      {
+        kind: 'folder',
+        uri: {
+          scheme: 'vscode-remote',
+          authority,
+          path: '/work/app',
+          query: '',
+          fragment: '',
+        },
+      },
+      mtime,
+    );
+
+  const ordered = orderWorkspaceEntries(
+    [ssh('ssh-remote+aaa', 'old', 10), ssh('ssh-remote+zzz', 'fresh', 100)],
+    { mode: 'name' },
+  );
+
+  assert.deepEqual(
+    ordered.map((row) => row.storageId),
+    ['fresh', 'old'],
+  );
+});
+
+test('a one-row reread keeps the duplicate flag from the full inventory', () => {
+  const prepared = {
+    ...entry('older', folder('/repo'), 1),
+    opening: { expectedId: 'older', duplicate: true },
+  };
+
+  const fresh = {
+    ...prepared,
+    opening: { expectedId: 'older', duplicate: false },
+  };
+
+  const kept = retainOpeningContext(prepared, fresh);
+
+  assert.equal(kept.opening?.duplicate, true);
+  assert.equal(storageMark(kept, false), 'Opens with this folder');
+
+  const singleton = {
+    ...entry('only', folder('/only'), 1),
+    opening: { expectedId: 'only', duplicate: false },
+  };
+
+  assert.equal(
+    storageMark(retainOpeningContext(singleton, { ...singleton }), false),
+    undefined,
+  );
 });
 
 test('local and SSH names stay in different groups, as do two local paths', () => {

@@ -97,12 +97,17 @@ export async function listHostEntriesAsync(options?: {
   entries: WorkspaceEntry[];
   /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
+  /** Storage directories from the same pass that have no database. */
+  incompleteIds: string[];
 }> {
   const scope = hostScope();
 
+  const inventory = await paths.listWorkspaceInventory(scope.userDir, options);
+
   return {
     ...scope,
-    entries: await paths.listWorkspaceEntriesAsync(scope.userDir, options),
+    entries: inventory.entries,
+    incompleteIds: inventory.incompleteIds,
   };
 }
 
@@ -120,16 +125,22 @@ export async function loadHostEntries(options?: {
   entries: WorkspaceEntry[];
   /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
+  /** Storage directories from the same pass that have no database. */
+  incompleteIds: string[];
 }> {
   const listed = await listHostEntriesAsync(options);
 
-  if (options?.signal?.aborted) return { ...listed, entries: [] };
+  if (options?.signal?.aborted)
+    return { ...listed, entries: [], incompleteIds: [] };
 
-  return {
-    userDir: listed.userDir,
-    identity: listed.identity,
-    entries: await annotateOpening(listed.entries, { signal: options?.signal }),
-  };
+  const entries = await annotateOpening(listed.entries, {
+    signal: options?.signal,
+  });
+
+  if (options?.signal?.aborted)
+    return { ...listed, entries: [], incompleteIds: [] };
+
+  return { ...listed, entries };
 }
 
 /** Load sqlite, storage root, workspace entries, and current identity. */

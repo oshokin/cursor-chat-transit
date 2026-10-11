@@ -331,6 +331,28 @@ export async function pendingChatMatch(
   return 'exact';
 }
 
+/**
+ * Hash one image.
+ * A missing file is not a match. Cancellation and permission errors propagate.
+ */
+async function imageChecksum(
+  filePath: string,
+  expected: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  try {
+    signal?.throwIfAborted();
+    const hashed = await hashFile(filePath, signal);
+
+    return hashed.sha256 === expected;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+
+    throw error;
+  }
+}
+
 /** True when the stored kv, image, or plan bytes match the pending checksum. */
 export async function pendingResourceMatches(
   dep: NonNullable<PendingImportChat['expectedResources']>[number],
@@ -342,6 +364,8 @@ export async function pendingResourceMatches(
     plansDir: string;
     /** Directory that should still hold pending canvas files. */
     canvasesDir: string | null;
+    /** Stops an image checksum. Cancellation is not a mismatch. */
+    signal?: AbortSignal;
   },
 ): Promise<boolean> {
   if (dep.kind === 'kv') {
@@ -354,26 +378,14 @@ export async function pendingResourceMatches(
     if (isAttachmentBasename(dep.id)) {
       const dest = path.join(attachmentDirectory(opts.workspace), dep.id);
 
-      try {
-        const hashed = await hashFile(dest);
-
-        return hashed.sha256 === dep.sha256;
-      } catch {
-        return false;
-      }
+      return imageChecksum(dest, dep.sha256, opts.signal);
     }
 
     const found = await resolveAttachmentPath(opts.workspace, dep.id);
 
     if (!found) return false;
 
-    try {
-      const hashed = await hashFile(found.filePath);
-
-      return hashed.sha256 === dep.sha256;
-    } catch {
-      return false;
-    }
+    return imageChecksum(found.filePath, dep.sha256, opts.signal);
   }
 
   if (dep.kind === 'plan') {

@@ -131,6 +131,7 @@ export async function reconcile(
         connGl: pair.connGl,
         plansDir: plansDirOf(ctx),
         canvasesDir: canvasesDirOf(ctx, workspace),
+        signal: ctx.signal,
       });
 
       if (!matches) {

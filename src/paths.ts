@@ -198,28 +198,35 @@ function readWorkspaceMeta(storageDir: string): WorkspaceIdentity | undefined {
   }
 }
 
+/** One storage directory after a single database stat. */
+type StorageInspection =
+  | { status: 'entry'; entry: WorkspaceEntry }
+  | { status: 'incomplete' }
+  | { status: 'unreadable' };
+
 /**
- * One physical storage, read again before a write.
- * Does not list the rest of the profile.
+ * Classify one storage directory.
+ * A missing database is manage-only. A permission error is not an empty directory.
  */
-export async function readStorageEntry(
+async function inspectStorageDirectory(
   /** Cursor user-data directory. */
   userDir: string,
   /** Storage directory name under workspaceStorage. */
   storageId: string,
-): Promise<WorkspaceEntry | undefined> {
+): Promise<StorageInspection> {
   const storageDir = path.join(workspaceStorageRoot(userDir), storageId);
   const dbPath = path.join(storageDir, 'state.vscdb');
-
   let stat: fs.Stats;
 
   try {
     stat = await fs.promises.stat(dbPath);
-  } catch {
-    return undefined;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { status: 'incomplete' }
+      : { status: 'unreadable' };
   }
 
-  if (!stat.isFile()) return undefined;
+  if (!stat.isFile()) return { status: 'incomplete' };
   let identity: WorkspaceIdentity | undefined;
 
   try {
@@ -244,16 +251,34 @@ export async function readStorageEntry(
   }
 
   return {
-    storageRoot: userDir,
-    storageId,
-    workspaceDbPath: dbPath,
-    globalDbPath: globalDbPath(userDir),
-    mtime,
-    identity,
-    key: identity
-      ? workspaceKey(identity.kind, identity.uri)
-      : `id:${storageId}`,
+    status: 'entry',
+    entry: {
+      storageRoot: userDir,
+      storageId,
+      workspaceDbPath: dbPath,
+      globalDbPath: globalDbPath(userDir),
+      mtime,
+      identity,
+      key: identity
+        ? workspaceKey(identity.kind, identity.uri)
+        : `id:${storageId}`,
+    },
   };
+}
+
+/**
+ * One physical storage, read again before a write.
+ * Does not list the rest of the profile.
+ */
+export async function readStorageEntry(
+  /** Cursor user-data directory. */
+  userDir: string,
+  /** Storage directory name under workspaceStorage. */
+  storageId: string,
+): Promise<WorkspaceEntry | undefined> {
+  const inspected = await inspectStorageDirectory(userDir, storageId);
+
+  return inspected.status === 'entry' ? inspected.entry : undefined;
 }
 
 /** Latest local storage write is a recency hint, not proof of the last editor visit. */
@@ -310,9 +335,73 @@ export function listWorkspaceEntries(
 }
 
 /**
- * Same inventory as `listWorkspaceEntries`, read with bounded async stat calls.
- * Cancellation does not start another batch. An in-flight stat is ignored by
- * returning no rows rather than a partial snapshot.
+ * One async pass over workspaceStorage.
+ * Databases become entries. Directories without a database are incomplete.
+ * An unreadable database is neither, so it is not treated as disposable.
+ * Cancellation returns an empty snapshot rather than a partial one.
+ */
+export async function listWorkspaceInventory(
+  /** Cursor user-data directory. */
+  userDir: string,
+  options?: {
+    /** Refresh that must not publish this snapshot. */
+    signal?: AbortSignal;
+  },
+): Promise<{ entries: WorkspaceEntry[]; incompleteIds: string[] }> {
+  const empty = { entries: [], incompleteIds: [] };
+
+  if (options?.signal?.aborted) return empty;
+  const root = workspaceStorageRoot(userDir);
+  let names: string[];
+
+  try {
+    const dirents = await fs.promises.readdir(root, { withFileTypes: true });
+
+    names = dirents
+      .filter((ent) => ent.isDirectory() && !ent.isSymbolicLink())
+      .map((ent) => ent.name);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return empty;
+
+    throw error;
+  }
+
+  const entries: WorkspaceEntry[] = [];
+  const incompleteIds: string[] = [];
+
+  try {
+    for await (const batch of mapInBatches(
+      names,
+      async (storageId) => ({
+        storageId,
+        ...(await inspectStorageDirectory(userDir, storageId)),
+      }),
+      options?.signal,
+    )) {
+      if (options?.signal?.aborted) return empty;
+
+      for (const item of batch) {
+        if (item.status === 'entry') entries.push(item.entry);
+        else if (item.status === 'incomplete')
+          incompleteIds.push(item.storageId);
+      }
+    }
+  } catch (error) {
+    if (options?.signal?.aborted) return empty;
+
+    throw error;
+  }
+
+  if (options?.signal?.aborted) return empty;
+  entries.sort((a, b) => b.mtime - a.mtime);
+  incompleteIds.sort();
+
+  return { entries, incompleteIds };
+}
+
+/**
+ * Database rows from `listWorkspaceInventory`.
+ * Cancellation does not start another batch.
  */
 export async function listWorkspaceEntriesAsync(
   /** Cursor user-data directory. */
@@ -322,42 +411,7 @@ export async function listWorkspaceEntriesAsync(
     signal?: AbortSignal;
   },
 ): Promise<WorkspaceEntry[]> {
-  if (options?.signal?.aborted) return [];
-  const root = workspaceStorageRoot(userDir);
-  let names: string[];
-
-  try {
-    const dirents = await fs.promises.readdir(root, { withFileTypes: true });
-
-    names = dirents.filter((ent) => ent.isDirectory()).map((ent) => ent.name);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-
-    throw error;
-  }
-
-  const entries: WorkspaceEntry[] = [];
-
-  try {
-    for await (const batch of mapInBatches(
-      names,
-      (storageId) => readStorageEntry(userDir, storageId),
-      options?.signal,
-    )) {
-      if (options?.signal?.aborted) return [];
-
-      for (const entry of batch) if (entry) entries.push(entry);
-    }
-  } catch (error) {
-    if (options?.signal?.aborted) return [];
-
-    throw error;
-  }
-
-  if (options?.signal?.aborted) return [];
-  entries.sort((a, b) => b.mtime - a.mtime);
-
-  return entries;
+  return (await listWorkspaceInventory(userDir, options)).entries;
 }
 
 /** Human-readable label; SSH host aliases never replace workspace identity. */

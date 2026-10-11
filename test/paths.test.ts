@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   listWorkspaceEntries,
   listWorkspaceEntriesAsync,
+  listWorkspaceInventory,
   preferStorageRoot,
   readStorageEntry,
 } from '../src/paths';
@@ -204,4 +205,24 @@ test('async inventory matches the sync list and a cancelled snapshot is empty', 
     await listWorkspaceEntriesAsync(dir, { signal: cancelled.signal }),
     [],
   );
+});
+
+test('one inventory pass returns databases and incomplete directories', async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-inventory-both-'));
+
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const storage = path.join(dir, 'User', 'workspaceStorage');
+
+  await fs.mkdir(path.join(storage, 'ready'), { recursive: true });
+  await fs.mkdir(path.join(storage, 'residue'), { recursive: true });
+  await fs.writeFile(path.join(storage, 'ready', 'state.vscdb'), '');
+
+  const listed = await listWorkspaceInventory(dir);
+
+  assert.deepEqual(
+    listed.entries.map((entry) => entry.storageId),
+    ['ready'],
+  );
+
+  assert.deepEqual(listed.incompleteIds, ['residue']);
 });

@@ -18,7 +18,6 @@ import { ManagedSelection } from './managed-selection';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
 import { orderedChatHeaders, workspacePickItems } from './picker';
-import { listIncompleteWorkspaceDirs } from './paths';
 import { workspaceStatisticsKey, type StatisticsUpdate } from './statistics';
 import { runTransfer } from './transfer-process';
 import type { EmptyWorkspaceScan } from './deletion-types';
@@ -59,11 +58,14 @@ export class ChatManager
   private readonly familyCache = new Map<string, FamilyGraph>();
   /** Workspace row order. Name is the default; Recent keeps the previous order. */
   private workspaceSort: 'name' | 'recent' = 'name';
-  /** Sorted copy of one visible root array. The source inventory is not reordered. */
+  /** Sorted copy for one generation, sort mode, and visibility revision. */
   private orderedRoots?: {
-    source: ManagedNode[];
+    /** `generation:sort:showAll:viewRevision`. */
+    key: string;
     value: ManagedNode[];
   };
+  /** Bumped when sort or visibility changes, so a new filtered array can reuse order. */
+  private viewRevision = 0;
   /** Cancels chat loads when the view is disposed. */
   private loading = new AbortController();
   /** True after dispose. Deletion cancel must not replace the controller. */
@@ -108,7 +110,7 @@ export class ChatManager
 
       const excluded = new Set([
         node.chat.composerId,
-        ...this.descendantHeaders(headers, node.chat.composerId).map(
+        ...this.descendantHeaders(node.workspace, node.chat.composerId).map(
           (header) => header.composerId,
         ),
       ]);
@@ -129,11 +131,8 @@ export class ChatManager
       this.selection.set(node, checked);
 
       if (node.chat) {
-        const headers =
-          this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
-
         for (const child of this.descendantHeaders(
-          headers,
+          node.workspace,
           node.chat.composerId,
         ))
           this.selection.set(
@@ -166,6 +165,8 @@ export class ChatManager
   /** Keep the visibility command present in both states. */
   toggleVisibility(): void {
     this.showAll = !this.showAll;
+    this.viewRevision += 1;
+    this.orderedRoots = undefined;
 
     void vscode.commands.executeCommand(
       'setContext',
@@ -632,12 +633,17 @@ export class ChatManager
     this.headerCache.clear();
     this.headerIndex.clear();
     this.familyCache.clear();
+    this.viewRevision += 1;
+    this.orderedRoots = undefined;
     this.changed.fire(undefined);
   }
 
   /** Directories left behind without `state.vscdb`. Hidden until empty storage is shown. */
-  private incompleteNodes(userDir: string): ManagedNode[] {
-    return listIncompleteWorkspaceDirs(userDir).map((storageId) => {
+  private incompleteNodes(
+    userDir: string,
+    ids: readonly string[],
+  ): ManagedNode[] {
+    return ids.map((storageId) => {
       const workspace = {
         storageRoot: userDir,
         storageId,
@@ -735,6 +741,7 @@ export class ChatManager
   /** Remember the workspace order without rereading Cursor. */
   sortWorkspaces(mode: 'name' | 'recent'): void {
     this.workspaceSort = mode;
+    this.viewRevision += 1;
     this.orderedRoots = undefined;
     void this.context.globalState.update('manageWorkspaceSort', mode);
     this.changed.fire(undefined);
@@ -757,22 +764,28 @@ export class ChatManager
 
   /** Confirmed descendants of one chat, not including the chat itself. */
   private descendantHeaders(
-    headers: ComposerHeader[],
+    /** Workspace whose catalogue snapshot is already indexed. */
+    workspace: WorkspaceEntry,
     composerId: string,
-    graph: ReturnType<typeof buildFamily> = buildFamily(headers),
   ): ComposerHeader[] {
+    const key = workspaceStatisticsKey(workspace);
+    const headers = this.headerCache.get(key) || [];
+
+    const graph = this.familyCache.get(key) || buildFamily(headers);
+
+    const index = this.headerIndex.get(key);
     const out: ComposerHeader[] = [];
     const stack = [...(graph.nodes.get(composerId)?.childComposerIds || [])];
     const seen = new Set<string>();
-
-    const index = new Map(headers.map((header) => [header.composerId, header]));
 
     while (stack.length) {
       const id = stack.pop();
 
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      const header = index.get(id);
+
+      const header =
+        index?.get(id) || headers.find((item) => item.composerId === id);
 
       if (header) out.push(header);
 
@@ -827,13 +840,10 @@ export class ChatManager
   /** How many confirmed descendants have their own check result. */
   private checkedDescendantNote(node: ManagedNode): string {
     if (!node.chat) return '';
-    const key = workspaceStatisticsKey(node.workspace);
-    const headers = this.headerCache.get(key) || [];
 
     const descendants = this.descendantHeaders(
-      headers,
+      node.workspace,
       node.chat.composerId,
-      this.familyCache.get(key) || buildFamily(headers),
     );
 
     if (!descendants.length) return '';
@@ -871,14 +881,9 @@ export class ChatManager
   ): { label: string; unselected: number } | undefined {
     if (!node.chat || !this.selection.has(node)) return undefined;
 
-    const key = workspaceStatisticsKey(node.workspace);
-
-    const headers = this.headerCache.get(key) || [];
-
     const descendants = this.descendantHeaders(
-      headers,
+      node.workspace,
       node.chat.composerId,
-      this.familyCache.get(key) || buildFamily(headers),
     );
 
     if (!descendants.length) return undefined;
@@ -903,7 +908,10 @@ export class ChatManager
    */
   private orderRoots(visible: ManagedNode[]): ManagedNode[] {
     if (this.workspaceSort !== 'name') return visible;
-    if (this.orderedRoots?.source === visible) return this.orderedRoots.value;
+
+    const key = `${this.generation}:${this.workspaceSort}:${this.showAll}:${this.viewRevision}`;
+
+    if (this.orderedRoots?.key === key) return this.orderedRoots.value;
 
     const ordered = orderWorkspaceEntries(
       visible.map((node) => node.workspace),
@@ -920,7 +928,7 @@ export class ChatManager
       return node ? [node] : [];
     });
 
-    this.orderedRoots = { source: visible, value };
+    this.orderedRoots = { key, value };
 
     return value;
   }
@@ -1028,9 +1036,13 @@ export class ChatManager
   /** List workspaces, or the chats of one workspace. */
   async getChildren(node?: ManagedNode): Promise<ManagedNode[]> {
     if (!node) {
+      const generation = this.generation;
+
       this.roots ??= this.loadWorkspaces(this.loading.signal);
 
       const roots = await this.roots;
+
+      if (generation !== this.generation) return [];
 
       const visible =
         this.showAll ||
@@ -1057,10 +1069,16 @@ export class ChatManager
       const headers =
         this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
 
-      return directChildren(headers, node.chat.composerId).map((chat) => ({
-        workspace: node.workspace,
-        chat,
-      }));
+      const key = workspaceStatisticsKey(node.workspace);
+
+      const graph = this.familyCache.get(key) || buildFamily(headers);
+
+      return directChildren(headers, node.chat.composerId, graph).map(
+        (chat) => ({
+          workspace: node.workspace,
+          chat,
+        }),
+      );
     }
 
     const key = workspaceStatisticsKey(node.workspace);
@@ -1081,6 +1099,7 @@ export class ChatManager
     /** Cancellation for this tree load. */
     signal: AbortSignal,
   ): Promise<ManagedNode[]> {
+    const generation = this.generation;
     const log = startOperationLog(this.operations, 'load managed chats');
 
     try {
@@ -1101,10 +1120,17 @@ export class ChatManager
         { signal, onEvent: log.event, onNote: log.note },
       );
 
+      if (generation !== this.generation || signal.aborted) {
+        log.finish('cancelled');
+
+        return [];
+      }
+
       log.finish('completed');
 
-      return this.storeCatalogue(workspace, result.allComposers);
+      return this.storeCatalogue(workspace, result.allComposers, generation);
     } catch (error) {
+      if (generation !== this.generation) return [];
       log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
 
       return [
@@ -1128,9 +1154,13 @@ export class ChatManager
     workspace: WorkspaceEntry,
     /** Header rows from list-chats or the catalogue worker. */
     headers: ComposerHeader[],
+    /** Generation that started this read. A newer refresh wins. */
+    generation: number,
   ): ManagedNode[] {
+    if (generation !== this.generation) return [];
     const ordered = orderedChatHeaders(headers);
     const key = workspaceStatisticsKey(workspace);
+    const graph = buildFamily(ordered);
 
     this.headerCache.set(key, ordered);
 
@@ -1139,13 +1169,14 @@ export class ChatManager
       new Map(ordered.map((header) => [header.composerId, header])),
     );
 
-    this.familyCache.set(key, buildFamily(ordered));
+    this.familyCache.set(key, graph);
 
-    const roots = topLevelChats(ordered).map((chat) => ({
+    const roots = topLevelChats(ordered, graph).map((chat) => ({
       workspace,
       chat,
     }));
 
+    if (generation !== this.generation) return [];
     this.lists.set(key, Promise.resolve(roots));
 
     return roots;
@@ -1156,26 +1187,53 @@ export class ChatManager
     /** Cancellation for the shared workspace scan. */
     signal: AbortSignal,
   ): Promise<ManagedNode[]> {
-    this.operationMessage = 'Preparing workspace list…';
-    this.publishMessage();
+    const generation = this.generation;
+    const current = () => generation === this.generation;
 
-    const host = await loadHostEntries({ signal });
+    const log = startOperationLog(
+      this.operations,
+      'prepare managed workspaces',
+    );
 
-    if (signal.aborted) return [];
+    if (current()) {
+      this.operationMessage = 'Preparing workspace list…';
+      this.publishMessage();
+    }
+
+    let host: Awaited<ReturnType<typeof loadHostEntries>>;
+
+    try {
+      host = await loadHostEntries({ signal });
+    } catch (error) {
+      const cancelled = !current() || signal.aborted;
+
+      log.finish(cancelled ? 'cancelled' : 'failed', undefined, error);
+
+      if (current()) {
+        this.operationMessage = undefined;
+
+        if (!cancelled) {
+          this.filterSummary =
+            'Workspace list could not be read. Refresh to try again.';
+
+          this.publishMessage();
+        }
+      }
+
+      return [];
+    }
+
+    if (!current() || signal.aborted) {
+      log.finish('cancelled');
+
+      return [];
+    }
 
     const entries = workspacePickItems(
       host.entries,
       host.identity,
       currentWorkspaceDatabase(this.context),
     ).map((row) => row.entry);
-
-    this.operationMessage = 'Preparing workspace list…';
-    this.publishMessage();
-
-    const log = startOperationLog(
-      this.operations,
-      'prepare managed workspaces',
-    );
 
     const hidden = new Set<string>();
     const rows = new Map<string, StatisticsUpdate>();
@@ -1206,7 +1264,11 @@ export class ChatManager
         },
       );
 
-      signal.throwIfAborted();
+      if (!current() || signal.aborted) {
+        log.finish('cancelled');
+
+        return [];
+      }
 
       for (const workspace of entries) {
         const row = rows.get(workspaceStatisticsKey(workspace));
@@ -1220,35 +1282,42 @@ export class ChatManager
 
       log.finish(result.failed ? 'incomplete' : 'completed');
 
-      this.operationMessage = undefined;
+      if (current()) {
+        this.operationMessage = undefined;
 
-      this.filterSummary = entries.length
-        ? `${entries.length - hidden.size} workspaces · ${hidden.size} empty or unavailable filtered. Select workspace data or individual chats. Project files are kept.`
-        : 'No local workspace data found.';
-
-      this.publishMessage();
-
-      return [
-        ...entries.map((workspace) => ({ workspace })),
-        ...this.incompleteNodes(host.userDir),
-      ];
-    } catch (error) {
-      log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
-      this.operationMessage = undefined;
-
-      if (!signal.aborted) {
-        this.filterSummary =
-          'Workspace check unavailable. All entries shown; see the operation log.';
+        this.filterSummary = entries.length
+          ? `${entries.length - hidden.size} workspaces · ${hidden.size} empty or unavailable filtered. Select workspace data or individual chats. Project files are kept.`
+          : 'No local workspace data found.';
 
         this.publishMessage();
       }
 
+      return [
+        ...entries.map((workspace) => ({ workspace })),
+        ...this.incompleteNodes(host.userDir, host.incompleteIds ?? []),
+      ];
+    } catch (error) {
+      const cancelled = !current() || signal.aborted;
+
+      log.finish(cancelled ? 'cancelled' : 'failed', undefined, error);
+
+      if (current()) {
+        this.operationMessage = undefined;
+
+        if (!cancelled) {
+          this.filterSummary =
+            'Workspace check unavailable. All entries shown; see the operation log.';
+
+          this.publishMessage();
+        }
+      }
+
       // A failed scan cannot prove that any workspace is disposable.
-      return signal.aborted
+      return cancelled
         ? []
         : [
             ...entries.map((workspace) => ({ workspace })),
-            ...this.incompleteNodes(host.userDir),
+            ...this.incompleteNodes(host.userDir, host.incompleteIds ?? []),
           ];
     }
   }
@@ -1306,10 +1375,9 @@ export class ChatManager
         /** Append the next batch of search rows. */
         append,
       ) => {
-        const signal = AbortSignal.any([generation, searchSignal]);
         const roots = await this.getChildren();
 
-        signal.throwIfAborted();
+        if (searchSignal.aborted || generation.aborted) return { failed: 0 };
         const pending: WorkspaceEntry[] = [];
 
         const rank = new Map(
@@ -1327,7 +1395,8 @@ export class ChatManager
           if (cached) {
             const nodes = await cached;
 
-            signal.throwIfAborted();
+            if (searchSignal.aborted || generation.aborted)
+              return { failed: 0 };
             const headers = this.headerCache.get(key);
 
             if (nodes.some((node) => node.error) || !headers)
@@ -1345,7 +1414,41 @@ export class ChatManager
         }
 
         if (!pending.length) return { failed: 0 };
+        const catalogueGeneration = this.generation;
+
+        const slots = new Map<
+          string,
+          {
+            promise: Promise<ManagedNode[]>;
+            resolve: (nodes: ManagedNode[]) => void;
+            done: boolean;
+          }
+        >();
+
+        for (const workspace of pending) {
+          const key = workspaceStatisticsKey(workspace);
+
+          if (this.lists.has(key)) continue;
+          let resolve: (nodes: ManagedNode[]) => void = () => {};
+
+          const promise = new Promise<ManagedNode[]>((done) => {
+            resolve = done;
+          });
+
+          this.lists.set(key, promise);
+          slots.set(key, { promise, resolve, done: false });
+        }
+
         const log = startOperationLog(this.operations, 'search managed chats');
+
+        /** Finish a reserved read without hanging a tree that joined it. */
+        const finishSlot = (key: string, nodes: ManagedNode[]) => {
+          const slot = slots.get(key);
+
+          if (!slot || slot.done) return;
+          slot.done = true;
+          slot.resolve(nodes);
+        };
 
         try {
           /** How many items failed. */
@@ -1360,35 +1463,66 @@ export class ChatManager
               workspaces: pending,
             },
             {
-              signal,
+              signal: generation,
               onEvent: log.event,
               onNote: log.note,
               onCatalogue: (row) => {
-                if (signal.aborted) return;
+                if (
+                  generation.aborted ||
+                  catalogueGeneration !== this.generation
+                )
+                  return;
                 const workspace = pending[row.index];
 
                 if (!workspace) return;
+                const key = workspaceStatisticsKey(workspace);
                 const headers = orderedChatHeaders(row.headers || []);
 
-                if (!row.error) this.storeCatalogue(workspace, headers);
+                const nodes = row.error
+                  ? [{ workspace, error: row.error }]
+                  : this.storeCatalogue(
+                      workspace,
+                      headers,
+                      catalogueGeneration,
+                    );
+
+                if (row.error && catalogueGeneration === this.generation)
+                  this.lists.set(key, Promise.resolve(nodes));
+
+                finishSlot(key, nodes);
+
+                if (searchSignal.aborted) return;
 
                 append(
                   managedSearchItems(
                     workspace,
                     headers,
                     row.error,
-                    rank.get(workspaceStatisticsKey(workspace)),
+                    rank.get(key),
                   ),
                 );
               },
             },
           );
 
+          for (const [key, slot] of slots) if (!slot.done) finishSlot(key, []);
+
           log.finish(result.failed ? 'incomplete' : 'completed');
 
           return result;
         } catch (error) {
-          log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
+          const cancelled =
+            generation.aborted || catalogueGeneration !== this.generation;
+
+          for (const [key, slot] of slots) {
+            if (slot.done) continue;
+
+            if (catalogueGeneration === this.generation) this.lists.delete(key);
+
+            finishSlot(key, []);
+          }
+
+          log.finish(cancelled ? 'cancelled' : 'failed', undefined, error);
 
           throw error;
         }

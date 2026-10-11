@@ -253,6 +253,10 @@ async function realignSkippedFamilies(
   const byId = new Map(rows.map((row) => [row.sourceId, row]));
   const seen = new Set<string>();
 
+  const alreadyBySource = new Map(
+    plan.already.map((item) => [item.composerId, item]),
+  );
+
   for (const row of rows) {
     if (seen.has(row.sourceId)) continue;
     const stack = [row.sourceId];
@@ -318,6 +322,7 @@ async function realignSkippedFamilies(
         );
 
         remove.add(member.sourceId);
+        alreadyBySource.delete(member.sourceId);
         plan.create.push(member.ordinal);
       }
 
@@ -327,10 +332,6 @@ async function realignSkippedFamilies(
 
       continue;
     }
-
-    const alreadyBySource = new Map(
-      plan.already.map((item) => [item.composerId, item]),
-    );
 
     for (const member of members) {
       const targetId = assignment.get(member.sourceId);

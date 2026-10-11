@@ -66,6 +66,9 @@ let catalogueHeaders: import('../src/types').ComposerHeader[] = [
 let hideFirst = false;
 let failedFirst = false;
 let holdScan: (() => Promise<void>) | undefined;
+let holdChats: (() => Promise<void>) | undefined;
+let holdCatalogue: (() => Promise<void>) | undefined;
+let inventoryError: Error | undefined;
 let emptyHold: Promise<void> | undefined;
 let emptyFail = false;
 
@@ -284,11 +287,16 @@ loader._load = function (id, parent, isMain) {
         userDir: '/profile-managed',
         identity: undefined,
       }),
-      loadHostEntries: async () => ({
-        entries,
-        userDir: '/profile-managed',
-        identity: undefined,
-      }),
+      loadHostEntries: async () => {
+        if (inventoryError) throw inventoryError;
+
+        return {
+          entries,
+          userDir: '/profile-managed',
+          identity: undefined,
+          incompleteIds: [],
+        };
+      },
       currentWorkspaceDatabase: () => currentDatabase,
       prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
     };
@@ -332,6 +340,8 @@ loader._load = function (id, parent, isMain) {
         if (failRead) throw new Error('Database unavailable');
 
         if (job.kind === 'workspace-catalogue') {
+          await holdCatalogue?.();
+
           for (let index = 0; index < job.workspaces.length; index++)
             handlers.onCatalogue?.({
               index,
@@ -339,6 +349,14 @@ loader._load = function (id, parent, isMain) {
             });
 
           return { failed: 0 };
+        }
+
+        if (job.kind === 'list-chats') {
+          const headers = listedComposers.slice();
+
+          await holdChats?.();
+
+          return { allComposers: headers };
         }
 
         if (job.kind === 'chat-statistics') {
@@ -402,6 +420,9 @@ beforeEach(() => {
   holdIssues = undefined;
   chatHealth.clear();
   holdScan = undefined;
+  holdChats = undefined;
+  holdCatalogue = undefined;
+  inventoryError = undefined;
   lockStatuses.length = 0;
   currentDatabase = undefined;
   savedSort = undefined;
@@ -501,6 +522,112 @@ test('refresh aborts an old root scan and never applies its partial filter', asy
     assert.deepEqual(await old, []);
     assert.equal((await manager.getChildren()).length, 2);
   } finally {
+    manager.dispose();
+  }
+});
+
+test('a late chat list cannot replace the catalogue loaded after refresh', async () => {
+  let releaseOld: () => void = () => {};
+  let enteredOld: () => void = () => {};
+
+  const enteredOldP = new Promise<void>((resolve) => {
+    enteredOld = resolve;
+  });
+
+  holdChats = () => {
+    enteredOld();
+
+    return new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+  };
+
+  listedComposers = [{ composerId: 'old', name: 'Old' }];
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+    const oldRead = manager.getChildren(roots[0]);
+
+    await enteredOldP;
+    holdChats = undefined;
+    listedComposers = [{ composerId: 'new', name: 'New' }];
+    manager.refresh();
+    const roots2 = await manager.getChildren();
+    const fresh = await manager.getChildren(roots2[0]);
+
+    assert.equal(fresh[0]?.chat?.composerId, 'new');
+    releaseOld();
+    await oldRead;
+
+    assert.equal(
+      (await manager.getChildren(roots2[0]))[0]?.chat?.composerId,
+      'new',
+    );
+  } finally {
+    releaseOld();
+    manager.dispose();
+  }
+});
+
+test('an inventory error finishes the status and refresh can read again', async () => {
+  inventoryError = Object.assign(new Error('EACCES audit metadata read'), {
+    code: 'EACCES',
+  });
+
+  const seen: string[] = [];
+  const manager = new Manager(context, log, (message) => seen.push(message));
+
+  try {
+    assert.deepEqual(await manager.getChildren(), []);
+    assert.equal(seen.at(-1)?.includes('Preparing'), false);
+    assert.match(seen.at(-1) || '', /Refresh to try again/);
+    inventoryError = undefined;
+    manager.refresh();
+
+    assert.equal((await manager.getChildren()).length, 2);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('search and tree share one catalogue read', async () => {
+  let releaseCatalogue: () => void = () => {};
+  let enteredCatalogue: () => void = () => {};
+
+  const enteredCatalogueP = new Promise<void>((resolve) => {
+    enteredCatalogue = resolve;
+  });
+
+  holdCatalogue = () => {
+    enteredCatalogue();
+
+    return new Promise<void>((resolve) => {
+      releaseCatalogue = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const search = manager.find(async () => {});
+
+    await enteredCatalogueP;
+    const roots = await manager.getChildren();
+    const children = manager.getChildren(roots[0]);
+
+    releaseCatalogue();
+
+    assert.equal((await children)[0]?.chat?.composerId, 'found');
+
+    assert.equal(jobs.filter((job) => job.kind === 'list-chats').length, 0);
+
+    const picker = await readySearch();
+
+    picker.hide();
+    await search;
+  } finally {
+    releaseCatalogue();
     manager.dispose();
   }
 });
