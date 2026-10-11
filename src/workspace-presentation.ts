@@ -7,9 +7,9 @@ export type WorkspaceLocation =
 /** Picker group order: current workspace is applied separately in the pick list. */
 export const LOCATION_ORDER: Record<WorkspaceLocation, number> = {
   local: 0,
-  ssh: 1,
+  wsl: 1,
   container: 2,
-  wsl: 3,
+  ssh: 3,
   remote: 4,
   unknown: 5,
 };

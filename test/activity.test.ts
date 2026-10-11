@@ -115,7 +115,7 @@ test('otherwise identical chat rows are disambiguated even when ID prefixes coll
   assert.match(rows[0].description, /12345678-a/);
 });
 
-test('workspace order is current, local, SSH, containers, WSL, remote, unidentified; recency within each group', () => {
+test('workspace order is current, local, WSL, containers, SSH, remote, unidentified; recency within each group', () => {
   const entries = [
     entry('ssh-old', 'vscode-remote', 'ssh-remote+z', 10),
     entry('local-old', 'file', '', 10),
@@ -137,10 +137,10 @@ test('workspace order is current, local, SSH, containers, WSL, remote, unidentif
       'current',
       'local-new',
       'local-old',
+      'wsl',
+      'container',
       'ssh-new',
       'ssh-old',
-      'container',
-      'wsl',
       'other',
       'unknown',
     ],

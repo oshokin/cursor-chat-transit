@@ -140,25 +140,26 @@ export async function checkManagedNodes(
       );
 
       log.finish(failed ? 'incomplete' : 'completed');
-      if (options?.kind === 'find chats with transfer issues') return 'done';
 
       setUi({
         status: failed ? 'incomplete' : 'completed',
         statusTitle: 'Check completed',
         statusDetail: `${checked} chats checked · ${failed} checks unavailable`,
       });
+
+      if (options?.kind === 'find chats with transfer issues') return 'done';
     } catch (error) {
       log.finish(isAbort(error) ? 'cancelled' : 'failed', undefined, error);
       if (!isAbort(error)) throw error;
-
-      if (options?.kind === 'find chats with transfer issues')
-        return 'cancelled';
 
       setUi({
         status: 'cancelled',
         statusTitle: 'Check cancelled',
         statusDetail: `${checked} completed checks are kept until Refresh.`,
       });
+
+      if (options?.kind === 'find chats with transfer issues')
+        return 'cancelled';
     } finally {
       finishPhaseProgress(log);
       setUi({ importNeedsRestart: needsRestart });

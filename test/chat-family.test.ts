@@ -266,3 +266,52 @@ test('a changed subagent copies the whole family', () => {
 
   assert.deepEqual(orphan.drop, [B]);
 });
+
+test('a missing ancestor drops the descendant chain', () => {
+  const dropped = familyImportAdjustments([
+    {
+      sourceId: 'child',
+      decision: 'create',
+      header: {
+        composerId: 'child',
+        subagentInfo: { parentComposerId: 'absent' },
+        subagentComposerIds: ['grand'],
+      },
+    },
+    {
+      sourceId: 'grand',
+      decision: 'create',
+      header: {
+        composerId: 'grand',
+        subagentInfo: {
+          parentComposerId: 'child',
+          rootParentConversationId: 'absent',
+        },
+      },
+    },
+  ]).drop.sort();
+
+  assert.deepEqual(dropped, ['child', 'grand']);
+});
+
+test('a contradictory root and a missing child are diagnosed', () => {
+  const conflict = buildFamily([
+    { composerId: 'root' },
+    { composerId: 'other' },
+    {
+      composerId: 'child',
+      subagentInfo: {
+        parentComposerId: 'root',
+        rootParentConversationId: 'other',
+      },
+    },
+  ]);
+
+  assert.ok(conflict.diagnostics.some((item) => item.composerId === 'child'));
+
+  const missing = buildFamily([
+    { composerId: 'root', subagentComposerIds: ['absent'] },
+  ]);
+
+  assert.ok(missing.diagnostics.length > 0);
+});

@@ -1524,3 +1524,106 @@ test(
     assert.equal(second.alreadyImported, 1);
   },
 );
+
+function familyPayload(extra = '') {
+  const result = payload([
+    { id: A, name: 'Parent' },
+    { id: B, name: 'Child', extra },
+  ]);
+
+  (
+    result.allComposers[0] as { subagentComposerIds?: string[] }
+  ).subagentComposerIds = [B];
+
+  Object.assign(result.allComposers[1], {
+    isSubagent: true,
+    subagentInfo: { parentComposerId: A, rootParentConversationId: A },
+  });
+
+  result.composers[A] = JSON.stringify({
+    ...JSON.parse(result.composers[A]),
+    subagentComposerIds: [B],
+  });
+
+  result.composers[B] = JSON.stringify({
+    ...JSON.parse(result.composers[B]),
+    subagentInfo: { parentComposerId: A, rootParentConversationId: A },
+  });
+
+  return result;
+}
+
+test(
+  'a changed family is not copied again on the next identical import',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+
+    const opts = {
+      journalDir: path.join(path.dirname(gl.database), 'journal'),
+    };
+
+    await transfer.importFromObject(ctx, familyPayload('v1'), workspace, opts);
+    await transfer.importFromObject(ctx, familyPayload('v2'), workspace, opts);
+    assert.equal(await bodyCount(gl), 4);
+
+    const third = await transfer.importFromObject(
+      ctx,
+      familyPayload('v2'),
+      workspace,
+      opts,
+    );
+
+    assert.equal(await bodyCount(gl), 4, JSON.stringify(third));
+  },
+);
+
+test(
+  'each family version reuses one coherent destination mapping',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+
+    const opts = {
+      journalDir: path.join(path.dirname(gl.database), 'journal'),
+    };
+
+    await transfer.importFromObject(ctx, familyPayload('v1'), workspace, opts);
+    await transfer.importFromObject(ctx, familyPayload('v2'), workspace, opts);
+
+    for (const version of ['v1', 'v2']) {
+      const result = await transfer.importFromObject(
+        ctx,
+        familyPayload(version),
+        workspace,
+        opts,
+      );
+
+      const parent = result.alreadyImportedChats.find(
+        (row) => row.composerId === A,
+      );
+
+      const child = result.alreadyImportedChats.find(
+        (row) => row.composerId === B,
+      );
+
+      assert.ok(parent?.targetComposerId);
+      assert.ok(child?.targetComposerId);
+
+      const body = JSON.parse(
+        (
+          await sql.execSql({
+            ...gl,
+            sql: `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${child.targetComposerId}`)};`,
+          })
+        ).trim(),
+      ) as { subagentInfo: { parentComposerId: string } };
+
+      assert.equal(
+        body.subagentInfo.parentComposerId,
+        parent.targetComposerId,
+        version,
+      );
+    }
+  },
+);

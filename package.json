@@ -203,7 +203,7 @@
       },
       {
         "command": "cursorChatTransit.manageCheck",
-        "title": "Check selected item",
+        "title": "Check conversation",
         "category": "Cursor Chat Transit",
         "icon": "$(graph)"
       },
@@ -328,7 +328,12 @@
       "view/item/context": [
         {
           "command": "cursorChatTransit.manageCheck",
-          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && !cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@1"
+        },
+        {
+          "command": "cursorChatTransit.manageCheckSelected",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && cursorChatTransit.manageHasCheckedItems",
           "group": "inline@1"
         },
         {

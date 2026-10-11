@@ -1944,3 +1944,170 @@ test(
     }
   },
 );
+
+async function setupFamily(p: Awaited<ReturnType<typeof profile>>) {
+  const headers = [
+    {
+      composerId: A,
+      subagentComposerIds: [B],
+      workspaceIdentifier: { id: 'one' },
+    },
+    {
+      composerId: B,
+      isSubagent: true,
+      subagentInfo: {
+        parentComposerId: A,
+        rootParentConversationId: A,
+      },
+      workspaceIdentifier: { id: 'one' },
+    },
+  ];
+
+  await execSqlScript({
+    ...p.ctx,
+    database: p.one.globalDbPath,
+    sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ _v: 13, composerId: A, fullConversationHeadersOnly: [], subagentComposerIds: [B] }))} WHERE key='composerData:${A}'; UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ _v: 13, composerId: B, fullConversationHeadersOnly: [], subagentInfo: { parentComposerId: A, rootParentConversationId: A } }))} WHERE key='composerData:${B}'; UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))} WHERE key='composer.composerHeaders';`,
+  });
+
+  await execSqlScript({
+    ...p.ctx,
+    database: p.one.workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))} WHERE key='composer.composerData';`,
+  });
+
+  await execSqlScript({
+    ...p.ctx,
+    database: p.shared.workspaceDbPath,
+    sql: `UPDATE ItemTable SET value='{}' WHERE key='composer.composerData';`,
+  });
+}
+
+test(
+  'deleting a child keeps the parent and the fingerprint scope',
+  { skip },
+  async () => {
+    const p = await profile();
+
+    try {
+      await setupFamily(p);
+
+      const prepared = await prepareManagedDelete(p.ctx, {
+        kind: 'prepare-managed-delete',
+        ...p.ctx,
+        userDataRoot: p.root,
+        emptyWindow: true,
+        workspaces: [p.one, p.empty, p.shared],
+        requests: [{ workspace: p.one, kind: 'chats', ids: [B] }],
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const outcome = await executeManagedDelete(p.ctx, {
+        kind: 'delete-managed-data',
+        ...p.ctx,
+        emptyWindow: true,
+        workspaces: [p.one, p.empty, p.shared],
+        plan: prepared.plan,
+      });
+
+      assert.equal(outcome.error, undefined, JSON.stringify(outcome));
+
+      assert.equal(
+        (
+          await execSql({
+            ...p.ctx,
+            database: p.one.globalDbPath,
+            sql: `SELECT count(*) FROM cursorDiskKV WHERE key='composerData:${B}';`,
+          })
+        ).trim(),
+        '0',
+      );
+    } finally {
+      await rm(p.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'a parent-only request keeps the parent when a child remains',
+  { skip },
+  async () => {
+    const p = await profile();
+
+    try {
+      await setupFamily(p);
+
+      const prepared = await prepareManagedDelete(p.ctx, {
+        kind: 'prepare-managed-delete',
+        ...p.ctx,
+        userDataRoot: p.root,
+        emptyWindow: true,
+        workspaces: [p.one, p.empty, p.shared],
+        requests: [{ workspace: p.one, kind: 'chats', ids: [A] }],
+      });
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const outcome = await executeManagedDelete(p.ctx, {
+        kind: 'delete-managed-data',
+        ...p.ctx,
+        emptyWindow: true,
+        workspaces: [p.one, p.empty, p.shared],
+        plan: prepared.plan,
+      });
+
+      assert.equal(
+        (
+          await execSql({
+            ...p.ctx,
+            database: p.one.globalDbPath,
+            sql: `SELECT count(*) FROM cursorDiskKV WHERE key='composerData:${A}';`,
+          })
+        ).trim(),
+        '1',
+        JSON.stringify(outcome),
+      );
+    } finally {
+      await rm(p.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'export follows family links stored only on composer bodies',
+  { skip },
+  async () => {
+    const p = await profile();
+
+    try {
+      await setupFamily(p);
+
+      const headers = [
+        { composerId: A, workspaceIdentifier: { id: 'one' } },
+        { composerId: B, isSubagent: true, workspaceIdentifier: { id: 'one' } },
+      ];
+
+      for (const [database, key] of [
+        [p.one.globalDbPath, 'composer.composerHeaders'],
+        [p.one.workspaceDbPath, 'composer.composerData'],
+      ] as const)
+        await execSqlScript({
+          ...p.ctx,
+          database,
+          sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))} WHERE key=${sqlText(key)};`,
+        });
+
+      const { exportToFile } = await import('../src/export-transfer');
+      const { readBundleObject } = await import('../src/bundle-object');
+      const dest = path.join(p.root, 'family.zip');
+
+      await exportToFile(p.ctx, p.one, dest, [A]);
+
+      assert.equal((await readBundleObject(dest)).allComposers.length, 2);
+    } finally {
+      await rm(p.root, { recursive: true, force: true });
+    }
+  },
+);

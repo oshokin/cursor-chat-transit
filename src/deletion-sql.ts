@@ -156,15 +156,27 @@ export async function deleteHeaderReferences(
       )
         throw new Error('Unsupported header list; deletion rolled back.');
 
+      const parents: string[] = [];
+
       value.allComposers = (
         composers as Array<{
           composerId: string;
         }>
       )
         .filter((row) => !ids.has(row.composerId))
-        .map((row) =>
-          withoutDeletedSubagents(row as Record<string, unknown>, ids),
-        );
+        .map((row) => {
+          const next = withoutDeletedSubagents(
+            row as Record<string, unknown>,
+            ids,
+          );
+
+          if (next !== row) parents.push(row.composerId);
+
+          return next;
+        });
+
+      if (layout.composerHeaders && layout.headerColumns.includes('value'))
+        await updateHeaderMembership(session, schema, parents, ids);
     }
 
     for (const field of ['selectedComposerIds', 'lastFocusedComposerIds']) {
@@ -189,6 +201,97 @@ export async function deleteHeaderReferences(
     await session.exec(
       `DELETE FROM ${schema}.composerHeaders WHERE composerId IN (SELECT id FROM selected);`,
     );
+}
+
+/** Rewrite a kept composerHeaders.value when it still lists a deleted child. */
+async function updateHeaderMembership(
+  session: SqliteSession,
+  schema: 'main' | 'workspace',
+  parents: readonly string[],
+  ids: ReadonlySet<string>,
+): Promise<void> {
+  for (const parent of parents) {
+    const hex = (
+      await session.exec(
+        `SELECT hex(value) FROM ${schema}.composerHeaders WHERE composerId=${sqlText(parent)};`,
+      )
+    ).trim();
+
+    if (!hex) continue;
+    const text = Buffer.from(hex, 'hex').toString('utf8');
+
+    if (Buffer.byteLength(text) > MAX_SQLITE_VALUE_BYTES)
+      throw new Error('Header metadata exceeds the supported record limit.');
+
+    const value = JSON.parse(text) as Record<string, unknown>;
+
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('Unsupported header list; deletion rolled back.');
+
+    const next = withoutDeletedSubagents(value, ids);
+
+    if (next === value) continue;
+
+    await session.exec(
+      `UPDATE ${schema}.composerHeaders SET value=${sqlText(JSON.stringify(next))} WHERE composerId=${sqlText(parent)};`,
+    );
+  }
+}
+
+/** Read one ItemTable list when it is inside the supported size. */
+async function itemText(
+  session: SqliteSession,
+  schema: 'main' | 'workspace',
+  key: string,
+): Promise<string | undefined> {
+  const bytes = Number(
+    (
+      await session.exec(
+        `SELECT coalesce(length(CAST(value AS BLOB)),0) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
+      )
+    ).trim() || 0,
+  );
+
+  if (!bytes) return undefined;
+
+  if (bytes > MAX_SQLITE_VALUE_BYTES)
+    throw new Error('Header metadata exceeds the supported record limit.');
+
+  const hex = (
+    await session.exec(
+      `SELECT hex(value) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
+    )
+  ).trim();
+
+  return hex ? Buffer.from(hex, 'hex').toString('utf8') : undefined;
+}
+
+/** Parse a chat list. A non-object value rolls the deletion back. */
+function parseHeaderList(text: string): {
+  allComposers?: Array<{
+    composerId?: unknown;
+    subagentInfo?: { parentComposerId?: unknown };
+    subagentComposerIds?: unknown;
+  }>;
+} {
+  try {
+    const value = JSON.parse(text) as unknown;
+
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('Unsupported header list; deletion rolled back.');
+
+    return value as {
+      allComposers?: Array<{
+        composerId?: unknown;
+        subagentInfo?: { parentComposerId?: unknown };
+        subagentComposerIds?: unknown;
+      }>;
+    };
+  } catch (error) {
+    throw new Error('Unsupported header list; deletion rolled back.', {
+      cause: error,
+    });
+  }
 }
 
 /** Read one KV value when it is inside the supported size. */
@@ -229,6 +332,38 @@ export async function detachDeletedSubagents(
   signal?: AbortSignal,
 ): Promise<void> {
   const parents = new Set<string>();
+
+  for (const [schema, key] of [
+    ['main', 'composer.composerHeaders'],
+    ['workspace', 'composer.composerData'],
+  ] as const) {
+    const text = await itemText(session, schema, key);
+
+    if (!text) continue;
+    const value = parseHeaderList(text);
+
+    for (const row of value.allComposers || []) {
+      if (!row || typeof row.composerId !== 'string') continue;
+      const parent = row.subagentInfo?.parentComposerId;
+
+      if (
+        ids.has(row.composerId) &&
+        typeof parent === 'string' &&
+        parent &&
+        !ids.has(parent)
+      )
+        parents.add(parent);
+
+      if (
+        !ids.has(row.composerId) &&
+        Array.isArray(row.subagentComposerIds) &&
+        row.subagentComposerIds.some(
+          (child) => typeof child === 'string' && ids.has(child),
+        )
+      )
+        parents.add(row.composerId);
+    }
+  }
 
   for (const id of ids) {
     signal?.throwIfAborted();

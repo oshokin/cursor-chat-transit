@@ -1,6 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { bubbleRange } from './core';
-import { parentsToUpdate } from './chat-family';
+import { keptParentNote, narrowDeletion, parentsToUpdate } from './chat-family';
 import { chatSelectionFingerprint } from './chat-fingerprint';
 import { deleteSelectedChats } from './chat-deletion';
 import { inspectDeletionOwnership } from './deletion-ownership';
@@ -304,15 +304,31 @@ export async function prepareManagedDelete(
     globalTokens[database] = await databaseToken(database);
   }
 
-  for (const target of targets) {
-    if (!target.ids.length) continue;
+  const keptNotes: string[] = [];
 
+  for (const target of targets) {
     const headers = await reader.read(target.workspace);
+
+    if (target.kind === 'chats') {
+      const narrowed = narrowDeletion(headers, target.ids);
+
+      if (narrowed.kept.length) {
+        target.ids = narrowed.deleteIds;
+        keptNotes.push(keptParentNote(narrowed.kept));
+      }
+    }
+
+    const watched = [
+      ...new Set([...target.ids, ...parentsToUpdate(headers, target.ids)]),
+    ];
+
+    target.verificationIds = watched;
+    if (!watched.length) continue;
 
     target.chatFingerprint = await chatSelectionFingerprint(
       ctx,
       target.workspace.globalDbPath,
-      [...target.ids, ...parentsToUpdate(headers, target.ids)],
+      watched,
     );
   }
 
@@ -322,7 +338,12 @@ export async function prepareManagedDelete(
     detail: `${targets.length} targets`,
   });
 
-  const keptNote = job.requests.find((request) => request.note)?.note;
+  const keptNote = [
+    job.requests.find((request) => request.note)?.note,
+    ...keptNotes,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return {
     ok: true,
@@ -418,7 +439,9 @@ export async function executeManagedDelete(
           const live = await chatSelectionFingerprint(
             ctx,
             database,
-            target.ids,
+            target.verificationIds?.length
+              ? target.verificationIds
+              : target.ids,
           );
 
           if (live !== target.chatFingerprint) {
@@ -648,6 +671,7 @@ export async function executeManagedDelete(
             {
               workspace: read.entry,
               ids: target.ids,
+              verificationIds: target.verificationIds,
               chatFingerprint: target.chatFingerprint,
             },
           ],
@@ -700,6 +724,7 @@ export async function executeManagedDelete(
             {
               workspace: read.entry,
               ids: read.ids,
+              verificationIds: target.verificationIds,
               chatFingerprint: target.chatFingerprint,
             },
           ],

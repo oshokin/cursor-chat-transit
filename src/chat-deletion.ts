@@ -1,6 +1,8 @@
 import { lstat } from 'node:fs/promises';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { narrowDeletion } from './chat-family';
 import { chatSelectionFingerprint } from './chat-fingerprint';
+import { WorkspaceHeaderReader } from './workspace-header-reader';
 import { bubbleRange, sqlText } from './core';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import {
@@ -72,6 +74,13 @@ export async function deleteSelectedChats(
       });
 
       if (ids.length) {
+        const headers = await new WorkspaceHeaderReader(ctx).read(workspace);
+        const narrowed = narrowDeletion(headers, ids);
+
+        ids.splice(0, ids.length, ...narrowed.deleteIds);
+      }
+
+      if (ids.length) {
         await validatePaths(workspace);
 
         await traceIO(
@@ -104,7 +113,9 @@ export async function deleteSelectedChats(
                 const live = await chatSelectionFingerprint(
                   ctx,
                   workspace.globalDbPath,
-                  target.ids,
+                  target.verificationIds?.length
+                    ? target.verificationIds
+                    : target.ids,
                   session,
                 );
 
@@ -200,6 +211,8 @@ function normalizeTargets(
       /** Physical workspace these chats belong to. */
       workspace: WorkspaceEntry;
       ids: Set<string>;
+      /** Rows covered by the confirmed fingerprint, including kept parents. */
+      verificationIds: Set<string>;
       /** Hash captured when the user confirmed this target. */
       chatFingerprint?: string;
     }
@@ -218,6 +231,7 @@ function normalizeTargets(
     const group = grouped.get(workspace.workspaceDbPath) || {
       workspace,
       ids: new Set<string>(),
+      verificationIds: new Set<string>(),
       chatFingerprint: target.chatFingerprint,
     };
 
@@ -226,12 +240,16 @@ function normalizeTargets(
       group.ids.add(id);
     }
 
+    for (const id of target.verificationIds || [])
+      group.verificationIds.add(id);
+
     grouped.set(workspace.workspaceDbPath, group);
   }
 
   return [...grouped.values()].map((group) => ({
     workspace: group.workspace,
     ids: [...group.ids],
+    verificationIds: [...group.verificationIds],
     chatFingerprint: group.chatFingerprint,
   }));
 }

@@ -19,7 +19,14 @@ export interface ChatFamilyNode {
 /** One relationship that export, import, or the tree must not guess through. */
 export interface FamilyDiagnostic {
   /** Why this chat is not a normal root or child. */
-  code: 'cycle' | 'self-parent' | 'conflict' | 'missing-parent' | 'unresolved';
+  code:
+    | 'cycle'
+    | 'self-parent'
+    | 'conflict'
+    | 'missing-parent'
+    | 'missing-child'
+    | 'contradictory-root'
+    | 'unresolved';
   /** Chat the diagnostic is about. */
   composerId: string;
   /** Short reason for logs and tests. */
@@ -136,7 +143,16 @@ export function buildFamily(headers: readonly ComposerHeader[]): FamilyGraph {
       });
 
     for (const child of item.children) {
-      if (!raw.has(child)) continue;
+      if (!raw.has(child)) {
+        diagnostics.push({
+          code: 'missing-child',
+          composerId: item.composerId,
+          detail: 'A listed subagent is not in this workspace list.',
+        });
+
+        continue;
+      }
+
       const childParent = raw.get(child)?.parent;
 
       if (childParent && childParent !== item.composerId) {
@@ -155,20 +171,26 @@ export function buildFamily(headers: readonly ComposerHeader[]): FamilyGraph {
   }
 
   const cyclic = new Set<string>();
+  const color = new Map<string, number>();
 
   for (const start of parentOf.keys()) {
-    const seen = new Set<string>();
+    if ((color.get(start) || 0) === 2) continue;
+    const stack: string[] = [];
     let cursor: string | undefined = start;
 
-    while (cursor && parentOf.has(cursor)) {
-      if (seen.has(cursor)) {
-        for (const id of seen) cyclic.add(id);
-        break;
-      }
-
-      seen.add(cursor);
+    while (cursor && (color.get(cursor) || 0) === 0) {
+      color.set(cursor, 1);
+      stack.push(cursor);
       cursor = parentOf.get(cursor);
     }
+
+    if (cursor && (color.get(cursor) || 0) === 1) {
+      const at = stack.indexOf(cursor);
+
+      for (const id of stack.slice(at < 0 ? 0 : at)) cyclic.add(id);
+    }
+
+    for (const id of stack) color.set(id, 2);
   }
 
   for (const id of cyclic) {
@@ -195,6 +217,32 @@ export function buildFamily(headers: readonly ComposerHeader[]): FamilyGraph {
   for (const id of conflicted) parentOf.delete(id);
 
   const nodes = new Map<string, ChatFamilyNode>();
+  const rootOf = new Map<string, string>();
+
+  /** Confirmed root, memoized so a deep chain is not walked once per node. */
+  const resolveRoot = (id: string): string => {
+    const path: string[] = [];
+    let cursor = id;
+
+    while (!rootOf.has(cursor)) {
+      path.push(cursor);
+      const parent = parentOf.get(cursor);
+
+      if (!parent) {
+        for (const step of path) rootOf.set(step, cursor);
+
+        return cursor;
+      }
+
+      cursor = parent;
+    }
+
+    const root = rootOf.get(cursor) || cursor;
+
+    for (const step of path) rootOf.set(step, root);
+
+    return root;
+  };
 
   for (const item of raw.values()) {
     const parent = conflicted.has(item.composerId)
@@ -205,31 +253,37 @@ export function buildFamily(headers: readonly ComposerHeader[]): FamilyGraph {
       (id) => parentOf.get(id) === item.composerId && !conflicted.has(id),
     );
 
-    let root = item.composerId;
-    const walk = new Set<string>();
-    let cursor = parent;
+    const root = parent ? resolveRoot(item.composerId) : item.composerId;
 
-    while (cursor && !walk.has(cursor)) {
-      walk.add(cursor);
-      root = cursor;
-      cursor = parentOf.get(cursor);
-    }
+    const rootDisagrees =
+      !!parent && !!item.root && raw.has(item.root) && item.root !== root;
+
+    if (rootDisagrees)
+      diagnostics.push({
+        code: 'contradictory-root',
+        composerId: item.composerId,
+        detail: 'rootParentConversationId does not match the parent chain.',
+      });
 
     const unresolved =
-      !parent &&
-      (item.isSubagent ||
-        conflicted.has(item.composerId) ||
-        diagnostics.some(
-          (itemDiagnostic) => itemDiagnostic.composerId === item.composerId,
-        ));
+      rootDisagrees ||
+      (!parent &&
+        (item.isSubagent ||
+          conflicted.has(item.composerId) ||
+          diagnostics.some(
+            (itemDiagnostic) =>
+              itemDiagnostic.composerId === item.composerId &&
+              itemDiagnostic.code !== 'missing-child',
+          )));
 
     nodes.set(item.composerId, {
       composerId: item.composerId,
-      parentComposerId: parent,
-      rootComposerId: parent ? root : undefined,
-      childComposerIds: kids,
+      parentComposerId: rootDisagrees ? undefined : parent,
+      rootComposerId: parent && !rootDisagrees ? root : undefined,
+      childComposerIds: rootDisagrees ? [] : kids,
       subagentTypeName: item.subagentTypeName,
-      relation: parent ? 'child' : unresolved ? 'unresolved' : 'root',
+      relation:
+        parent && !rootDisagrees ? 'child' : unresolved ? 'unresolved' : 'root',
     });
   }
 
@@ -270,7 +324,7 @@ export function exportFamilyIds(
   for (const id of wanted) {
     const node = graph.nodes.get(id);
 
-    if (!node) continue;
+    if (!node || node.relation === 'unresolved') continue;
     if (node.relation === 'child' && node.rootComposerId)
       addTree(node.rootComposerId);
     else addTree(id);
@@ -283,11 +337,26 @@ export function exportFamilyIds(
 export function directChildren(
   headers: readonly ComposerHeader[],
   parentId: string,
+  /** Reuse a graph already built for this header list. */
+  graph: FamilyGraph = buildFamily(headers),
 ): ComposerHeader[] {
-  const graph = buildFamily(headers);
   const kids = new Set(graph.nodes.get(parentId)?.childComposerIds || []);
 
   return headers.filter((header) => kids.has(header.composerId));
+}
+
+/**
+ * Conversations offered in the export picker.
+ * Linked subagents stay inside the parent. Unresolved subagents are not roots.
+ */
+export function exportConversationHeaders(
+  headers: readonly ComposerHeader[],
+): ComposerHeader[] {
+  const graph = buildFamily(headers);
+
+  return headers.filter(
+    (header) => graph.nodes.get(header.composerId)?.relation === 'root',
+  );
 }
 
 /** Headers that belong on the workspace row: roots and unresolved chats. */
@@ -494,6 +563,22 @@ export function familyImportAdjustments(rows: readonly FamilyImportRow[]): {
       dropped.add(row.sourceId);
   }
 
+  let grew = true;
+
+  while (grew) {
+    grew = false;
+
+    for (const row of rows) {
+      if (dropped.has(row.sourceId)) continue;
+      const parent = row.header.subagentInfo?.parentComposerId;
+
+      if (typeof parent === 'string' && parent && dropped.has(parent)) {
+        dropped.add(row.sourceId);
+        grew = true;
+      }
+    }
+  }
+
   const graph = buildFamily(
     rows.filter((row) => !dropped.has(row.sourceId)).map((row) => row.header),
   );
@@ -538,4 +623,98 @@ export function familyImportAdjustments(rows: readonly FamilyImportRow[]): {
   }
 
   return { promote: [...promote], drop: [...dropped] };
+}
+
+/**
+ * Pick one destination target per source member so each child points at that assignment's parent.
+ * Candidates are tried with the current target first. Undefined means no coherent copy exists.
+ */
+export function coherentFamilyAssignment(
+  members: readonly {
+    sourceId: string;
+    targetId: string;
+    header: ComposerHeader;
+  }[],
+  /** Source composer id to destination ids that already hold that snapshot. */
+  candidates: ReadonlyMap<string, readonly string[]>,
+  /** Destination composer id to the parent stored on its body. */
+  parentOfTarget: ReadonlyMap<string, string | undefined>,
+): Map<string, string> | undefined {
+  if (members.length < 2) return undefined;
+  const graph = buildFamily(members.map((member) => member.header));
+
+  /** True when every confirmed child edge lands on the assigned parent target. */
+  const coherent = (assign: ReadonlyMap<string, string>) => {
+    for (const member of members) {
+      const parent = graph.nodes.get(member.sourceId)?.parentComposerId;
+
+      if (!parent || !assign.has(parent)) continue;
+      const childTarget = assign.get(member.sourceId);
+      const parentTarget = assign.get(parent);
+
+      if (!childTarget || parentOfTarget.get(childTarget) !== parentTarget)
+        return false;
+    }
+
+    return true;
+  };
+
+  const chosen = new Map(
+    members.map((member) => [member.sourceId, member.targetId]),
+  );
+
+  if (coherent(chosen)) return chosen;
+
+  const ordered = members.map((member) => {
+    const options = candidates.get(member.sourceId) || [member.targetId];
+
+    return [member.targetId, ...options.filter((id) => id !== member.targetId)];
+  });
+
+  const assign = new Map<string, string>();
+
+  /** Try the next member's candidates. Stop at the first coherent family. */
+  const search = (index: number): boolean => {
+    if (index === members.length) return coherent(assign);
+    const member = members[index];
+
+    for (const target of ordered[index]) {
+      assign.set(member.sourceId, target);
+      if (search(index + 1)) return true;
+    }
+
+    return false;
+  };
+
+  return search(0) ? assign : undefined;
+}
+
+/** Copy family links from a composer body when the header does not already name them. */
+export function applyBodyFamily(
+  header: ComposerHeader,
+  body: {
+    parent?: string;
+    root?: string;
+    children?: string[];
+    isSubagent?: boolean;
+  },
+): ComposerHeader {
+  const next: ComposerHeader = { ...header };
+  const headerParent = header.subagentInfo?.parentComposerId;
+
+  if (!headerParent && body.parent) {
+    next.subagentInfo = {
+      ...header.subagentInfo,
+      parentComposerId: body.parent,
+      ...(body.root ? { rootParentConversationId: body.root } : {}),
+    };
+
+    next.isSubagent = true;
+  }
+
+  if (!header.subagentComposerIds?.length && body.children?.length)
+    next.subagentComposerIds = body.children;
+  if (body.isSubagent) next.isSubagent = true;
+
+  return next;
 }

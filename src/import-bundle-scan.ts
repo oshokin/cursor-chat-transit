@@ -1,4 +1,7 @@
-import { familyImportAdjustments } from './chat-family';
+import {
+  coherentFamilyAssignment,
+  familyImportAdjustments,
+} from './chat-family';
 import { textRecovery } from './text-recovery';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -31,6 +34,7 @@ import { isPlanFilename, planFilenamesFromChat } from './plans';
 import { readMeasuredNdjson } from './progress-reader';
 import { parseBoundedJson } from './record-json';
 import { SnapshotHasher } from './snapshot-hash';
+import { execSql } from './sqlite';
 import { SqliteSession } from './sqlite-session';
 import { readFile } from './trace-fs';
 import { inspectPair } from './transfer-context';
@@ -76,6 +80,8 @@ export async function scanAll(opts: {
     ordinal: number;
     name?: string;
     decision: 'create' | 'skip';
+    targetId: string;
+    hash: string;
     header: ComposerHeader;
   }> = [];
 
@@ -186,6 +192,8 @@ export async function scanAll(opts: {
           ordinal,
           name,
           decision: decision.action,
+          targetId,
+          hash: scanned.hash,
           header: scanned.header,
         });
 
@@ -266,7 +274,156 @@ export async function scanAll(opts: {
     });
   }
 
+  const skipped = familyRows.filter(
+    (row) =>
+      row.decision === 'skip' &&
+      !adjusted.promote.includes(row.sourceId) &&
+      !adjusted.drop.includes(row.sourceId),
+  );
+
+  await realignSkippedFamilies(opts, skipped, receipts, plan);
+
   return plan;
+}
+
+/** Keep a reused family on one destination copy. A split pair becomes a new family. */
+async function realignSkippedFamilies(
+  opts: Parameters<typeof scanAll>[0],
+  rows: Array<{
+    sourceId: string;
+    ordinal: number;
+    name?: string;
+    targetId: string;
+    hash: string;
+    header: ComposerHeader;
+  }>,
+  receipts: Awaited<ReturnType<JournalStore['receipts']>>,
+  plan: Plan,
+): Promise<void> {
+  if (rows.length < 2) return;
+  const byId = new Map(rows.map((row) => [row.sourceId, row]));
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (seen.has(row.sourceId)) continue;
+    const stack = [row.sourceId];
+    const members = [];
+
+    while (stack.length) {
+      const id = stack.pop();
+
+      if (!id || seen.has(id) || !byId.has(id)) continue;
+      seen.add(id);
+      const member = byId.get(id)!;
+
+      members.push(member);
+      const children = member.header.subagentComposerIds || [];
+
+      for (const child of children) stack.push(child);
+      const parent = member.header.subagentInfo?.parentComposerId;
+
+      if (typeof parent === 'string') stack.push(parent);
+    }
+
+    if (members.length < 2) continue;
+    const candidates = new Map<string, string[]>();
+
+    for (const member of members) {
+      const options = receipts
+        .filter(
+          (receipt) =>
+            receipt.sourceComposerId === member.sourceId &&
+            receipt.snapshotHash === member.hash &&
+            receipt.state !== 'pending',
+        )
+        .map((receipt) => receipt.targetComposerId);
+
+      candidates.set(member.sourceId, [
+        member.targetId,
+        ...options.filter((id) => id !== member.targetId),
+      ]);
+    }
+
+    const parentOfTarget = new Map<string, string | undefined>();
+
+    for (const ids of candidates.values()) {
+      for (const targetId of ids) {
+        if (parentOfTarget.has(targetId)) continue;
+
+        parentOfTarget.set(targetId, await destinationParent(opts, targetId));
+      }
+    }
+
+    const assignment = coherentFamilyAssignment(
+      members,
+      candidates,
+      parentOfTarget,
+    );
+
+    if (!assignment) {
+      for (const member of members) {
+        const targetId = randomUUID();
+
+        await opts.work.exec(
+          `UPDATE chat SET decision='create', target_id=${sqlText(targetId)}, reason='family-copy' WHERE source_id=${sqlText(member.sourceId)};`,
+        );
+
+        plan.already = plan.already.filter(
+          (item) => item.composerId !== member.sourceId,
+        );
+
+        plan.create.push(member.ordinal);
+      }
+
+      continue;
+    }
+
+    for (const member of members) {
+      const targetId = assignment.get(member.sourceId);
+
+      if (!targetId || targetId === member.targetId) continue;
+
+      await opts.work.exec(
+        `UPDATE chat SET target_id=${sqlText(targetId)} WHERE source_id=${sqlText(member.sourceId)};`,
+      );
+
+      const already = plan.already.find(
+        (item) => item.composerId === member.sourceId,
+      );
+
+      if (already) already.targetComposerId = targetId;
+    }
+  }
+}
+
+/** Parent id stored on one destination composer body. */
+async function destinationParent(
+  opts: Parameters<typeof scanAll>[0],
+  targetId: string,
+): Promise<string | undefined> {
+  const text = (
+    await execSql({
+      ...opts.pair.connGl,
+      sql: `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${targetId}`)};`,
+      readOnly: true,
+    })
+  ).trim();
+
+  if (!text) return undefined;
+
+  try {
+    const body = parseBoundedJson(
+      Buffer.from(text),
+      'composer',
+      opts.ctx.maxJsonProperties,
+    ) as { subagentInfo?: { parentComposerId?: unknown } };
+
+    const parent = body.subagentInfo?.parentComposerId;
+
+    return typeof parent === 'string' ? parent : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Fingerprint one chat and record the resources it needs. */

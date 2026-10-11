@@ -8,6 +8,11 @@ export interface DeleteTarget {
   ids: string[];
   /** Confirmed hash of this target's global chat rows. Checked inside the write transaction. */
   chatFingerprint?: string;
+  /**
+   * Rows hashed for this plan, including parents that stay.
+   * Distinct from `ids`, which are the only rows deleted.
+   */
+  verificationIds?: string[];
 }
 
 /** Known committed outcomes; cancellation never hides already completed workspaces. */
@@ -76,6 +81,11 @@ export interface ManagedPlanTarget {
    * A live Cursor rewrite of unrelated global state does not change it.
    */
   chatFingerprint?: string;
+  /**
+   * Rows hashed for this plan, including parents that stay.
+   * Distinct from `ids`, which are the only rows deleted.
+   */
+  verificationIds?: string[];
   /** Select empty workspaces asked for a workspace that still has no history. */
   requireEmpty?: true;
   /** The open window: its chats may be deleted and its storage directory stays. */

@@ -38,6 +38,17 @@ let registeredManager: import('../src/extension-manager').ChatManager;
 let nativeSelection: ManagedNode[] = [];
 const jobs: (TransferJob | StatisticsJob | CatalogueJob | DeletionJob)[] = [];
 let failRead = false;
+let holdIssues: Promise<void> | undefined;
+
+const chatHealth = new Map<
+  string,
+  'ready' | 'empty' | 'missing' | 'incomplete' | 'unknown' | 'failed'
+>();
+
+let listedComposers: import('../src/types').ComposerHeader[] = [
+  { composerId: 'chat', name: 'Example' },
+];
+
 let hideFirst = false;
 let failedFirst = false;
 let holdScan: (() => Promise<void>) | undefined;
@@ -54,6 +65,11 @@ let lockDepth = 0;
 
 const lockStatuses: Array<{ title: string; detail: string } | undefined> = [];
 const ui: Record<string, unknown> = {};
+
+const mockRuntime: { uiState: typeof ui; progressTimer?: NodeJS.Timeout } = {
+  uiState: ui,
+};
+
 const messages: string[] = [];
 let currentDatabase: string | undefined;
 let searchPickers: ReturnType<typeof createSearchPicker>[] = [];
@@ -215,7 +231,7 @@ loader._load = function (id, parent, isMain) {
     };
   if (id === './extension-state')
     return {
-      runtime: { uiState: ui },
+      runtime: mockRuntime,
       setUi: (value: object) => Object.assign(ui, value),
       withLock: async (
         _ctx: unknown,
@@ -233,7 +249,9 @@ loader._load = function (id, parent, isMain) {
         }
       },
       linkedSignal: () => new AbortController().signal,
-      finishPhaseProgress() {},
+      finishPhaseProgress() {
+        clearInterval(mockRuntime.progressTimer);
+      },
       attachPhaseProgress: () => () => {},
     };
   if (id === './extension-workspaces')
@@ -291,7 +309,36 @@ loader._load = function (id, parent, isMain) {
           return { failed: 0 };
         }
 
-        return { allComposers: [{ composerId: 'chat', name: 'Example' }] };
+        if (job.kind === 'chat-statistics') {
+          await holdIssues;
+          let failed = 0;
+
+          for (const chat of job.chats || []) {
+            const mark = chatHealth.get(chat.composerId) || 'missing';
+
+            if (mark === 'failed') {
+              failed += 1;
+
+              handlers.onStatistics?.({
+                key: chat.composerId,
+                detail: 'Check failed',
+                failed: true,
+              });
+
+              continue;
+            }
+
+            handlers.onStatistics?.({
+              key: chat.composerId,
+              detail: mark,
+              health: mark,
+            });
+          }
+
+          return { failed };
+        }
+
+        return { allComposers: listedComposers };
       },
     };
 
@@ -320,10 +367,15 @@ beforeEach(() => {
   jobs.length = 0;
   messages.length = 0;
   failRead = hideFirst = failedFirst = false;
+  holdIssues = undefined;
+  chatHealth.clear();
   holdScan = undefined;
   lockStatuses.length = 0;
   currentDatabase = undefined;
   searchPickers = [];
+  listedComposers = [{ composerId: 'chat', name: 'Example' }];
+  clearInterval(mockRuntime.progressTimer);
+  for (const key of Object.keys(ui)) delete ui[key];
 });
 
 test('manager filters once per refresh, caches headers, and distinguishes physical storage', async () => {
@@ -1051,6 +1103,495 @@ test('cancel deletion keeps uncached chat lists usable', async () => {
       ),
     );
   } finally {
+    manager.dispose();
+  }
+});
+
+const familyHeaders = [
+  {
+    composerId: 'parent',
+    name: 'Parent',
+    subagentComposerIds: ['child'],
+  },
+  {
+    composerId: 'child',
+    name: 'Child',
+    isSubagent: true,
+    subagentInfo: {
+      parentComposerId: 'parent',
+      rootParentConversationId: 'parent',
+    },
+    subagentComposerIds: ['grand'],
+  },
+  {
+    composerId: 'grand',
+    name: 'Grand',
+    isSubagent: true,
+    subagentInfo: {
+      parentComposerId: 'child',
+      rootParentConversationId: 'parent',
+    },
+  },
+];
+
+test('inline parent check includes confirmed descendants', async () => {
+  listedComposers = familyHeaders;
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+    const [parent] = await manager.getChildren(roots[0]);
+
+    await manager.select(parent, true);
+    assert.equal(manager.selection.values().length, 3);
+    await manager.check(parent);
+
+    const job = [...jobs]
+      .reverse()
+      .find((item) => item.kind === 'chat-statistics');
+
+    assert.ok(job && job.kind === 'chat-statistics');
+
+    assert.deepEqual(job.chats?.map((chat) => chat.composerId).sort(), [
+      'child',
+      'grand',
+      'parent',
+    ]);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('name order prefers a newer workspace and a local workspace', async () => {
+  const manager = new Manager(context, log);
+
+  const older = { workspace: { ...entries[0], mtime: 1000 } };
+  const newer = { workspace: { ...entries[1], mtime: 2000 } };
+
+  const local = {
+    workspace: {
+      ...entries[0],
+      identity: {
+        kind: 'folder' as const,
+        uri: { scheme: 'file', authority: '', path: '/z/project' },
+      },
+    },
+  };
+
+  const ssh = {
+    workspace: {
+      ...entries[1],
+      identity: {
+        kind: 'folder' as const,
+        uri: {
+          scheme: 'vscode-remote',
+          authority: 'ssh-remote+host',
+          path: '/a/project',
+        },
+      },
+    },
+  };
+
+  try {
+    assert.ok(manager['compareWorkspaces'](newer, older) < 0);
+    assert.ok(manager['compareWorkspaces'](local, ssh) < 0);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('selecting transfer issues finishes the Operations status', async () => {
+  listedComposers = familyHeaders;
+  const manager = new Manager(context, log);
+
+  try {
+    await manager.selectIssues();
+    assert.ok(manager.selection.values().length > 0);
+    assert.notEqual(ui.status, 'running');
+  } finally {
+    manager.dispose();
+  }
+});
+
+const issueFamily = [
+  {
+    composerId: 'ack',
+    name: 'Ack/policy changes in NATS',
+    subagentComposerIds: ['child', 'sibling'],
+  },
+  {
+    composerId: 'child',
+    name: 'Child',
+    isSubagent: true,
+    subagentInfo: {
+      parentComposerId: 'ack',
+      rootParentConversationId: 'ack',
+    },
+    subagentComposerIds: ['grand'],
+  },
+  {
+    composerId: 'grand',
+    name: 'Grand',
+    isSubagent: true,
+    subagentInfo: {
+      parentComposerId: 'child',
+      rootParentConversationId: 'ack',
+    },
+  },
+  {
+    composerId: 'sibling',
+    name: 'Sibling',
+    isSubagent: true,
+    subagentInfo: {
+      parentComposerId: 'ack',
+      rootParentConversationId: 'ack',
+    },
+  },
+  { composerId: 'other', name: 'Other conversation' },
+  {
+    composerId: 'orphan',
+    name: 'Detached',
+    isSubagent: true,
+    subagentInfo: { parentComposerId: 'gone' },
+  },
+];
+
+function composerIds(
+  manager: InstanceType<typeof Manager>,
+  workspace = entries[0],
+): string[] {
+  return manager.selection
+    .values()
+    .filter(
+      (node) => node.workspace.workspaceDbPath === workspace.workspaceDbPath,
+    )
+    .map((node) => node.chat?.composerId)
+    .filter((id): id is string => !!id)
+    .sort();
+}
+
+async function selectIssueFamily(
+  health: Record<
+    string,
+    'ready' | 'empty' | 'missing' | 'incomplete' | 'unknown' | 'failed'
+  >,
+  lines?: string[],
+) {
+  listedComposers = issueFamily;
+
+  for (const [id, mark] of Object.entries(health)) chatHealth.set(id, mark);
+
+  const manager = new Manager(context, log, (message) => lines?.push(message));
+
+  await manager.selectIssues();
+
+  return manager;
+}
+
+test('an empty parent selects its child and grandchild, not another conversation', async () => {
+  const lines: string[] = [];
+
+  const manager = await selectIssueFamily(
+    {
+      ack: 'empty',
+      child: 'ready',
+      grand: 'ready',
+      sibling: 'ready',
+      other: 'ready',
+      orphan: 'ready',
+    },
+    lines,
+  );
+
+  try {
+    assert.deepEqual(composerIds(manager), [
+      'ack',
+      'child',
+      'grand',
+      'sibling',
+    ]);
+
+    assert.deepEqual(composerIds(manager, entries[1]), [
+      'ack',
+      'child',
+      'grand',
+      'sibling',
+    ]);
+
+    assert.equal(
+      manager.selection.values().every((node) => node.chat),
+      true,
+    );
+
+    assert.match(
+      lines.at(-1) || '',
+      /2 chats selected: 2 empty\. 6 subagents included with a selected parent\./,
+    );
+
+    assert.equal(ui.status, 'completed');
+
+    const roots = await manager.getChildren();
+    const top = await manager.getChildren(roots[0]);
+    const ack = top.find((node) => node.chat?.composerId === 'ack');
+    const item = manager.getTreeItem(ack!);
+
+    assert.equal(String(item.description).includes(' of '), false);
+    await manager.deleteSelected();
+
+    const request = deletions
+      .at(-1)
+      ?.find(
+        (row) => row.workspace.workspaceDbPath === entries[0].workspaceDbPath,
+      );
+
+    assert.equal(request?.kind, 'chats');
+
+    assert.deepEqual([...(request?.ids || [])].sort(), [
+      'ack',
+      'child',
+      'grand',
+      'sibling',
+    ]);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a ready parent stays unselected when only its child is empty', async () => {
+  const manager = await selectIssueFamily({
+    ack: 'ready',
+    child: 'empty',
+    grand: 'ready',
+    sibling: 'ready',
+    other: 'ready',
+    orphan: 'ready',
+  });
+
+  try {
+    assert.deepEqual(composerIds(manager), ['child', 'grand']);
+    await manager.deleteSelected();
+
+    const request = deletions
+      .at(-1)
+      ?.find(
+        (row) => row.workspace.workspaceDbPath === entries[0].workspaceDbPath,
+      );
+
+    assert.equal(request?.kind, 'chats');
+
+    assert.deepEqual([...(request?.ids || [])].sort(), ['child', 'grand']);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('an empty middle chat selects its grandchild and not its parent or sibling', async () => {
+  const manager = await selectIssueFamily({
+    ack: 'ready',
+    child: 'incomplete',
+    grand: 'ready',
+    sibling: 'ready',
+    other: 'ready',
+    orphan: 'ready',
+  });
+
+  try {
+    assert.deepEqual(composerIds(manager), ['child', 'grand']);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a missing child selects its own descendants and leaves the ready parent', async () => {
+  const manager = await selectIssueFamily({
+    ack: 'ready',
+    child: 'missing',
+    grand: 'ready',
+    sibling: 'missing',
+    other: 'ready',
+    orphan: 'ready',
+  });
+
+  try {
+    assert.deepEqual(composerIds(manager), ['child', 'grand', 'sibling']);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('issue counts ignore descendants that were added only to keep the family', async () => {
+  const lines: string[] = [];
+
+  const manager = await selectIssueFamily(
+    {
+      ack: 'empty',
+      child: 'empty',
+      grand: 'ready',
+      sibling: 'incomplete',
+      other: 'ready',
+      orphan: 'ready',
+    },
+    lines,
+  );
+
+  try {
+    assert.deepEqual(composerIds(manager), [
+      'ack',
+      'child',
+      'grand',
+      'sibling',
+    ]);
+
+    assert.match(
+      lines.at(-1) || '',
+      /6 chats selected: 2 incomplete, 4 empty\. 2 subagents included with a selected parent\./,
+    );
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a failed or unknown descendant of an empty parent is still selected', async () => {
+  const lines: string[] = [];
+
+  const manager = await selectIssueFamily(
+    {
+      ack: 'empty',
+      child: 'failed',
+      grand: 'unknown',
+      sibling: 'ready',
+      other: 'ready',
+      orphan: 'ready',
+    },
+    lines,
+  );
+
+  try {
+    assert.deepEqual(composerIds(manager), [
+      'ack',
+      'child',
+      'grand',
+      'sibling',
+    ]);
+
+    assert.match(lines.at(-1) || '', /could not be checked/);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('an unresolved empty chat is selected without inventing its missing parent', async () => {
+  const lines: string[] = [];
+
+  const manager = await selectIssueFamily(
+    {
+      ack: 'ready',
+      child: 'ready',
+      grand: 'ready',
+      sibling: 'ready',
+      other: 'ready',
+      orphan: 'empty',
+    },
+    lines,
+  );
+
+  try {
+    assert.deepEqual(composerIds(manager), ['orphan']);
+    assert.equal(composerIds(manager).includes('gone'), false);
+    assert.match(lines.at(-1) || '', /^2 chats selected: 2 empty\.$/);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a leaf with no subagents does not mention included subagents', async () => {
+  const lines: string[] = [];
+
+  const manager = await selectIssueFamily(
+    {
+      ack: 'ready',
+      child: 'ready',
+      grand: 'ready',
+      sibling: 'ready',
+      other: 'incomplete',
+      orphan: 'ready',
+    },
+    lines,
+  );
+
+  try {
+    assert.deepEqual(composerIds(manager), ['other']);
+    assert.equal((lines.at(-1) || '').includes('subagent'), false);
+    assert.match(lines.at(-1) || '', /2 chats selected: 2 incomplete\./);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('refresh during issue selection does not apply the family afterwards', async () => {
+  listedComposers = issueFamily;
+  chatHealth.set('ack', 'empty');
+  let release = () => {};
+
+  holdIssues = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const manager = new Manager(context, log);
+
+  try {
+    const pending = manager.selectIssues();
+
+    for (
+      let attempt = 0;
+      attempt < 50 && !jobs.some((job) => job.kind === 'chat-statistics');
+      attempt += 1
+    )
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+    manager.refresh();
+    release();
+    await pending;
+    assert.equal(manager.selection.values().length, 0);
+    assert.notEqual(ui.status, 'running');
+  } finally {
+    release();
+    manager.dispose();
+  }
+});
+
+test('a selection edit during the issue scan wins over the family result', async () => {
+  listedComposers = issueFamily;
+  chatHealth.set('ack', 'empty');
+  chatHealth.set('child', 'ready');
+  let release = () => {};
+
+  holdIssues = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const manager = new Manager(context, log);
+
+  try {
+    const pending = manager.selectIssues();
+
+    for (
+      let attempt = 0;
+      attempt < 50 && !jobs.some((job) => job.kind === 'chat-statistics');
+      attempt += 1
+    )
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const roots = await manager.getChildren();
+    const top = await manager.getChildren(roots[0]);
+    const other = top.find((node) => node.chat?.composerId === 'other');
+
+    await manager.select(other!, true);
+    release();
+    await pending;
+    assert.deepEqual(composerIds(manager), ['other']);
+  } finally {
+    release();
     manager.dispose();
   }
 });

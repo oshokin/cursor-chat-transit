@@ -31,7 +31,12 @@ import {
   topLevelChats,
   type FamilyGraph,
 } from './chat-family';
-import { workspacePresentation } from './workspace-presentation';
+import { compareText, validTimestamp } from './activity';
+import {
+  LOCATION_ORDER,
+  workspaceLocation,
+  workspacePresentation,
+} from './workspace-presentation';
 
 /** A native, lazy tree. Its lifetime and its jobs do not depend on keyboard focus. */
 export class ChatManager
@@ -138,7 +143,7 @@ export class ChatManager
     this.publishMessage();
     this.changed.fire(undefined);
   }
-  /** Select visible workspace rows that can be deleted. The current window is excluded. */
+  /** Select visible workspace rows, including the current window. */
   async selectAll(): Promise<void> {
     this.operationMessage = undefined;
     const roots = await this.getChildren();
@@ -168,9 +173,9 @@ export class ChatManager
     this.publishMessage();
     this.changed.fire(undefined);
   }
-  /** Check the explicit selection through the existing checker. */
+  /** Check the checkbox selection, including confirmed descendants of checked rows. */
   async checkSelected(): Promise<void> {
-    await this.checkNodes(this.selection.values());
+    await this.check();
   }
 
   /** Resolve checked scopes before row fallback; keyboard focus never changes deletion targets. */
@@ -467,6 +472,22 @@ export class ChatManager
       }
     }
 
+    const seen = new Set(picked.map((chat) => this.key(chat)));
+    const issues = [...picked];
+    let included = 0;
+
+    for (const chat of issues) {
+      for (const descendant of this.descendantScope(chat)) {
+        if (!descendant.chat) continue;
+        const key = this.key(descendant);
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+        picked.push(descendant);
+        included += 1;
+      }
+    }
+
     if (!picked.length) {
       this.operationMessage = counts.unchecked
         ? `No chats with transfer issues. Selection unchanged. ${counts.unchecked} could not be checked.`
@@ -480,7 +501,7 @@ export class ChatManager
     this.selection.clear();
 
     for (const chat of picked) this.selection.set(chat, true);
-    this.operationMessage = issueSelectionMessage(counts);
+    this.operationMessage = issueSelectionMessage(counts, included);
     this.publishMessage();
     this.changed.fire(undefined);
 
@@ -546,8 +567,7 @@ export class ChatManager
     const current = currentWorkspaceDatabase(this.context);
 
     return (
-      !!current &&
-      path.resolve(current) === path.resolve(node.workspace.workspaceDbPath)
+      !!current && sameDatabasePath(current, node.workspace.workspaceDbPath)
     );
   }
 
@@ -668,9 +688,14 @@ export class ChatManager
   private directChildHeaders(node: ManagedNode): ComposerHeader[] {
     if (!node.chat) return [];
 
+    const headers =
+      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
     return directChildren(
-      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [],
+      headers,
       node.chat.composerId,
+      this.familyCache.get(workspaceStatisticsKey(node.workspace)) ||
+        buildFamily(headers),
     );
   }
 
@@ -678,8 +703,8 @@ export class ChatManager
   private descendantHeaders(
     headers: ComposerHeader[],
     composerId: string,
+    graph: ReturnType<typeof buildFamily> = buildFamily(headers),
   ): ComposerHeader[] {
-    const graph = buildFamily(headers);
     const out: ComposerHeader[] = [];
     const stack = [...(graph.nodes.get(composerId)?.childComposerIds || [])];
     const seen = new Set<string>();
@@ -718,16 +743,85 @@ export class ChatManager
     return count ? `${count} subagent${count === 1 ? '' : 's'}` : '';
   }
 
+  /**
+   * Own health stays on the row detail. This sentence is only the descendant summary.
+   * A healthy parent is not marked failed because a subagent failed.
+   */
+  private familyNote(node: ManagedNode): string {
+    const relation = this.familyDescription(node);
+
+    if (
+      !node.chat ||
+      relation === 'Parent unavailable' ||
+      relation === 'Subagent'
+    )
+      return relation;
+
+    if (relation && relation !== relation.replace(/ subagents?$/, '')) {
+      const summary = this.checkedDescendantNote(node);
+
+      return summary || relation;
+    }
+
+    return relation;
+  }
+
+  /** How many confirmed descendants have their own check result. */
+  private checkedDescendantNote(node: ManagedNode): string {
+    if (!node.chat) return '';
+    const key = workspaceStatisticsKey(node.workspace);
+    const headers = this.headerCache.get(key) || [];
+
+    const descendants = this.descendantHeaders(
+      headers,
+      node.chat.composerId,
+      this.familyCache.get(key) || buildFamily(headers),
+    );
+
+    if (!descendants.length) return '';
+    let checked = 0;
+    let issues = 0;
+
+    for (const header of descendants) {
+      const row = this.results.get(
+        this.key({ workspace: node.workspace, chat: header }),
+      );
+
+      if (!row?.health) continue;
+      checked += 1;
+
+      if (
+        row.health === 'incomplete' ||
+        row.health === 'missing' ||
+        row.health === 'empty'
+      )
+        issues += 1;
+    }
+
+    if (!checked) return '';
+    if (issues)
+      return `${issues} subagent${issues === 1 ? ' has' : 's have'} transfer issues`;
+    if (checked === descendants.length)
+      return `${checked} subagent${checked === 1 ? '' : 's'} checked`;
+
+    return `${checked} of ${descendants.length} subagents checked`;
+  }
+
   /** Selected parent whose descendants are only partly checked. */
   private partialSelection(
     node: ManagedNode,
   ): { label: string; unselected: number } | undefined {
     if (!node.chat || !this.selection.has(node)) return undefined;
 
-    const headers =
-      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+    const key = workspaceStatisticsKey(node.workspace);
 
-    const descendants = this.descendantHeaders(headers, node.chat.composerId);
+    const headers = this.headerCache.get(key) || [];
+
+    const descendants = this.descendantHeaders(
+      headers,
+      node.chat.composerId,
+      this.familyCache.get(key) || buildFamily(headers),
+    );
 
     if (!descendants.length) return undefined;
 
@@ -759,30 +853,41 @@ export class ChatManager
     return value;
   }
 
-  /** Name order. The current window stays in its alphabetical place. */
+  /** Name, then location, host, recency, path, and storage identity. */
   private compareWorkspaces(left: ManagedNode, right: ManagedNode): number {
     const a = workspacePresentation(left.workspace);
     const b = workspacePresentation(right.workspace);
-
-    const name = new Intl.Collator(undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    }).compare(a.name, b.name);
+    const name = workspaceNameCollator.compare(a.name, b.name);
 
     if (name) return name;
 
-    const pathOrder = new Intl.Collator(undefined, {
-      numeric: true,
-      sensitivity: 'base',
-    }).compare(a.path, b.path);
+    const location =
+      LOCATION_ORDER[workspaceLocation(left.workspace)] -
+      LOCATION_ORDER[workspaceLocation(right.workspace)];
+
+    if (location) return location;
+
+    const host = compareText(
+      left.workspace.identity?.uri.authority || '',
+      right.workspace.identity?.uri.authority || '',
+    );
+
+    if (host) return host;
+
+    const recency =
+      validTimestamp(right.workspace.mtime) -
+      validTimestamp(left.workspace.mtime);
+
+    if (recency) return recency;
+
+    const pathOrder = workspaceNameCollator.compare(a.path, b.path);
 
     if (pathOrder) return pathOrder;
 
-    return left.workspace.workspaceDbPath < right.workspace.workspaceDbPath
-      ? -1
-      : left.workspace.workspaceDbPath > right.workspace.workspaceDbPath
-        ? 1
-        : 0;
+    return compareText(
+      left.workspace.workspaceDbPath,
+      right.workspace.workspaceDbPath,
+    );
   }
 
   /** Stable identity for a workspace row or one of its chats. */
@@ -835,6 +940,7 @@ export class ChatManager
     );
 
     const result = this.results.get(this.key(node));
+    const partial = node.chat ? this.partialSelection(node) : undefined;
 
     const workspaceSelected = !node.chat && this.selection.has(node);
 
@@ -843,8 +949,8 @@ export class ChatManager
       (node.chat
         ? [
             result?.detail || 'Not checked',
-            this.familyDescription(node),
-            this.partialSelection(node)?.label,
+            this.familyNote(node),
+            partial?.label,
           ]
             .filter(Boolean)
             .join(' · ')
@@ -856,8 +962,6 @@ export class ChatManager
           ]
             .filter(Boolean)
             .join(' · '));
-
-    const partial = this.partialSelection(node);
 
     item.tooltip = [
       node.chat?.name || presentation.name,
@@ -1243,9 +1347,82 @@ export class ChatManager
     if (selected && !generation.aborted) await reveal(selected);
   }
 
-  /** Inspect source data; publish batched tree updates without coupling jobs to focus. */
+  /**
+   * Checkbox selection wins. With no checks, the row and its confirmed descendants are checked.
+   * A child check does not add the parent or siblings.
+   */
   async check(node?: ManagedNode): Promise<void> {
-    await this.checkNodes(node ? [node] : []);
+    const checked = this.selection.values().filter((item) => !item.error);
+
+    if (checked.length) {
+      const nodes: ManagedNode[] = [];
+
+      for (const item of checked) {
+        if (item.chat) nodes.push(...this.descendantScope(item));
+        else {
+          await this.getChildren(item);
+          nodes.push(...this.descendantScope({ workspace: item.workspace }));
+        }
+      }
+
+      const seen = new Set<string>();
+
+      await this.checkNodes(
+        nodes.filter((item) => {
+          const key = this.key(item);
+
+          if (seen.has(key)) return false;
+          seen.add(key);
+
+          return true;
+        }),
+      );
+
+      return;
+    }
+
+    if (!node || node.error) {
+      await this.checkNodes([]);
+
+      return;
+    }
+
+    if (node.chat) await this.getChildren({ workspace: node.workspace });
+    else await this.getChildren(node);
+    await this.checkNodes(this.descendantScope(node));
+  }
+
+  /** Confirmed descendants of a chat, or every loaded chat of a workspace. */
+  private descendantScope(node: ManagedNode): ManagedNode[] {
+    const headers =
+      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
+    const graph =
+      this.familyCache.get(workspaceStatisticsKey(node.workspace)) ||
+      buildFamily(headers);
+
+    if (!node.chat)
+      return headers.map((chat) => ({ workspace: node.workspace, chat }));
+
+    const ids = new Set<string>([node.chat.composerId]);
+
+    const stack = [
+      ...(graph.nodes.get(node.chat.composerId)?.childComposerIds || []),
+    ];
+
+    while (stack.length) {
+      const id = stack.pop();
+
+      if (!id || ids.has(id)) continue;
+      ids.add(id);
+
+      for (const child of graph.nodes.get(id)?.childComposerIds || [])
+        stack.push(child);
+    }
+
+    return headers
+      .filter((header) => ids.has(header.composerId))
+      .map((chat) => ({ workspace: node.workspace, chat }));
   }
 
   /** Batch repainting is shared by row checks and bulk checks. */
@@ -1270,12 +1447,31 @@ export class ChatManager
 }
 
 /** Display label for a stored subagent type. Unknown names stay as stored. */
-function issueSelectionMessage(counts: {
-  incomplete: number;
-  missing: number;
-  empty: number;
-  unchecked: number;
-}): string {
+const workspaceNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+/** One database path on Windows, without treating two storages as the same project. */
+function sameDatabasePath(left: string, right: string): boolean {
+  const normalize = (file: string) =>
+    process.platform === 'win32'
+      ? path.resolve(file).toLowerCase()
+      : path.resolve(file);
+
+  return normalize(left) === normalize(right);
+}
+
+function issueSelectionMessage(
+  counts: {
+    incomplete: number;
+    missing: number;
+    empty: number;
+    unchecked: number;
+  },
+  /** Confirmed descendants added so a selected parent is not left childless. */
+  included = 0,
+): string {
   const selected = counts.incomplete + counts.missing + counts.empty;
 
   const parts = [
@@ -1284,7 +1480,11 @@ function issueSelectionMessage(counts: {
     counts.empty ? `${counts.empty} empty` : '',
   ].filter(Boolean);
 
-  return `${selected} chat${selected === 1 ? '' : 's'} selected: ${parts.join(', ')}.${counts.unchecked ? ` ${counts.unchecked} could not be checked.` : ''}`;
+  const subagents = included
+    ? ` ${included} subagent${included === 1 ? '' : 's'} included with a selected parent.`
+    : '';
+
+  return `${selected} chat${selected === 1 ? '' : 's'} selected: ${parts.join(', ')}.${subagents}${counts.unchecked ? ` ${counts.unchecked} could not be checked.` : ''}`;
 }
 
 function subagentTypeLabel(name: string): string {

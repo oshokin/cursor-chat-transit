@@ -30,9 +30,14 @@ import { startOperationLog } from './operation-log';
 import { formatIncompleteExportNotice } from './operation-ui';
 import { type TransitLog } from './output-ui';
 import * as paths from './paths';
+import {
+  buildFamily,
+  descendantCount,
+  exportConversationHeaders,
+} from './chat-family';
 import { chatPickItems } from './picker';
 
-/** Export chats from the selected (or picked) workspace to a local JSON file. */
+/** Export chats from the selected (or picked) workspace to a local ZIP archive. */
 export async function doExport(opts: {
   /** Extension host context used for settings and remembered folders. */
   context: vscode.ExtensionContext;
@@ -169,19 +174,32 @@ export async function doExport(opts: {
         statusDetail: 'Choose the conversations to include.',
       });
 
+      const conversations = exportConversationHeaders(listed.allComposers);
+      const family = buildFamily(listed.allComposers);
+
       const picked = await pickWithStatistics({
-        items: chatPickItems(listed.allComposers),
+        items: chatPickItems(conversations).map((item) => {
+          const count = descendantCount(family, item.id);
+
+          return count
+            ? {
+                ...item,
+                description: `${count} subagent${count === 1 ? '' : 's'} included`,
+              }
+            : item;
+        }),
         key: (item) => item.id,
         many: true,
         title: 'Select chats to export',
-        placeholder: 'Most recently updated first · Type to find a chat',
+        placeholder:
+          'Subagent chats are included with their parent conversation.',
         buttonLabel: 'Count user messages and identify chat formats',
         operations: opts.operations,
         job: async () => ({
           ...sqliteCtx,
           kind: 'chat-statistics',
           workspace,
-          chats: listed.allComposers.map(
+          chats: conversations.map(
             (
               /** Composer id and title from one header. */
               { composerId, name },
@@ -250,8 +268,25 @@ export async function doExport(opts: {
       statusDetail: 'Choose a location for the export.',
     });
 
+    const familyGraph = buildFamily(listed.allComposers);
+
+    const conversations =
+      mode.value === 'all'
+        ? exportConversationHeaders(listed.allComposers)
+        : selected;
+
+    const chatTotal = conversations.reduce(
+      (sum, chat) => sum + 1 + descendantCount(familyGraph, chat.composerId),
+      0,
+    );
+
+    const saveTitle =
+      chatTotal === conversations.length
+        ? `Export ${conversations.length} conversation${conversations.length === 1 ? '' : 's'}`
+        : `Export ${conversations.length} conversation${conversations.length === 1 ? '' : 's'} · ${chatTotal} chats including subagents`;
+
     const saveUri = await vscode.window.showSaveDialog({
-      title: `Export ${selected.length} Cursor chat(s)`,
+      title: saveTitle,
       defaultUri: vscode.Uri.file(
         path.join(exportDirectory(opts.context), filename),
       ),
