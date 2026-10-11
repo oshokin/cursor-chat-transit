@@ -7,6 +7,7 @@ import { ordinalName } from './bundle-names';
 import type { ConversationLayout } from './bundle-writer';
 import { rewriteCanvasReferences } from './canvases';
 import { remapJsonObject } from './chat-json';
+import { remapFamilyRecord } from './chat-family';
 import { sqlText } from './core';
 import * as db from './db';
 import { headerUpsertSql, isCasConflict, itemCasReplaceSql } from './db-write';
@@ -109,7 +110,11 @@ export async function writeOne(opts: {
     await rememberResources(opts);
 
     const header = asObject(
-      parseBoundedJson(await readFile(path.join(dir, 'header.json')), 'header'),
+      parseBoundedJson(
+        await readFile(path.join(dir, 'header.json')),
+        'header',
+        opts.ctx.maxJsonProperties,
+      ),
       'header',
     ) as unknown as ComposerHeader;
 
@@ -166,6 +171,7 @@ export async function writeOne(opts: {
           opts.ctx.signal,
           undefined,
           opts.ctx.maxJsonProperties,
+          'bubble',
         )) {
           const bubble = asObject(rec.value, 'bubble');
           const sourceBubble = String(bubble.bubbleId);
@@ -373,6 +379,8 @@ export async function assembleComposer(
     parseBoundedJson(
       await readFile(path.join(dir, 'composer.json')),
       'composer',
+      opts.ctx.maxJsonProperties,
+      'composer',
     ),
     'composer',
   );
@@ -544,6 +552,37 @@ export async function remapValue(
     string,
     unknown
   >;
+
+  const familyIds = new Set<string>();
+  const info = record.subagentInfo;
+
+  if (info && typeof info === 'object' && !Array.isArray(info)) {
+    for (const key of ['parentComposerId', 'rootParentConversationId']) {
+      const value = (info as Record<string, unknown>)[key];
+
+      if (typeof value === 'string') familyIds.add(value);
+    }
+  }
+
+  if (Array.isArray(record.subagentComposerIds)) {
+    for (const id of record.subagentComposerIds)
+      if (typeof id === 'string') familyIds.add(id);
+  }
+
+  if (familyIds.size) {
+    const familyMap = new Map<string, string>();
+
+    await opts.work.queryLines(
+      `SELECT json_array(source_id, target_id) FROM chat WHERE source_id IN (${[...familyIds].map(sqlText).join(',')});`,
+      (line) => {
+        const pair = JSON.parse(line) as [string, string];
+
+        familyMap.set(pair[0], pair[1]);
+      },
+    );
+
+    rewritten = remapFamilyRecord(rewritten, familyMap);
+  }
 
   if (maps) {
     rewritten = rewritePlanReferences(rewritten, maps.plans) as Record<

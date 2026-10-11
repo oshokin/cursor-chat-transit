@@ -27,7 +27,13 @@ export async function checkManagedNodes(
   nodes: ManagedNode[],
   /** Refresh the UI as results arrive. */
   update: (node: ManagedNode, row: StatisticsUpdate) => void,
-): Promise<void> {
+  options?: {
+    /** Notification title. */
+    title?: string;
+    /** Operation log name. */
+    kind?: 'check managed chats' | 'find chats with transfer issues';
+  },
+): Promise<'done' | 'cancelled' | undefined> {
   const groups = groupManagedNodes(nodes);
 
   if (!groups.length) {
@@ -42,8 +48,11 @@ export async function checkManagedNodes(
 
   const needsRestart = runtime.uiState.importNeedsRestart;
 
-  await withLock(context, async () => {
-    const log = startOperationLog(operations, 'check managed chats');
+  return withLock(context, async () => {
+    const log = startOperationLog(
+      operations,
+      options?.kind || 'check managed chats',
+    );
 
     runtime.progressTimer = setInterval(
       () => setUi({ timingLabel: `Elapsed ${humanDuration(log.elapsedMs())}` }),
@@ -63,7 +72,7 @@ export async function checkManagedNodes(
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: 'Checking chats',
+          title: options?.title || 'Checking chats',
           cancellable: true,
         },
         async (
@@ -131,6 +140,7 @@ export async function checkManagedNodes(
       );
 
       log.finish(failed ? 'incomplete' : 'completed');
+      if (options?.kind === 'find chats with transfer issues') return 'done';
 
       setUi({
         status: failed ? 'incomplete' : 'completed',
@@ -140,6 +150,9 @@ export async function checkManagedNodes(
     } catch (error) {
       log.finish(isAbort(error) ? 'cancelled' : 'failed', undefined, error);
       if (!isAbort(error)) throw error;
+
+      if (options?.kind === 'find chats with transfer issues')
+        return 'cancelled';
 
       setUi({
         status: 'cancelled',

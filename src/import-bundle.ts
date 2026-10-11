@@ -256,6 +256,7 @@ CREATE TABLE dep (
               ),
             ),
             'header',
+            ctx.maxJsonProperties,
           ),
           'header',
         );

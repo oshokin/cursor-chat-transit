@@ -2655,3 +2655,83 @@ test(
     );
   },
 );
+
+test(
+  'deleting a subagent removes it from the kept parent',
+  { skip },
+  async (t) => {
+    const { ctx, entries, globalDbPath, read } = await setup(t);
+
+    const parentBody = {
+      composerId: A,
+      text: 'keep parent',
+      subagentComposerIds: [D],
+    };
+
+    const childBody = {
+      composerId: D,
+      subagentInfo: { parentComposerId: A },
+    };
+
+    await execSqlScript({
+      ...ctx,
+      database: globalDbPath,
+      sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(parentBody))} WHERE key=${sqlText(`composerData:${A}`)}; INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)},${sqlText(JSON.stringify(childBody))}); UPDATE ItemTable SET value=${sqlText(
+        JSON.stringify({
+          allComposers: [
+            {
+              composerId: A,
+              workspaceIdentifier: { id: 'one' },
+              subagentComposerIds: [D],
+            },
+            {
+              composerId: D,
+              workspaceIdentifier: { id: 'one' },
+              subagentInfo: { parentComposerId: A },
+            },
+            { composerId: C, workspaceIdentifier: { id: 'two' } },
+          ],
+        }),
+      )} WHERE key='composer.composerHeaders';`,
+    });
+
+    await execSqlScript({
+      ...ctx,
+      database: entries[0].workspaceDbPath,
+      sql: `UPDATE ItemTable SET value=${sqlText(
+        JSON.stringify({
+          allComposers: [
+            { composerId: A, subagentComposerIds: [D] },
+            { composerId: D },
+            { composerId: B },
+          ],
+          selectedComposerIds: [A, D, B],
+          lastFocusedComposerIds: [A],
+        }),
+      )} WHERE key='composer.composerData';`,
+    });
+
+    const result = await deleteSelectedChats(ctx, entries, [
+      { workspace: entries[0], ids: [D] },
+    ]);
+
+    assert.equal(result.error, undefined);
+    assert.ok(result.deleted.some((line) => line.endsWith(D)));
+
+    const stored = await read(
+      globalDbPath,
+      `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+    );
+
+    assert.equal(stored.includes(D), false);
+    assert.match(stored, /keep parent/);
+
+    const list = await read(
+      entries[0].workspaceDbPath,
+      "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+    );
+
+    assert.equal(list.includes(D), false);
+    assert.match(list, new RegExp(A));
+  },
+);

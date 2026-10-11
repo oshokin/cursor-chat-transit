@@ -504,8 +504,7 @@ test(
       )},${sqlText(
         JSON.stringify({
           _v: 11,
-          conversationState: '',
-          futureMessages: [{ text: 'keep' }],
+          conversationState: 'not-a-walked-state',
           fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
         }),
       )}); INSERT INTO cursorDiskKV VALUES(${sqlText(

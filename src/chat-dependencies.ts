@@ -66,9 +66,6 @@ export function blobKeysFromComposerBody(bodyText: string): {
   if (!supportedComposerVersion(version))
     return { status: 'unsupported', keys: [] };
 
-  if (Array.isArray(rec.futureMessages) && rec.futureMessages.length > 0)
-    return { status: 'unsupported', keys: [] };
-
   if (
     state === undefined ||
     state === null ||

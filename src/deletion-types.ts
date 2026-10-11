@@ -39,6 +39,8 @@ export type ManagedDeleteRequest =
        * Rechecked before any write. A later manual check does not keep it.
        */
       requireEmpty?: true;
+      /** Parent kept because a subagent was not selected. */
+      note?: string;
     }
   | {
       /** Delete these chats and keep the workspace directory. */
@@ -47,6 +49,8 @@ export type ManagedDeleteRequest =
       workspace: WorkspaceEntry;
       /** Composer ids. Not inferred from "all children were checked". */
       ids: string[];
+      /** Parent kept because a subagent was not selected. */
+      note?: string;
     };
 
 /** One checked target after a read-only preflight. Message bodies are not stored. */
@@ -74,6 +78,8 @@ export interface ManagedPlanTarget {
   chatFingerprint?: string;
   /** Select empty workspaces asked for a workspace that still has no history. */
   requireEmpty?: true;
+  /** The open window: its chats may be deleted and its storage directory stays. */
+  storageKept?: true;
 }
 
 /** Read-only plan. Execution rejects it when the profile or token no longer matches. */
@@ -87,6 +93,8 @@ export interface ManagedDeletePlan {
    * Keyed by `globalDbPath`. Message bodies are not stored.
    */
   globalTokens?: Record<string, string>;
+  /** Parents withheld because a descendant was not selected. */
+  keptNote?: string;
 }
 
 /** Per-target result. SQL success is not workspace deletion. */

@@ -7,6 +7,7 @@ import {
   checkDeletionTransaction,
   deleteHeaderReferences,
   deleteMessageRows,
+  detachDeletedSubagents,
 } from './deletion-sql';
 import type { DeleteResult, DeleteTarget } from './deletion-types';
 import { SqliteSession } from './sqlite-session';
@@ -126,6 +127,8 @@ export async function deleteSelectedChats(
                 resolved.globals.get(workspace.globalDbPath)!,
                 resolved.headers.get(workspace.workspaceDbPath)!,
               );
+
+              await detachDeletedSubagents(session, selected, ctx.signal);
 
               await deleteHeaderReferences(
                 session,

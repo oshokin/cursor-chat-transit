@@ -1116,3 +1116,98 @@ for (const scenario of [
       );
     },
   );
+
+test(
+  'the export worker rejects a composer above the configured property budget',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const { sqlText } = await import('../src/core');
+    const { runTransfer } = await import('../src/transfer-process');
+
+    const body: Record<string, unknown> = {
+      _v: 18,
+      composerId: A,
+      fullConversationHeadersOnly: [],
+    };
+
+    for (let index = 0; index < 100_001; index += 1) body[`k${index}`] = 1;
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE ItemTable SET value=${sqlText(
+        JSON.stringify({
+          allComposers: [
+            {
+              composerId: A,
+              workspaceIdentifier: {
+                id: workspace.storageId,
+                uri: workspace.identity?.uri,
+              },
+            },
+          ],
+        }),
+      )} WHERE key='composer.composerHeaders'; INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${A}`)},${sqlText(JSON.stringify(body))});`,
+    });
+
+    await assert.rejects(
+      () =>
+        runTransfer(
+          {
+            ...ctx,
+            workspace,
+            kind: 'export',
+            filePath: path.join(workspace.storageRoot, 'budget.zip'),
+            selectedIds: [A],
+            maxJsonProperties: 100_000,
+          },
+          {},
+        ),
+      /properties/,
+    );
+  },
+);
+
+test(
+  'the export worker uses the configured temporary directory',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const { sqlText } = await import('../src/core');
+    const { runTransfer } = await import('../src/transfer-process');
+    const missing = path.join(workspace.storageRoot, 'missing-temp');
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE ItemTable SET value=${sqlText(
+        JSON.stringify({
+          allComposers: [
+            {
+              composerId: A,
+              workspaceIdentifier: {
+                id: workspace.storageId,
+                uri: workspace.identity?.uri,
+              },
+            },
+          ],
+        }),
+      )} WHERE key='composer.composerHeaders'; INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${A}`)},${sqlText(JSON.stringify({ _v: 18, composerId: A, fullConversationHeadersOnly: [] }))});`,
+    });
+
+    await assert.rejects(
+      () =>
+        runTransfer(
+          {
+            ...ctx,
+            workspace,
+            kind: 'export',
+            filePath: path.join(workspace.storageRoot, 'temp.zip'),
+            selectedIds: [A],
+            temporaryDirectory: missing,
+          },
+          {},
+        ),
+      new RegExp(missing.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  },
+);

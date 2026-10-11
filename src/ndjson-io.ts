@@ -3,7 +3,11 @@ import { createReadStream } from 'node:fs';
 import { mkdir, open, type FileHandle } from 'node:fs/promises';
 import { partPath } from './bundle-names';
 import { MAX_JSON_RECORD_BYTES, NDJSON_PART_BYTES } from './bundle-limits';
-import { assertBoundedRecord, parseBoundedJson } from './record-json';
+import {
+  assertBoundedRecord,
+  parseBoundedJson,
+  type JsonEnvelope,
+} from './record-json';
 
 /** One decoded NDJSON value plus the UTF-8 size of its line. */
 export interface NdjsonRecord {
@@ -23,8 +27,10 @@ export async function* readNdjson(
   signal?: AbortSignal,
   /** Called with the number of bytes written. */
   onBytes?: (processed: number) => void,
-  /** Property budget for one user payload. Bubble envelopes are not charged. */
+  /** Property budget for one user payload. */
   maxProperties?: number,
+  /** Unwrap a known archive record before counting properties. */
+  envelope?: JsonEnvelope,
 ): AsyncGenerator<NdjsonRecord> {
   transferEvent({ action: 'Read NDJSON', status: 'started', path: filePath });
   let readBytes = 0;
@@ -55,7 +61,7 @@ export async function* readNdjson(
     }
 
     yield {
-      value: parseBoundedJson(line, label, maxProperties),
+      value: parseBoundedJson(line, label, maxProperties, envelope),
       bytes: line.length,
     };
   };
@@ -157,6 +163,8 @@ export class NdjsonPartWriter {
     private readonly signal?: AbortSignal,
     /** Property budget for one user payload. */
     private readonly maxProperties?: number,
+    /** Unwrap a known archive record before counting properties. */
+    private readonly envelope?: JsonEnvelope,
   ) {}
 
   /** Files written so far, in order. */
@@ -170,7 +178,14 @@ export class NdjsonPartWriter {
     value: unknown,
   ): Promise<void> {
     this.signal?.throwIfAborted();
-    assertBoundedRecord(value, 'JSON record', this.maxProperties);
+
+    assertBoundedRecord(
+      value,
+      'JSON record',
+      this.maxProperties,
+      this.envelope,
+    );
+
     const line = Buffer.from(`${JSON.stringify(value)}\n`, 'utf8');
 
     if (line.length > MAX_JSON_RECORD_BYTES) {

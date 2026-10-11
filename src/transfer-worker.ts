@@ -181,6 +181,8 @@ async function run(
     busyTimeoutMs: job.busyTimeoutMs,
     plansDir: job.plansDir,
     canvasesDir: job.canvasesDir,
+    maxJsonProperties: job.maxJsonProperties,
+    temporaryDirectory: job.temporaryDirectory,
     signal: abort.signal,
     onPhase: (
       phase,

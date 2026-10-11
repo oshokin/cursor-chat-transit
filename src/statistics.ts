@@ -14,7 +14,13 @@ import { WorkspaceHeaderReader } from './workspace-header-reader';
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
   TransferContext,
-  'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs' | 'onNote'
+  | 'executable'
+  | 'initFile'
+  | 'timeoutMs'
+  | 'busyTimeoutMs'
+  | 'onNote'
+  | 'maxJsonProperties'
+  | 'temporaryDirectory'
 > & {
   /** Source assessment: presence for workspace filtering, full health for chat selection. */
   deepCheck?: boolean;

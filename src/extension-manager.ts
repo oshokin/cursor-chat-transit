@@ -22,6 +22,15 @@ import { workspaceStatisticsKey, type StatisticsUpdate } from './statistics';
 import { runTransfer } from './transfer-process';
 import type { EmptyWorkspaceScan } from './deletion-types';
 import type { ComposerHeader, WorkspaceEntry } from './types';
+import {
+  buildFamily,
+  descendantCount,
+  directChildren,
+  keptParentNote,
+  narrowDeletion,
+  topLevelChats,
+  type FamilyGraph,
+} from './chat-family';
 import { workspacePresentation } from './workspace-presentation';
 
 /** A native, lazy tree. Its lifetime and its jobs do not depend on keyboard focus. */
@@ -36,6 +45,17 @@ export class ChatManager
   private readonly lists = new Map<string, Promise<ManagedNode[]>>();
   /** Check results keyed by workspace or chat. */
   private readonly results = new Map<string, StatisticsUpdate>();
+  /** Headers for one workspace, used to place subagents without another read. */
+  private readonly headerCache = new Map<string, ComposerHeader[]>();
+  /** Family links for those headers. */
+  private readonly familyCache = new Map<string, FamilyGraph>();
+  /** Workspace row order. Name is the default; Recent keeps the previous order. */
+  private workspaceSort: 'name' | 'recent' = 'name';
+  /** Sorted copy of one visible root array. The source inventory is not reordered. */
+  private orderedRoots?: {
+    source: ManagedNode[];
+    value: ManagedNode[];
+  };
   /** Cancels chat loads when the view is disposed. */
   private loading = new AbortController();
   /** True after dispose. Deletion cancel must not replace the controller. */
@@ -65,7 +85,7 @@ export class ChatManager
     const parent = { workspace: node.workspace };
 
     this.operationMessage = undefined;
-    if (!node.chat && this.isCurrentRoot(node)) return;
+
     if (!checked && node.chat && this.selection.has(parent)) {
       const siblings = await this.getChildren(parent);
 
@@ -74,11 +94,47 @@ export class ChatManager
         throw new Error(
           'Unable to update selection. Refresh the workspace and try again.',
         );
+
+      const headers =
+        this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
+      const excluded = new Set([
+        node.chat.composerId,
+        ...this.descendantHeaders(headers, node.chat.composerId).map(
+          (header) => header.composerId,
+        ),
+      ]);
+
       this.selection.set(parent, false);
-      for (const sibling of siblings)
-        if (sibling.chat?.composerId !== node.chat.composerId)
-          this.selection.set(sibling, true);
-    } else this.selection.set(node, checked);
+
+      const remainder = headers.length
+        ? headers.map((chat) => ({ workspace: node.workspace, chat }))
+        : siblings;
+
+      for (const item of remainder) {
+        const id = item.chat?.composerId;
+
+        if (!id || excluded.has(id)) continue;
+        this.selection.set(item, true);
+      }
+    } else {
+      this.selection.set(node, checked);
+
+      if (node.chat) {
+        const headers =
+          this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
+        for (const child of this.descendantHeaders(
+          headers,
+          node.chat.composerId,
+        ))
+          this.selection.set(
+            { workspace: node.workspace, chat: child },
+            checked,
+          );
+      }
+    }
+
     this.publishMessage();
     this.changed.fire(undefined);
   }
@@ -87,9 +143,7 @@ export class ChatManager
     this.operationMessage = undefined;
     const roots = await this.getChildren();
 
-    this.selection.selectWorkspaces(
-      roots.filter((node) => !this.isCurrentRoot(node)),
-    );
+    this.selection.selectWorkspaces(roots);
 
     this.publishMessage();
     this.changed.fire(undefined);
@@ -132,8 +186,35 @@ export class ChatManager
     try {
       const checked = this.selection.values();
 
-      const requests = requestsFromNodes(
-        checked.length ? checked : node && !node.error ? [node] : [],
+      const chosen = checked.length
+        ? checked
+        : node && !node.error
+          ? [node]
+          : [];
+
+      const narrowed = this.withoutKeptParents(chosen);
+
+      if (!chosen.length) {
+        await deleteManagedChats(this.context, this.operations, []);
+
+        return;
+      }
+
+      if (!narrowed.nodes.length) {
+        this.operationMessage =
+          narrowed.note || 'Select workspace data or individual chats.';
+
+        this.publishMessage();
+
+        return;
+      }
+
+      if (narrowed.note) this.operationMessage = narrowed.note;
+
+      const requests = requestsFromNodes(narrowed.nodes).map((request) =>
+        narrowed.note && request.kind === 'chats'
+          ? { ...request, note: narrowed.note }
+          : request,
       );
 
       if (await deleteManagedChats(this.context, this.operations, requests))
@@ -291,6 +372,174 @@ export class ChatManager
     );
   }
 
+  /**
+   * Replace the checked set with chats whose transfer health is incomplete, missing, or empty.
+   * Ready, unknown, and failed rows stay unchecked. A selection edit during the scan is kept.
+   */
+  async selectIssues(): Promise<ManagedNode | undefined> {
+    const generation = this.generation;
+    const revision = this.selection.revision;
+
+    this.operationMessage = 'Finding chats with transfer issues…';
+    this.publishMessage();
+    this.roots ??= this.loadWorkspaces(this.loading.signal);
+    const roots = await this.roots;
+    const chats: ManagedNode[] = [];
+
+    for (const root of roots) {
+      if (root.error) continue;
+      await this.getChildren(root);
+
+      const headers =
+        this.headerCache.get(workspaceStatisticsKey(root.workspace)) || [];
+
+      for (const chat of headers)
+        chats.push({ workspace: root.workspace, chat });
+    }
+
+    if (!chats.length) {
+      this.operationMessage =
+        'No chats with transfer issues. Selection unchanged.';
+
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    const status = await checkManagedNodes(
+      this.context,
+      this.operations,
+      chats,
+      (node, row) => {
+        this.results.set(this.key(node), row);
+      },
+      {
+        title: 'Finding chats with transfer issues…',
+        kind: 'find chats with transfer issues',
+      },
+    );
+
+    if (status !== 'done') {
+      this.operationMessage = undefined;
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    if (
+      generation !== this.generation ||
+      revision !== this.selection.revision
+    ) {
+      this.operationMessage =
+        'Selection changed while checking. Run the command again to apply the results.';
+
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    const counts = { incomplete: 0, missing: 0, empty: 0, unchecked: 0 };
+    const picked: ManagedNode[] = [];
+
+    for (const chat of chats) {
+      const row = this.results.get(this.key(chat));
+      const health = row?.health;
+
+      if (
+        row?.failed ||
+        !health ||
+        health === 'unknown' ||
+        health === 'ready'
+      ) {
+        if (row?.failed || !health || health === 'unknown')
+          counts.unchecked += 1;
+
+        continue;
+      }
+
+      if (
+        health === 'incomplete' ||
+        health === 'missing' ||
+        health === 'empty'
+      ) {
+        counts[health] += 1;
+        picked.push(chat);
+      }
+    }
+
+    if (!picked.length) {
+      this.operationMessage = counts.unchecked
+        ? `No chats with transfer issues. Selection unchanged. ${counts.unchecked} could not be checked.`
+        : 'No chats with transfer issues. Selection unchanged.';
+
+      this.publishMessage();
+
+      return undefined;
+    }
+
+    this.selection.clear();
+
+    for (const chat of picked) this.selection.set(chat, true);
+    this.operationMessage = issueSelectionMessage(counts);
+    this.publishMessage();
+    this.changed.fire(undefined);
+
+    return picked[0];
+  }
+
+  /** Drop a selected parent when one of its subagents is not selected. */
+  private withoutKeptParents(nodes: ManagedNode[]): {
+    nodes: ManagedNode[];
+    note?: string;
+  } {
+    const chats = nodes.filter((node) => node.chat);
+    const roots = nodes.filter((node) => !node.chat);
+
+    if (!chats.length) return { nodes };
+    const kept: Array<{ unselected: number }> = [];
+    const drop = new Set<string>();
+    const groups = new Map<string, ManagedNode[]>();
+
+    for (const chat of chats) {
+      const key = chat.workspace.workspaceDbPath;
+      const list = groups.get(key) || [];
+
+      list.push(chat);
+      groups.set(key, list);
+    }
+
+    for (const group of groups.values()) {
+      const headers =
+        this.headerCache.get(workspaceStatisticsKey(group[0].workspace)) ||
+        group.map((node) => node.chat!);
+
+      const narrowed = narrowDeletion(
+        headers,
+        group.map((node) => node.chat!.composerId),
+      );
+
+      for (const row of narrowed.kept) {
+        drop.add(`${group[0].workspace.workspaceDbPath}\0${row.composerId}`);
+        kept.push(row);
+      }
+    }
+
+    const note = keptParentNote(kept);
+
+    return {
+      nodes: [
+        ...roots,
+        ...chats.filter(
+          (node) =>
+            !drop.has(
+              `${node.workspace.workspaceDbPath}\0${node.chat!.composerId}`,
+            ),
+        ),
+      ],
+      ...(note ? { note } : {}),
+    };
+  }
+
   /** Physical database of the workspace open in this window. */
   private isCurrentRoot(node: ManagedNode): boolean {
     if (node.chat || node.error) return false;
@@ -332,7 +581,12 @@ export class ChatManager
     private readonly operations: TransitLog,
     /** Native view message, independent of the shared transfer sidebar. */
     private readonly listMessage: (message: string) => void = () => {},
-  ) {}
+  ) {
+    this.workspaceSort =
+      context.globalState?.get('manageWorkspaceSort') === 'recent'
+        ? 'recent'
+        : 'name';
+  }
 
   /** Stop loads and release the tree event. */
   dispose(): void {
@@ -352,6 +606,8 @@ export class ChatManager
     this.lists.clear();
     this.selection.clear();
     this.results.clear();
+    this.headerCache.clear();
+    this.familyCache.clear();
     this.changed.fire(undefined);
   }
 
@@ -394,6 +650,141 @@ export class ChatManager
     });
   }
 
+  /** Drop check labels after the property budget changes. Selection stays. */
+  invalidateCheckResults(): void {
+    this.results.clear();
+    this.changed.fire(undefined);
+  }
+
+  /** Remember the workspace order without rereading Cursor. */
+  sortWorkspaces(mode: 'name' | 'recent'): void {
+    this.workspaceSort = mode;
+    this.orderedRoots = undefined;
+    void this.context.globalState.update('manageWorkspaceSort', mode);
+    this.changed.fire(undefined);
+  }
+
+  /** Direct child headers already loaded for this chat. */
+  private directChildHeaders(node: ManagedNode): ComposerHeader[] {
+    if (!node.chat) return [];
+
+    return directChildren(
+      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [],
+      node.chat.composerId,
+    );
+  }
+
+  /** Confirmed descendants of one chat, not including the chat itself. */
+  private descendantHeaders(
+    headers: ComposerHeader[],
+    composerId: string,
+  ): ComposerHeader[] {
+    const graph = buildFamily(headers);
+    const out: ComposerHeader[] = [];
+    const stack = [...(graph.nodes.get(composerId)?.childComposerIds || [])];
+    const seen = new Set<string>();
+
+    while (stack.length) {
+      const id = stack.pop();
+
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const header = headers.find((item) => item.composerId === id);
+
+      if (header) out.push(header);
+
+      for (const child of graph.nodes.get(id)?.childComposerIds || [])
+        stack.push(child);
+    }
+
+    return out;
+  }
+
+  /** Subagent count or type shown beside a chat. */
+  private familyDescription(node: ManagedNode): string {
+    if (!node.chat) return '';
+    const key = workspaceStatisticsKey(node.workspace);
+    const graph = this.familyCache.get(key);
+    const info = graph?.nodes.get(node.chat.composerId);
+
+    if (!info || !graph) return '';
+    if (info.relation === 'unresolved') return 'Parent unavailable';
+    if (info.relation === 'child')
+      return info.subagentTypeName
+        ? subagentTypeLabel(info.subagentTypeName)
+        : 'Subagent';
+    const count = descendantCount(graph, node.chat.composerId);
+
+    return count ? `${count} subagent${count === 1 ? '' : 's'}` : '';
+  }
+
+  /** Selected parent whose descendants are only partly checked. */
+  private partialSelection(
+    node: ManagedNode,
+  ): { label: string; unselected: number } | undefined {
+    if (!node.chat || !this.selection.has(node)) return undefined;
+
+    const headers =
+      this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
+    const descendants = this.descendantHeaders(headers, node.chat.composerId);
+
+    if (!descendants.length) return undefined;
+
+    const unselected = descendants.filter(
+      (header) =>
+        !this.selection.has({ workspace: node.workspace, chat: header }),
+    ).length;
+
+    if (!unselected) return undefined;
+    const total = descendants.length + 1;
+
+    return {
+      label: `${total - unselected} of ${total} selected`,
+      unselected,
+    };
+  }
+
+  /** Name order is cached for one visible array. Recent keeps the loader order. */
+  private orderRoots(visible: ManagedNode[]): ManagedNode[] {
+    if (this.workspaceSort !== 'name') return visible;
+    if (this.orderedRoots?.source === visible) return this.orderedRoots.value;
+
+    const value = [...visible].sort((left, right) =>
+      this.compareWorkspaces(left, right),
+    );
+
+    this.orderedRoots = { source: visible, value };
+
+    return value;
+  }
+
+  /** Name order. The current window stays in its alphabetical place. */
+  private compareWorkspaces(left: ManagedNode, right: ManagedNode): number {
+    const a = workspacePresentation(left.workspace);
+    const b = workspacePresentation(right.workspace);
+
+    const name = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    }).compare(a.name, b.name);
+
+    if (name) return name;
+
+    const pathOrder = new Intl.Collator(undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    }).compare(a.path, b.path);
+
+    if (pathOrder) return pathOrder;
+
+    return left.workspace.workspaceDbPath < right.workspace.workspaceDbPath
+      ? -1
+      : left.workspace.workspaceDbPath > right.workspace.workspaceDbPath
+        ? 1
+        : 0;
+  }
+
   /** Stable identity for a workspace row or one of its chats. */
   /** Tree row being acted on. */
   private key(node: ManagedNode): string {
@@ -414,14 +805,18 @@ export class ChatManager
           ? 'Unable to load chats'
           : node.chat?.name ||
             (node.chat ? 'Untitled chat' : presentation.name),
-      node.chat || node.error
+      node.error
         ? vscode.TreeItemCollapsibleState.None
-        : vscode.TreeItemCollapsibleState.Collapsed,
+        : node.chat
+          ? this.directChildHeaders(node).length
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None
+          : vscode.TreeItemCollapsibleState.Collapsed,
     );
 
     const current = this.isCurrentRoot(node);
 
-    if (!node.error && !current)
+    if (!node.error)
       item.checkboxState = this.selection.has(node)
         ? vscode.TreeItemCheckboxState.Checked
         : vscode.TreeItemCheckboxState.Unchecked;
@@ -446,7 +841,13 @@ export class ChatManager
     item.description =
       node.error ||
       (node.chat
-        ? result?.detail || 'Not checked'
+        ? [
+            result?.detail || 'Not checked',
+            this.familyDescription(node),
+            this.partialSelection(node)?.label,
+          ]
+            .filter(Boolean)
+            .join(' · ')
         : [
             current ? 'Current window' : undefined,
             workspaceSelected ? 'Workspace data selected' : result?.detail,
@@ -456,13 +857,18 @@ export class ChatManager
             .filter(Boolean)
             .join(' · '));
 
+    const partial = this.partialSelection(node);
+
     item.tooltip = [
       node.chat?.name || presentation.name,
       presentation.path,
       `Storage: ${node.workspace.workspaceDbPath}`,
       node.chat ? `Chat: ${node.chat.composerId}` : '',
+      partial
+        ? `This chat is selected; ${partial.unselected} subagent${partial.unselected === 1 ? ' is' : 's are'} not selected`
+        : '',
       current
-        ? 'This workspace is open in the current window. Its chats can be deleted; its workspace data cannot.'
+        ? 'Its chats can be selected and deleted. Workspace storage is kept while this window is open.'
         : workspaceSelected
           ? 'Workspace data selected. Project files are kept.'
           : result?.detail ||
@@ -486,7 +892,8 @@ export class ChatManager
 
       const roots = await this.roots;
 
-      return this.showAll ||
+      const visible =
+        this.showAll ||
         !roots.some(
           (
             /** Directory that contains the extracted or staged archive. */
@@ -495,20 +902,33 @@ export class ChatManager
             this.results.get(this.key(root))?.failed ||
             this.results.get(this.key(root))?.hide,
         )
-        ? roots
-        : roots.filter(
-            (
-              /** Directory that contains the extracted or staged archive. */
-              root,
-            ) =>
-              !(
-                this.results.get(this.key(root))?.failed ||
-                this.results.get(this.key(root))?.hide
-              ),
-          );
+          ? roots
+          : roots.filter(
+              (
+                /** Directory that contains the extracted or staged archive. */
+                root,
+              ) =>
+                !(
+                  this.results.get(this.key(root))?.failed ||
+                  this.results.get(this.key(root))?.hide
+                ),
+            );
+
+      return this.orderRoots(visible);
     }
 
-    if (node.chat || node.error) return [];
+    if (node.error) return [];
+
+    if (node.chat) {
+      const headers =
+        this.headerCache.get(workspaceStatisticsKey(node.workspace)) || [];
+
+      return directChildren(headers, node.chat.composerId).map((chat) => ({
+        workspace: node.workspace,
+        chat,
+      }));
+    }
+
     const key = workspaceStatisticsKey(node.workspace);
     let pending = this.lists.get(key);
 
@@ -548,8 +968,13 @@ export class ChatManager
       );
 
       log.finish('completed');
+      const ordered = orderedChatHeaders(result.allComposers);
+      const key = workspaceStatisticsKey(workspace);
 
-      return orderedChatHeaders(result.allComposers).map((chat) => ({
+      this.headerCache.set(key, ordered);
+      this.familyCache.set(key, buildFamily(ordered));
+
+      return topLevelChats(ordered).map((chat) => ({
         workspace,
         chat,
       }));
@@ -665,15 +1090,28 @@ export class ChatManager
     }
   }
 
-  /** Tree reveal needs an actual root row, not a synthetic command item. */
+  /** Tree reveal needs the real parent row, not a synthetic command item. */
   async getParent(node: ManagedNode): Promise<ManagedNode | undefined> {
     if (!node.chat && !node.error) return undefined;
 
-    return (await this.getChildren()).find(
-      (/** Directory that contains the extracted or staged archive. */ root) =>
+    const workspace = (await this.getChildren()).find(
+      (root) =>
         workspaceStatisticsKey(root.workspace) ===
         workspaceStatisticsKey(node.workspace),
     );
+
+    if (!node.chat || node.error || !workspace) return workspace;
+    const key = workspaceStatisticsKey(node.workspace);
+
+    const parentId = this.familyCache
+      .get(key)
+      ?.nodes.get(node.chat.composerId)?.parentComposerId;
+
+    const parent = (this.headerCache.get(key) || []).find(
+      (header) => header.composerId === parentId,
+    );
+
+    return parent ? { workspace: node.workspace, chat: parent } : workspace;
   }
 
   /** Search includes collapsed workspaces; loaded header lists are reused by tree expansion. */
@@ -831,6 +1269,32 @@ export class ChatManager
   }
 }
 
+/** Display label for a stored subagent type. Unknown names stay as stored. */
+function issueSelectionMessage(counts: {
+  incomplete: number;
+  missing: number;
+  empty: number;
+  unchecked: number;
+}): string {
+  const selected = counts.incomplete + counts.missing + counts.empty;
+
+  const parts = [
+    counts.incomplete ? `${counts.incomplete} incomplete` : '',
+    counts.missing ? `${counts.missing} with no stored data` : '',
+    counts.empty ? `${counts.empty} empty` : '',
+  ].filter(Boolean);
+
+  return `${selected} chat${selected === 1 ? '' : 's'} selected: ${parts.join(', ')}.${counts.unchecked ? ` ${counts.unchecked} could not be checked.` : ''}`;
+}
+
+function subagentTypeLabel(name: string): string {
+  if (name === 'explore') return 'Explore';
+  if (name === 'generalPurpose') return 'General purpose';
+  if (name === 'shell') return 'Shell';
+
+  return name;
+}
+
 /** Keep management inside the existing container and use familiar native actions. */
 export function registerManager(
   /** Extension host context that owns the tree view. */
@@ -896,6 +1360,10 @@ export function registerManager(
         ].some((key) => event.affectsConfiguration(`cursorChatTransit.${key}`))
       )
         manager.refresh();
+      if (
+        event.affectsConfiguration('cursorChatTransit.limits.maxJsonProperties')
+      )
+        manager.invalidateCheckResults();
     }),
   );
 
@@ -906,8 +1374,20 @@ export function registerManager(
           view.reveal(node, { select: true, focus: true, expand: true }),
         ),
       manageRefresh: () => manager.refresh(),
+      manageSortName: () => manager.sortWorkspaces('name'),
+      manageSortRecent: () => manager.sortWorkspaces('recent'),
       manageCheck: (node) => manager.check(node || view.selection[0]),
       manageSelectAll: () => manager.selectAll(),
+      manageSelectIssues: async () => {
+        const first = await manager.selectIssues();
+
+        if (first)
+          await view.reveal(first, {
+            select: false,
+            focus: false,
+            expand: false,
+          });
+      },
       manageSelectEmpty: async () => {
         const first = await manager.selectEmpty();
 

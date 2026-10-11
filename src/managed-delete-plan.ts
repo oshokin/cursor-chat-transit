@@ -103,6 +103,15 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
 
   const ids = workspaces.map((target) => target.workspace.storageId);
 
+  const keptParts = [
+    plan.targets.some((target) => target.storageKept)
+      ? "The current workspace's storage will be kept."
+      : '',
+    plan.keptNote || '',
+  ].filter(Boolean);
+
+  const kept = keptParts.length ? `\n\n${keptParts.join('\n\n')}` : '';
+
   if (
     workspaces.length > 0 &&
     !chats.length &&
@@ -173,7 +182,7 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
     return {
       title: `Delete ${total} selected chat${total === 1 ? '' : 's'}?`,
       confirm: 'Delete chats',
-      detail: `Workspace data is kept. Project files are kept.\n\n${lines}${chats.length > 20 ? `\nAnd ${chats.length - 20} more.` : ''}\n\nClose all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
+      detail: `Workspace data is kept. Project files are kept.${kept}\n\n${lines}${chats.length > 20 ? `\nAnd ${chats.length - 20} more.` : ''}\n\nClose all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
     };
   }
 
@@ -190,7 +199,7 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
       ? `Delete data for ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} and ${individual} individual chat${individual === 1 ? '' : 's'}?`
       : `Delete data for ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}?`,
     confirm: 'Delete selected data',
-    detail: `Saved Cursor state, local resources and extension data will be deleted for the ${workspaces.length} selected workspace${workspaces.length === 1 ? '' : 's'}.\n\nWorkspace data:\n${workspaceLines.slice(0, 20).join('\n')}${chatSection}${more}\n\nProject files are kept. Close all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
+    detail: `Saved Cursor state, local resources and extension data will be deleted for the ${workspaces.length} selected workspace${workspaces.length === 1 ? '' : 's'}.${kept}\n\nWorkspace data:\n${workspaceLines.slice(0, 20).join('\n')}${chatSection}${more}\n\nProject files are kept. Close all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
   };
 }
 

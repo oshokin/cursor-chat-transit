@@ -1,4 +1,5 @@
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { withoutDeletedSubagents } from './chat-family';
 import { bubbleRange, sqlText } from './core';
 import { inspectDatabase } from './db';
 import { resolveComposers, type HeaderSource } from './db-headers';
@@ -159,7 +160,11 @@ export async function deleteHeaderReferences(
         composers as Array<{
           composerId: string;
         }>
-      ).filter((row) => !ids.has(row.composerId));
+      )
+        .filter((row) => !ids.has(row.composerId))
+        .map((row) =>
+          withoutDeletedSubagents(row as Record<string, unknown>, ids),
+        );
     }
 
     for (const field of ['selectedComposerIds', 'lastFocusedComposerIds']) {
@@ -184,6 +189,78 @@ export async function deleteHeaderReferences(
     await session.exec(
       `DELETE FROM ${schema}.composerHeaders WHERE composerId IN (SELECT id FROM selected);`,
     );
+}
+
+/** Read one KV value when it is inside the supported size. */
+async function kvText(
+  session: SqliteSession,
+  key: string,
+): Promise<string | undefined> {
+  const bytes = Number(
+    (
+      await session.exec(
+        `SELECT coalesce(length(CAST(value AS BLOB)),0) FROM main.cursorDiskKV WHERE key=${sqlText(key)};`,
+      )
+    ).trim() || 0,
+  );
+
+  if (!bytes) return undefined;
+
+  if (bytes > MAX_SQLITE_VALUE_BYTES)
+    throw new Error('Header metadata exceeds the supported record limit.');
+
+  const hex = (
+    await session.exec(
+      `SELECT hex(value) FROM main.cursorDiskKV WHERE key=${sqlText(key)};`,
+    )
+  ).trim();
+
+  return hex ? Buffer.from(hex, 'hex').toString('utf8') : undefined;
+}
+
+/**
+ * Remove deleted children from a kept parent's membership list.
+ * The parent row itself stays. Message text is not rewritten.
+ */
+export async function detachDeletedSubagents(
+  session: SqliteSession,
+  /** Composer ids selected for this operation. */
+  ids: Set<string>,
+  signal?: AbortSignal,
+): Promise<void> {
+  const parents = new Set<string>();
+
+  for (const id of ids) {
+    signal?.throwIfAborted();
+    const text = await kvText(session, `composerData:${id}`);
+
+    if (!text) continue;
+
+    const body = JSON.parse(text) as {
+      subagentInfo?: { parentComposerId?: unknown };
+    };
+
+    const parent = body.subagentInfo?.parentComposerId;
+
+    if (typeof parent === 'string' && parent && !ids.has(parent))
+      parents.add(parent);
+  }
+
+  for (const parent of parents) {
+    signal?.throwIfAborted();
+    const key = `composerData:${parent}`;
+    const text = await kvText(session, key);
+
+    if (!text) continue;
+    const body = JSON.parse(text) as Record<string, unknown>;
+    const next = withoutDeletedSubagents(body, ids);
+
+    if (next === body) continue;
+
+    await session.exec(
+      `UPDATE main.cursorDiskKV SET value=${sqlText(JSON.stringify(next))} WHERE key=${sqlText(key)};`,
+    );
+  }
 }
 
 /** Bound IPC requests while preserving indexed range deletes; never scan the whole KV table. */

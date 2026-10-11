@@ -415,14 +415,14 @@ test('refresh aborts an old root scan and never applies its partial filter', asy
   }
 });
 
-test('manager sorts the current physical workspace first using the picker order', async () => {
+test('manager lists workspaces by name instead of pinning the current window', async () => {
   currentDatabase = entries[1].workspaceDbPath;
   const manager = new Manager(context, log);
 
   try {
     assert.deepEqual(
       (await manager.getChildren()).map((n) => n.workspace),
-      [entries[1], entries[0]],
+      [entries[0], entries[1]],
     );
   } finally {
     manager.dispose();

@@ -77,6 +77,7 @@ export async function deleteManagedChats(
       });
 
       const sqlite = await prepareSqlite(context);
+      const settings = transferSettings();
 
       const prepared = await vscode.window.withProgress(
         {
@@ -93,7 +94,7 @@ export async function deleteManagedChats(
             {
               kind: 'prepare-managed-delete',
               ...sqlite,
-              ...transferSettings(),
+              ...settings,
               userDataRoot: host.userDir,
               requests,
               workspaces: host.entries,
@@ -192,7 +193,7 @@ export async function deleteManagedChats(
             {
               kind: 'delete-managed-data',
               ...sqlite,
-              ...transferSettings(),
+              ...settings,
               plan: prepared.plan,
               workspaces: listHostEntries().entries,
               database: currentWorkspaceDatabase(context),

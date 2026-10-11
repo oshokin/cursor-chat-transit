@@ -218,6 +218,7 @@ export async function readComposerHeadersTable(
   strict = false,
 ): Promise<ComposerHeader[]> {
   const hasWorkspaceId = !columns || columns.includes('workspaceId');
+  const hasSubagent = !!columns?.includes('isSubagent');
 
   /** Emit a hex timestamp column, or empty hex when dates stay in JSON. */
   const timestampColumn = (
@@ -232,12 +233,12 @@ export async function readComposerHeadersTable(
 
   await execSqlHexRows({
     ...conn,
-    sql: `SELECT hex(composerId), ${hasWorkspaceId ? "hex(COALESCE(workspaceId, ''))" : "hex('')"}, hex(value), ${timestampColumn('createdAt')}, ${timestampColumn('lastUpdatedAt')} FROM composerHeaders;`,
-    cols: 5,
+    sql: `SELECT hex(composerId), ${hasWorkspaceId ? "hex(COALESCE(workspaceId, ''))" : "hex('')"}, hex(value), ${timestampColumn('createdAt')}, ${timestampColumn('lastUpdatedAt')}${hasSubagent ? ", hex(COALESCE(CAST(isSubagent AS TEXT), ''))" : ''} FROM composerHeaders;`,
+    cols: hasSubagent ? 6 : 5,
     readOnly: true,
     onRow: (
       /** Hex columns for one composerHeaders row. */
-      [idBuf, wsBuf, valueBuf, createdBuf, updatedBuf],
+      [idBuf, wsBuf, valueBuf, createdBuf, updatedBuf, subagentBuf],
     ) => {
       const parsed = asComposerHeader(jsonFromBuf(valueBuf));
 
@@ -264,6 +265,9 @@ export async function readComposerHeadersTable(
           },
         );
       if (parsed.composerId === 'empty-state-draft') return;
+
+      if (hasSubagent && textFromBuf(subagentBuf) === '1')
+        parsed.isSubagent = true;
 
       // Some versions keep dates in columns rather than inside the JSON value.
       for (const [key, buffer] of [

@@ -1,5 +1,6 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { bubbleRange } from './core';
+import { parentsToUpdate } from './chat-family';
 import { chatSelectionFingerprint } from './chat-fingerprint';
 import { deleteSelectedChats } from './chat-deletion';
 import { inspectDeletionOwnership } from './deletion-ownership';
@@ -152,12 +153,39 @@ export async function prepareManagedDelete(
     if (request.kind === 'workspace-data') {
       const refusal = await activeRefusal(entry, job);
 
-      if (refusal)
-        return {
-          ok: false,
-          title: 'Cannot delete the selected data',
-          detail: `${refusal}\nNo data was deleted.`,
-        };
+      if (refusal) {
+        let ids: string[];
+
+        try {
+          ids = [
+            ...new Set(
+              (await reader.read(entry, true)).map((row) => row.composerId),
+            ),
+          ];
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+
+          return {
+            ok: false,
+            title: 'Cannot delete the selected data',
+            detail: `“${presentation.name}” uses an unsupported or unreadable database: ${message} No data was deleted.`,
+          };
+        }
+
+        targets.push({
+          kind: 'chats',
+          workspace: entry,
+          ids,
+          token: await databaseToken(entry.workspaceDbPath),
+          storageKept: true,
+          name: presentation.name,
+          location: presentation.location,
+          pathLabel: presentation.path,
+        });
+
+        continue;
+      }
 
       let directory: string;
 
@@ -279,10 +307,12 @@ export async function prepareManagedDelete(
   for (const target of targets) {
     if (!target.ids.length) continue;
 
+    const headers = await reader.read(target.workspace);
+
     target.chatFingerprint = await chatSelectionFingerprint(
       ctx,
       target.workspace.globalDbPath,
-      target.ids,
+      [...target.ids, ...parentsToUpdate(headers, target.ids)],
     );
   }
 
@@ -292,9 +322,16 @@ export async function prepareManagedDelete(
     detail: `${targets.length} targets`,
   });
 
+  const keptNote = job.requests.find((request) => request.note)?.note;
+
   return {
     ok: true,
-    plan: { userDataRoot: job.userDataRoot, targets, globalTokens },
+    plan: {
+      userDataRoot: job.userDataRoot,
+      targets,
+      globalTokens,
+      ...(keptNote ? { keptNote } : {}),
+    },
   };
 }
 

@@ -4,13 +4,18 @@ import {
   MAX_JSON_RECORD_BYTES,
 } from './bundle-limits';
 
+/** Which known archive record wraps the user payload. Absent means the value itself. */
+export type JsonEnvelope = 'bubble' | 'composer';
+
 /** Parse one bounded JSON value and refuse oversized or too-wide objects. */
 export function parseBoundedJson(
   bytes: Buffer,
   /** Name used when the value is rejected. */
   label: string,
-  /** Property budget for the user payload. The bubble envelope is not charged. */
+  /** Property budget for the user payload. */
   maxProperties: number = MAX_JSON_KEYS,
+  /** Unwrap a known archive record before counting properties. */
+  envelope?: JsonEnvelope,
 ): unknown {
   if (bytes.length > MAX_JSON_RECORD_BYTES) {
     throw coded(
@@ -37,14 +42,14 @@ export function parseBoundedJson(
     throw coded(`${label} is not valid JSON.`, 'INVALID_JSON');
   }
 
-  assertBoundedRecord(value, label, maxProperties);
+  assertBoundedRecord(value, label, maxProperties, envelope);
 
   return value;
 }
 
 /**
  * Check a transfer record.
- * `{ bubbleId, payload }` counts only `payload` against the property budget.
+ * A bubble or composer envelope is unwrapped only when the caller names that format.
  */
 export function assertBoundedRecord(
   /** JSON value whose size is checked. */
@@ -53,17 +58,21 @@ export function assertBoundedRecord(
   label: string,
   /** Property budget for the user payload. */
   maxProperties: number = MAX_JSON_KEYS,
+  /** Unwrap a known archive record before counting properties. */
+  envelope?: JsonEnvelope,
 ): void {
-  assertJsonLimits(recordPayload(value), label, maxProperties);
+  assertJsonLimits(recordPayload(value, envelope), label, maxProperties);
 }
 
-/** User payload of a known bubble line, or the value itself. */
-function recordPayload(value: unknown): unknown {
+/** User payload of a named archive record, or the value itself. */
+function recordPayload(value: unknown, envelope?: JsonEnvelope): unknown {
+  if (!envelope) return value;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
 
   if (
+    envelope === 'bubble' &&
     keys.length === 2 &&
     keys.includes('bubbleId') &&
     keys.includes('payload') &&
@@ -71,6 +80,17 @@ function recordPayload(value: unknown): unknown {
     record.bubbleId
   )
     return record.payload;
+
+  if (
+    envelope === 'composer' &&
+    keys.length === 2 &&
+    keys.includes('conversation') &&
+    keys.includes('fields') &&
+    record.fields &&
+    typeof record.fields === 'object' &&
+    !Array.isArray(record.fields)
+  )
+    return record.fields;
 
   return value;
 }

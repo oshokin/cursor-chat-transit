@@ -55,7 +55,8 @@ export async function readBundleObject(
         const composer = parseBoundedJson(
           await readFile(path.join(dir, 'composer.json')),
           'composer',
-          /** Whether the conversation array was present. */
+          undefined,
+          'composer',
         ) as {
           /** Recorded conversation layout, such as `empty` or `ndjson`. */
           conversation: string;
@@ -87,7 +88,14 @@ export async function readBundleObject(
         bubbles[id] = [];
 
         for (const part of await ndjsonFiles(path.join(dir, 'bubbles'))) {
-          for await (const item of readNdjson(part, 'bubble', signal)) {
+          for await (const item of readNdjson(
+            part,
+            'bubble',
+            signal,
+            undefined,
+            undefined,
+            'bubble',
+          )) {
             const bubble = item.value as {
               bubbleId: string;
               /** Bubble body stored under that id. */

@@ -2,6 +2,7 @@ import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { operationTempDir } from './operation-temp';
 import { readBundleObject } from './bundle-object';
+import { exportFamilyIds } from './chat-family';
 import { selectChats } from './core';
 import * as db from './db';
 import { exportBundle } from './export-bundle';
@@ -136,7 +137,8 @@ export async function exportToFile(
     });
 
     await local.close();
-    const selected = selectChats(listed.allComposers, selectedIds);
+    const family = exportFamilyIds(listed.allComposers, selectedIds);
+    const selected = selectChats(listed.allComposers, family.ids);
 
     ctx.onPhase?.('selection', { chats: selected.length });
 

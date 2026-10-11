@@ -1,3 +1,4 @@
+import { familyImportAdjustments } from './chat-family';
 import { textRecovery } from './text-recovery';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -34,7 +35,12 @@ import { SqliteSession } from './sqlite-session';
 import { readFile } from './trace-fs';
 import { inspectPair } from './transfer-context';
 import { inChat } from './transfer-events';
-import type { BubbleRecord, TransferContext, WorkspaceEntry } from './types';
+import type {
+  BubbleRecord,
+  ComposerHeader,
+  TransferContext,
+  WorkspaceEntry,
+} from './types';
 import { TransferError } from './types';
 
 /** Classify every chat in the bundle against the destination. */
@@ -64,6 +70,14 @@ export async function scanAll(opts: {
   };
 
   const receipts = await opts.journal.receipts();
+
+  const familyRows: Array<{
+    sourceId: string;
+    ordinal: number;
+    name?: string;
+    decision: 'create' | 'skip';
+    header: ComposerHeader;
+  }> = [];
 
   for (const file of await ndjsonFiles(path.join(opts.root, 'catalog'))) {
     for await (const row of readNdjson(
@@ -166,6 +180,15 @@ export async function scanAll(opts: {
         throw err;
       }
 
+      if (decision.action === 'create' || decision.action === 'skip')
+        familyRows.push({
+          sourceId,
+          ordinal,
+          name,
+          decision: decision.action,
+          header: scanned.header,
+        });
+
       if (decision.action === 'skip') {
         plan.already.push({
           composerId: sourceId,
@@ -195,6 +218,54 @@ export async function scanAll(opts: {
     }
   }
 
+  const adjusted = familyImportAdjustments(familyRows);
+
+  for (const sourceId of adjusted.drop) {
+    const row = familyRows.find((item) => item.sourceId === sourceId);
+
+    if (!row) continue;
+
+    await opts.work.exec(
+      `UPDATE chat SET decision='skip', reason='missing-family' WHERE source_id=${sqlText(sourceId)};`,
+    );
+
+    plan.create = plan.create.filter((ordinal) => ordinal !== row.ordinal);
+
+    plan.newVersions = plan.newVersions.filter(
+      (item) => item.composerId !== sourceId,
+    );
+
+    plan.restored = plan.restored.filter(
+      (item) => item.composerId !== sourceId,
+    );
+
+    plan.skipped.push({
+      composerId: sourceId,
+      name: row.name,
+      reason: 'The parent chat is not in this archive.',
+    });
+  }
+
+  for (const sourceId of adjusted.promote) {
+    const row = familyRows.find((item) => item.sourceId === sourceId);
+
+    if (!row) continue;
+    const targetId = randomUUID();
+
+    await opts.work.exec(
+      `UPDATE chat SET decision='create', target_id=${sqlText(targetId)}, reason='family-copy' WHERE source_id=${sqlText(sourceId)};`,
+    );
+
+    plan.already = plan.already.filter((item) => item.composerId !== sourceId);
+    plan.create.push(row.ordinal);
+
+    plan.newVersions.push({
+      composerId: sourceId,
+      name: row.name,
+      reason: 'A subagent changed; a new conversation family will be created',
+    });
+  }
+
   return plan;
 }
 
@@ -221,12 +292,18 @@ export async function scanChat(
   quality: 'complete' | 'history-only';
   /** Destination composer id chosen for this copy. */
   targetId: string;
+  /** Family fields from the archive header. */
+  header: ComposerHeader;
 }> {
   const optsPhase = opts.ctx.onPhase;
   const dir = path.join(opts.root, 'chats', ordinalName(ordinal));
 
   const header = asObject(
-    parseBoundedJson(await readFile(path.join(dir, 'header.json')), 'header'),
+    parseBoundedJson(
+      await readFile(path.join(dir, 'header.json')),
+      'header',
+      opts.ctx.maxJsonProperties,
+    ),
     'header',
   );
 
@@ -237,6 +314,8 @@ export async function scanChat(
   const composer = asObject(
     parseBoundedJson(
       await readFile(path.join(dir, 'composer.json')),
+      'composer',
+      opts.ctx.maxJsonProperties,
       'composer',
     ),
     'composer',
@@ -492,7 +571,37 @@ export async function scanChat(
 
   hasher.quality(quality);
 
-  return { hash: hasher.digest(), quality, targetId };
+  return {
+    hash: hasher.digest(),
+    quality,
+    targetId,
+    header: familyHeader(header, sourceId),
+  };
+}
+
+/** Header fields that decide whether this chat belongs to a family. */
+function familyHeader(
+  header: Record<string, unknown>,
+  sourceId: string,
+): ComposerHeader {
+  const info = header.subagentInfo;
+  const ids = header.subagentComposerIds;
+
+  return {
+    composerId: sourceId,
+    ...(typeof header.name === 'string' ? { name: header.name } : {}),
+    ...(header.isSubagent === true ? { isSubagent: true } : {}),
+    ...(info && typeof info === 'object' && !Array.isArray(info)
+      ? { subagentInfo: info as ComposerHeader['subagentInfo'] }
+      : {}),
+    ...(Array.isArray(ids)
+      ? {
+          subagentComposerIds: ids.filter(
+            (id): id is string => typeof id === 'string',
+          ),
+        }
+      : {}),
+  };
 }
 
 /** Mark blob ids reachable from conversation state, including nested records. */

@@ -9,13 +9,14 @@ import { createWriteStream } from 'node:fs';
 import {
   BUNDLE_FORMAT,
   EXPORT_FORMAT_VERSION,
+  MAX_JSON_KEYS,
   MAX_MANIFEST_BYTES,
 } from './bundle-limits';
 import { ordinalName } from './bundle-names';
 import { packZip } from './bundle-zip';
 import { hashFile } from './hash-file';
 import { NdjsonPartWriter, writeNdjsonLine } from './ndjson-io';
-import { parseBoundedJson } from './record-json';
+import { parseBoundedJson, type JsonEnvelope } from './record-json';
 
 /** How the conversation array was stored beside the composer fields. */
 export type ConversationLayout = 'absent' | 'empty' | 'ndjson';
@@ -125,7 +126,14 @@ export class BundleWriter {
     this.ordinal += 1;
     this.chatDir = path.join(this.root, 'chats', ordinalName(this.ordinal));
     await mkdir(this.chatDir, { recursive: true });
-    await writeJson(path.join(this.chatDir, 'header.json'), header);
+
+    await writeJson(
+      path.join(this.chatDir, 'header.json'),
+      header,
+      false,
+      this.maxJsonProperties,
+    );
+
     this.conversationLayout = 'absent';
 
     this.conversation = new NdjsonPartWriter(
@@ -138,6 +146,7 @@ export class BundleWriter {
       path.join(this.chatDir, 'bubbles'),
       this.signal,
       this.maxJsonProperties,
+      'bubble',
     );
 
     this.resources = new NdjsonPartWriter(
@@ -169,6 +178,8 @@ export class BundleWriter {
         fields,
       },
       true,
+      this.maxJsonProperties,
+      'composer',
     );
   }
 
@@ -295,7 +306,7 @@ export class BundleWriter {
 
     const manifestPath = path.join(this.root, 'manifest.json');
 
-    await writeJson(manifestPath, manifest);
+    await writeJson(manifestPath, manifest, false, MAX_JSON_KEYS);
     const manifestStat = await hashFile(manifestPath, this.signal);
 
     if (manifestStat.bytes > MAX_MANIFEST_BYTES) {
@@ -347,10 +358,14 @@ async function writeJson(
   value: unknown,
   /** Replace an existing staged file. */
   overwrite = false,
+  /** Property budget for this record. Manifest uses the fixed schema budget. */
+  maxProperties?: number,
+  /** Unwrap a known archive record before counting properties. */
+  envelope?: JsonEnvelope,
 ): Promise<void> {
   const bytes = Buffer.from(JSON.stringify(value), 'utf8');
 
-  parseBoundedJson(bytes, path.basename(filePath));
+  parseBoundedJson(bytes, path.basename(filePath), maxProperties, envelope);
 
   await writeFile(filePath, bytes, {
     flag: overwrite ? 'w' : 'wx',

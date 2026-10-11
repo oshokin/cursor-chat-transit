@@ -38,6 +38,7 @@ export async function* readMeasuredNdjson(
       }
     },
     ctx.maxJsonProperties,
+    label.startsWith('bubble ') ? 'bubble' : undefined,
   ))
     yield row;
   report(total);

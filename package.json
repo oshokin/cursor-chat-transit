@@ -180,6 +180,22 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "cursorChatTransit.manageSortName",
+        "title": "Name (A\u2013Z)",
+        "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.manageSortRecent",
+        "title": "Recently active",
+        "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.manageSelectIssues",
+        "title": "Select chats with transfer issues",
+        "category": "Cursor Chat Transit",
+        "icon": "$(warning)"
+      },
+      {
         "command": "cursorChatTransit.manageSelectEmpty",
         "title": "Select empty workspaces",
         "category": "Cursor Chat Transit",
@@ -259,6 +275,21 @@
           "group": "1_overflow@1"
         },
         {
+          "command": "cursorChatTransit.manageSortName",
+          "when": "view == cursorChatTransit.manage",
+          "group": "1_overflow@2"
+        },
+        {
+          "command": "cursorChatTransit.manageSortRecent",
+          "when": "view == cursorChatTransit.manage",
+          "group": "1_overflow@3"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectIssues",
+          "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageBusy",
+          "group": "navigation@2.5"
+        },
+        {
           "command": "cursorChatTransit.manageSelectEmpty",
           "when": "view == cursorChatTransit.manage && !cursorChatTransit.manageBusy",
           "group": "navigation@3"
@@ -319,6 +350,10 @@
       "commandPalette": [
         {
           "command": "cursorChatTransit.manageRefresh",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSelectIssues",
           "when": "false"
         },
         {

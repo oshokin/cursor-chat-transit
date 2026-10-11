@@ -57,6 +57,21 @@ export interface ComposerHeader {
   /** Whether Cursor marked the chat archived. */
   isArchived?: boolean;
   isBestOfNSubcomposer?: boolean;
+  /** SQL/header flag for a Cursor-spawned subagent. Not Best-of-N. */
+  isSubagent?: boolean;
+  /** Parent, root, and tool-call links stored by Cursor. */
+  subagentInfo?: {
+    /** Immediate parent composer. */
+    parentComposerId?: string;
+    /** Top conversation of this family. */
+    rootParentConversationId?: string;
+    /** Type label such as explore, when Cursor stored one. */
+    subagentTypeName?: string;
+    /** Other subagent fields kept as stored. */
+    [key: string]: unknown;
+  };
+  /** Direct child composer ids stored on the parent body or header. */
+  subagentComposerIds?: string[];
   /** Checkpoint timestamp when Cursor stored one. */
   conversationCheckpointLastUpdatedAt?: number;
   /** Workspace this chat was bound to, if recorded. */

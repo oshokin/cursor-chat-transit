@@ -216,13 +216,17 @@ export function headerUpsertSql(
       c.isArchived ? '1' : '0',
     );
 
-    maybeCol(
-      cols,
-      vals,
-      'isSubagent',
-      has('isSubagent'),
-      c.isBestOfNSubcomposer ? '1' : '0',
-    );
+    const info = c.subagentInfo;
+
+    const subagent =
+      c.isSubagent === true ||
+      (!!info &&
+        typeof info === 'object' &&
+        !Array.isArray(info) &&
+        typeof (info as { parentComposerId?: unknown }).parentComposerId ===
+          'string');
+
+    maybeCol(cols, vals, 'isSubagent', has('isSubagent'), subagent ? '1' : '0');
 
     maybeCol(cols, vals, 'recency', has('recency'), String(updated));
 

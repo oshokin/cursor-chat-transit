@@ -705,7 +705,7 @@ test(
     const image = path.join(
       path.dirname(one.workspaceDbPath),
       'images',
-      'shot.png',
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png',
     );
 
     const before = (
@@ -762,7 +762,7 @@ test(
 );
 
 test(
-  'the current window is refused when its database is reached through a symlink',
+  'the current window keeps its storage when its database is reached through a symlink',
   { skip },
   async () => {
     const { root, ctx, one, empty, shared } = await profile();
@@ -785,9 +785,25 @@ test(
         database: alias,
       });
 
-      assert.equal(prepared.ok, false);
-      if (prepared.ok) return;
-      assert.match(prepared.detail, /current window/);
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      const current = prepared.plan.targets.find(
+        (target) => target.workspace.workspaceDbPath === one.workspaceDbPath,
+      );
+
+      assert.equal(current?.kind, 'chats');
+      assert.equal(current?.storageKept, true);
+
+      assert.equal(
+        prepared.plan.targets.some(
+          (target) =>
+            target.workspace.workspaceDbPath === empty.workspaceDbPath &&
+            target.kind === 'workspace-data',
+        ),
+        true,
+      );
+
       await lstat(one.workspaceDbPath);
       await lstat(empty.workspaceDbPath);
     } finally {

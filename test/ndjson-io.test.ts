@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { BundleWriter } from '../src/bundle-writer';
 import { NdjsonPartWriter, readNdjson } from '../src/ndjson-io';
 import { assertJsonLimits, parseBoundedJson } from '../src/record-json';
 import { MAX_JSON_KEYS, MAX_JSON_RECORD_BYTES } from '../src/bundle-limits';
@@ -146,7 +147,7 @@ test('a payload at the property limit survives the bubble envelope', async () =>
 
     parseBoundedJson(Buffer.from(JSON.stringify(payload)), 'source bubble');
 
-    const writer = new NdjsonPartWriter(dir);
+    const writer = new NdjsonPartWriter(dir, undefined, undefined, 'bubble');
 
     await writer.write({
       bubbleId: '11111111-1111-4111-8111-111111111111',
@@ -156,10 +157,71 @@ test('a payload at the property limit survives the bubble envelope', async () =>
     await writer.finish();
 
     for (const file of writer.files()) {
-      for await (const row of readNdjson(file, 'exported bubble'))
+      for await (const row of readNdjson(
+        file,
+        'exported bubble',
+        undefined,
+        undefined,
+        undefined,
+        'bubble',
+      ))
         assert.ok(row);
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a plain object with bubble keys uses the full property budget', () => {
+  const value = {
+    bubbleId: '11111111-1111-4111-8111-111111111111',
+    payload: { entries: Array.from({ length: 999_999 }, () => ({ x: 0 })) },
+  };
+
+  assert.throws(
+    () => parseBoundedJson(Buffer.from(JSON.stringify(value)), 'plain'),
+    /properties/,
+  );
+});
+
+test('composer writer honors a budget above and below the default', async () => {
+  const above = await mkdtemp(path.join(os.tmpdir(), 'cct-composer-above-'));
+
+  const writer = await BundleWriter.open(path.join(above, 'test.zip'), {
+    maxJsonProperties: 1_100_000,
+  });
+
+  try {
+    await writer.beginChat({ composerId: 'root' });
+
+    await writer.writeComposer(
+      { entries: Array.from({ length: 1_000_001 }, () => ({ x: 0 })) },
+      'absent',
+    );
+  } finally {
+    await writer.abort();
+    await rm(above, { recursive: true, force: true });
+  }
+
+  const below = await mkdtemp(path.join(os.tmpdir(), 'cct-composer-below-'));
+
+  const tight = await BundleWriter.open(path.join(below, 'test.zip'), {
+    maxJsonProperties: 100_000,
+  });
+
+  try {
+    await tight.beginChat({ composerId: 'root' });
+
+    await assert.rejects(
+      () =>
+        tight.writeComposer(
+          { entries: Array.from({ length: 100_001 }, () => ({ x: 0 })) },
+          'absent',
+        ),
+      /properties/,
+    );
+  } finally {
+    await tight.abort();
+    await rm(below, { recursive: true, force: true });
   }
 });

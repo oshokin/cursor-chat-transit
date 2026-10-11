@@ -4,15 +4,12 @@ import { bubbleRange, sqlText } from './core';
 import { execSql } from './sqlite';
 import type { TransferContext, WorkspaceEntry } from './types';
 
-/** Image files beyond this are refused instead of scanned. */
-const IMAGE_PROOF_LIMIT = 32;
-
-/** Foreign composers searched in one statement. */
+/** Foreign composers or image ids searched in one statement. */
 const IMAGE_ID_BATCH = 32;
 
 /** UUID embedded in a workspace image filename. */
 const UUID_IN_NAME =
-  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 /**
  * Refuse workspace removal when another chat's messages reference an image in this directory.
@@ -41,18 +38,22 @@ export async function foreignImageRefusal(
     return `Cannot confirm image ownership: ${error instanceof Error ? error.message : String(error)}`;
   }
 
+  const unnamed = names.find((name) => !UUID_IN_NAME.test(name));
+
+  if (unnamed)
+    return `Cannot confirm image ownership because ${JSON.stringify(unnamed.slice(0, 80))} is not a supported image name. Nothing was deleted.`;
+
   const uuids = [
     ...new Set(
-      names
-        .flatMap((name) => name.match(UUID_IN_NAME) ?? [])
-        .map((id) => id.toLowerCase()),
+      names.flatMap((name) => {
+        const found = name.match(UUID_IN_NAME);
+
+        return found ? [found[0].toLowerCase()] : [];
+      }),
     ),
   ];
 
   if (!uuids.length) return undefined;
-
-  if (uuids.length > IMAGE_PROOF_LIMIT)
-    return 'This workspace has too many image files to prove they are not used by another chat. Nothing was deleted.';
 
   let foreign: string[];
 
@@ -77,10 +78,6 @@ export async function foreignImageRefusal(
     }
   }
 
-  const needle = uuids
-    .map((uuid) => `instr(lower(CAST(value AS TEXT)), ${sqlText(uuid)})`)
-    .join(' OR ');
-
   try {
     for (let start = 0; start < known.length; start += IMAGE_ID_BATCH) {
       const batch = known.slice(start, start + IMAGE_ID_BATCH);
@@ -92,15 +89,22 @@ export async function foreignImageRefusal(
         )
         .join(' OR ');
 
-      const hit = await execSql({
-        ...ctx,
-        database: entry.globalDbPath,
-        readOnly: true,
-        sql: `SELECT 1 FROM cursorDiskKV WHERE (${where}) AND (${needle}) LIMIT 1;`,
-      });
+      for (let image = 0; image < uuids.length; image += IMAGE_ID_BATCH) {
+        const needle = uuids
+          .slice(image, image + IMAGE_ID_BATCH)
+          .map((uuid) => `instr(lower(CAST(value AS TEXT)), ${sqlText(uuid)})`)
+          .join(' OR ');
 
-      if (hit.trim())
-        return 'This workspace contains an image referenced by another chat. Nothing was deleted.';
+        const hit = await execSql({
+          ...ctx,
+          database: entry.globalDbPath,
+          readOnly: true,
+          sql: `SELECT 1 FROM cursorDiskKV WHERE (${where}) AND (${needle}) LIMIT 1;`,
+        });
+
+        if (hit.trim())
+          return 'This workspace contains an image referenced by another chat. Nothing was deleted.';
+      }
     }
   } catch (error) {
     return `Cannot confirm image ownership: ${error instanceof Error ? error.message : String(error)}`;
