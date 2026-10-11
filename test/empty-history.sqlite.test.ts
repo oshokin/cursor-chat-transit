@@ -782,9 +782,12 @@ test(
   { skip },
   async () => {
     const { root, ctx, add } = await profile();
+    let workspaceDir = '';
 
     try {
       const one = await add('one', [A], [[`bubbleId:${A}:m`, '{}']]);
+
+      workspaceDir = path.dirname(one.workspaceDbPath);
       const parent = path.join(root, 'User', 'workspaceStorage');
 
       const prepared = await prepareManagedDelete(ctx, {
@@ -802,6 +805,16 @@ test(
       const result = await withDirectoryRemoval(
         async (directory) => {
           await rm(directory, { recursive: true, force: true });
+
+          // A missing Windows path still stats as ENOENT. Put a denied
+          // directory back so the confirmation cannot treat it as gone.
+          if (process.platform === 'win32') {
+            await mkdir(directory);
+            await denyAccess(directory);
+
+            return;
+          }
+
           await denyAccess(parent);
         },
         () =>
@@ -817,6 +830,8 @@ test(
       assert.deepEqual(result.outcomes[0]?.chatIdsDeleted, [A]);
       assert.notEqual(result.outcomes[0]?.storage, 'deleted');
     } finally {
+      if (process.platform === 'win32' && workspaceDir)
+        await allowAccess(workspaceDir).catch(() => undefined);
       await allowAccess(path.join(root, 'User', 'workspaceStorage'));
       await rm(root, { recursive: true, force: true });
     }

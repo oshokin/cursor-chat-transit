@@ -662,8 +662,10 @@ test(
       extra,
     }));
 
+    const slow = { ...ctx, timeoutMs: 60_000 };
+
     await execSqlScript({
-      ...ctx,
+      ...slow,
       database: workspace.globalDbPath,
       sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
         `composerData:${id}`,
@@ -688,9 +690,7 @@ test(
 
     const result = await runTransfer<{ failed: number }>(
       {
-        ...ctx,
-        // The fixture limit is 10s. This payload is legal; a slow runner still has to finish it.
-        timeoutMs: 60_000,
+        ...slow,
         kind: 'chat-statistics',
         deepCheck: true,
         workspace,

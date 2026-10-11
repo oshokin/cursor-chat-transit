@@ -95,6 +95,8 @@ export async function deleteSelectedChats(
               maxLineBytes: 2 * MAX_SQLITE_VALUE_BYTES + 65536,
             });
 
+            let completed: string[];
+
             try {
               await session.exec(
                 `ATTACH DATABASE ${sqlText(workspace.workspaceDbPath)} AS workspace; CREATE TEMP TABLE selected(id TEXT PRIMARY KEY);`,
@@ -160,19 +162,23 @@ export async function deleteSelectedChats(
               commitPending = true;
               await session.exec('COMMIT;');
               commitPending = false;
+              completed = [...ids];
 
-              for (const id of ids) {
+              for (const id of ids)
                 result.deleted.push(`${workspace.workspaceDbPath}: ${id}`);
-
-                transferEvent({
-                  action: 'Delete chat',
-                  status: 'completed',
-                  path: workspace.workspaceDbPath,
-                  chatId: id,
-                });
-              }
             } finally {
               await session.close();
+            }
+
+            // The writer is closed, so a listener can replace the directory.
+            // Windows refuses to remove a directory that sqlite3 still has open.
+            for (const id of completed) {
+              transferEvent({
+                action: 'Delete chat',
+                status: 'completed',
+                path: workspace.workspaceDbPath,
+                chatId: id,
+              });
             }
           },
         );

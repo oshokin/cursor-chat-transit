@@ -297,7 +297,10 @@ test('a WAL that cannot be stat is not treated as absent', async () => {
     await assert.rejects(
       databaseToken(database),
       (error: NodeJS.ErrnoException) => {
-        assert.equal(error.code, 'EACCES');
+        assert.ok(
+          error.code === 'EACCES' || error.code === 'EPERM',
+          error.code,
+        );
 
         return true;
       },
