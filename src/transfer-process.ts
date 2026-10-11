@@ -203,16 +203,19 @@ export async function runTransfer<T>(
       }
     };
 
-    /** Reject when the child process stops. */
+    /** Reject when the child process stops before its final message is read. */
     const onExit = (
       /** Exit code, or null when the child was signaled. */
       code: number | null,
     ) => {
-      fail(
-        new Error(
-          `The transfer process stopped (${code ?? 'signal'}). Cursor was not restarted.`,
-        ),
-      );
+      // `exit` can be queued ahead of the last IPC message in the same poll.
+      setImmediate(() => {
+        fail(
+          new Error(
+            `The transfer process stopped (${code ?? 'signal'}). Cursor was not restarted.`,
+          ),
+        );
+      });
     };
 
     /** Cancel the child when the caller aborts. */

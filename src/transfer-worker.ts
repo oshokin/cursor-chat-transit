@@ -19,9 +19,12 @@ const abort = new AbortController();
 
 /** Forces exit when disconnect cleanup leaves a handle that would keep writers locked. */
 let disconnectedExit: NodeJS.Timeout | undefined;
+/** True once the result has been handed to the host and this process may close IPC. */
+let finishing = false;
 
 // Losing the Extension Host must release writers, not orphan them.
 process.once('disconnect', () => {
+  if (finishing) return;
   abort.abort();
   disconnectedExit = setTimeout(() => process.exit(1), 5000);
 });
@@ -29,6 +32,33 @@ process.once('disconnect', () => {
 process.once('SIGTERM', () => abort.abort());
 /** True after the worker accepts its start message. */
 let started = false;
+
+/**
+ * Deliver the final IPC message, then close the channel.
+ * `process.exit` inside the send callback drops that message on a busy host.
+ */
+function finishWorker(code: number, message: Record<string, unknown>): void {
+  clearTimeout(disconnectedExit);
+  finishing = true;
+
+  if (!process.connected || !process.send) {
+    process.exit(code);
+
+    return;
+  }
+
+  try {
+    process.send(message, () => {
+      process.disconnect();
+
+      const force = setTimeout(() => process.exit(code), 1000);
+
+      force.unref();
+    });
+  } catch {
+    process.exit(code);
+  }
+}
 
 /** IPC can disappear between a connection check and send; stop without an unhandled error. */
 function sendUpdate(message: Record<string, unknown>): void {
@@ -77,32 +107,21 @@ process.on(
       () => run(job),
     ).then(
       (result) => {
-        clearTimeout(disconnectedExit);
-
-        if (process.connected)
-          process.send?.({ type: 'done', result }, () => process.exit(0));
-        else process.exit(0);
+        finishWorker(0, { type: 'done', result });
       },
       (err: unknown) => {
         const error = err instanceof Error ? err : new Error(String(err));
 
-        clearTimeout(disconnectedExit);
-
-        if (!process.connected) process.exit(1);
-
-        process.send?.(
-          {
-            type: 'error',
-            message: error.message,
-            name: error.name,
-            code: 'code' in error ? String(error.code) : undefined,
-            detail:
-              'detail' in error && error.detail
-                ? String(error.detail)
-                : undefined,
-          },
-          () => process.exit(1),
-        );
+        finishWorker(1, {
+          type: 'error',
+          message: error.message,
+          name: error.name,
+          code: 'code' in error ? String(error.code) : undefined,
+          detail:
+            'detail' in error && error.detail
+              ? String(error.detail)
+              : undefined,
+        });
       },
     );
   },
