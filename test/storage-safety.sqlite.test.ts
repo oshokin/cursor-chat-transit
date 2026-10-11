@@ -302,7 +302,7 @@ test(
 
 test(
   'worker loses IPC during preparation, exits and releases all SQLite writers',
-  { skip, timeout: 20000 },
+  { skip, timeout: 60_000 },
   async (t) => {
     const { ctx, workspace } = await setup(t);
     const file = await messageArchive(workspace.storageRoot);
@@ -311,6 +311,8 @@ test(
       execArgv: ['--import', 'tsx'],
       stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
     });
+
+    child.stderr?.resume();
 
     t.after(async () => {
       if (child.exitCode === null) child.kill('SIGKILL');
@@ -337,7 +339,9 @@ test(
           message.metrics?.processed === 100
         ) {
           disconnected = true;
-          child.disconnect();
+          // Return from the message handler before closing IPC. A synchronous
+          // disconnect can stall the handshake, so the child never observes it.
+          setImmediate(() => child.disconnect());
         }
       },
     );

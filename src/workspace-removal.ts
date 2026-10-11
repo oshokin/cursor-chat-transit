@@ -241,11 +241,19 @@ export async function removeWorkspaceDirectory(
   throw new Error('Workspace data directory is still present.');
 }
 
-/** `dev:ino` of a directory. Path text is not an identity. */
+/**
+ * Identity of a directory. Path text is not an identity.
+ * Windows often reuses a file index, and `ino` may be 0, so creation time is part of the token.
+ */
 export async function directoryIdentity(directory: string): Promise<string> {
   const stats = await lstat(directory);
 
-  return `${stats.dev}:${stats.ino}`;
+  const born =
+    typeof stats.birthtimeMs === 'number' && Number.isFinite(stats.birthtimeMs)
+      ? stats.birthtimeMs
+      : 0;
+
+  return `${stats.dev}:${stats.ino}:${born}`;
 }
 
 /**

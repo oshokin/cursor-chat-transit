@@ -17,8 +17,15 @@ import { runCatalogue, type CatalogueJob } from './workspace-catalogue';
 /** Cancels the worker when the extension host disconnects. */
 const abort = new AbortController();
 
+/** Forces exit when disconnect cleanup leaves a handle that would keep writers locked. */
+let disconnectedExit: NodeJS.Timeout | undefined;
+
 // Losing the Extension Host must release writers, not orphan them.
-process.once('disconnect', () => abort.abort());
+process.once('disconnect', () => {
+  abort.abort();
+  disconnectedExit = setTimeout(() => process.exit(1), 5000);
+});
+
 process.once('SIGTERM', () => abort.abort());
 /** True after the worker accepts its start message. */
 let started = false;
@@ -70,6 +77,8 @@ process.on(
       () => run(job),
     ).then(
       (result) => {
+        clearTimeout(disconnectedExit);
+
         if (process.connected)
           process.send?.({ type: 'done', result }, () => process.exit(0));
         else process.exit(0);
@@ -77,11 +86,9 @@ process.on(
       (err: unknown) => {
         const error = err instanceof Error ? err : new Error(String(err));
 
-        if (!process.connected) {
-          process.exitCode = 1;
+        clearTimeout(disconnectedExit);
 
-          return;
-        }
+        if (!process.connected) process.exit(1);
 
         process.send?.(
           {

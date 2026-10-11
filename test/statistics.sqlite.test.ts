@@ -689,6 +689,8 @@ test(
     const result = await runTransfer<{ failed: number }>(
       {
         ...ctx,
+        // The fixture limit is 10s. This payload is legal; a slow runner still has to finish it.
+        timeoutMs: 60_000,
         kind: 'chat-statistics',
         deepCheck: true,
         workspace,

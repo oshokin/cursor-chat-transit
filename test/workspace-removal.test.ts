@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -23,6 +22,7 @@ import {
   resolveWorkspaceDirectory,
   workspaceDataRefusal,
 } from '../src/workspace-removal';
+import { allowAccess, denyAccess } from './access';
 
 async function layout(): Promise<{ root: string; entry: WorkspaceEntry }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cct-remove-'));
@@ -204,12 +204,12 @@ test('a project directory inside workspace storage is refused', async () => {
 
 test('unicode names and quotes address the exact directory', async () => {
   const { root, entry } = await layout();
-  const storageId = 'хранилище "кавычки"';
+  const storageId = 'хранилище «кавычки»';
   const directory = path.join(root, 'User', 'workspaceStorage', storageId);
 
   await mkdir(directory);
   await writeFile(path.join(directory, 'state.vscdb'), '');
-  await writeFile(path.join(root, 'вне "проекта"'), 'keep');
+  await writeFile(path.join(root, 'вне «проекта»'), 'keep');
 
   try {
     const resolved = await resolveWorkspaceDirectory(root, {
@@ -224,7 +224,7 @@ test('unicode names and quotes address the exact directory', async () => {
     await assert.rejects(lstat(directory));
 
     assert.equal(
-      await readFile(path.join(root, 'вне "проекта"'), 'utf8'),
+      await readFile(path.join(root, 'вне «проекта»'), 'utf8'),
       'keep',
     );
   } finally {
@@ -292,7 +292,7 @@ test('a WAL that cannot be stat is not treated as absent', async () => {
     await mkdir(directory);
     await writeFile(database, 'db');
     await writeFile(`${database}-wal`, 'wal');
-    await chmod(directory, 0o000);
+    await denyAccess(directory);
 
     await assert.rejects(
       databaseToken(database),
@@ -303,7 +303,7 @@ test('a WAL that cannot be stat is not treated as absent', async () => {
       },
     );
   } finally {
-    await chmod(directory, 0o700);
+    await allowAccess(directory);
     await rm(root, { recursive: true, force: true });
   }
 });

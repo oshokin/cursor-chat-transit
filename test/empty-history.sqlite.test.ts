@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { sqlText } from '../src/core';
@@ -23,6 +23,7 @@ import { observeTransfer } from '../src/transfer-events';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
 import { assessWorkspaceHistory } from '../src/workspace-history';
 import { withDirectoryRemoval } from '../src/workspace-removal';
+import { allowAccess, denyAccess } from './access';
 
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 const skip = executable ? false : 'sqlite3 required';
@@ -447,7 +448,7 @@ test(
       const missing = await add('missing', []);
       const busy = await add('busy', [A]);
 
-      await chmod(path.dirname(blocked.workspaceDbPath), 0o000);
+      await denyAccess(path.dirname(blocked.workspaceDbPath));
       await writeFile(corrupt.workspaceDbPath, 'not a database');
       await rm(missing.workspaceDbPath, { force: true });
 
@@ -483,12 +484,9 @@ test(
         'unavailable',
       );
 
-      await chmod(path.dirname(blocked.workspaceDbPath), 0o700);
+      await allowAccess(path.dirname(blocked.workspaceDbPath));
     } finally {
-      await chmod(
-        path.join(root, 'User', 'workspaceStorage', 'blocked'),
-        0o700,
-      );
+      await allowAccess(path.join(root, 'User', 'workspaceStorage', 'blocked'));
 
       await rm(root, { recursive: true, force: true });
     }
@@ -804,7 +802,7 @@ test(
       const result = await withDirectoryRemoval(
         async (directory) => {
           await rm(directory, { recursive: true, force: true });
-          await chmod(parent, 0o000);
+          await denyAccess(parent);
         },
         () =>
           executeManagedDelete(ctx, {
@@ -819,7 +817,7 @@ test(
       assert.deepEqual(result.outcomes[0]?.chatIdsDeleted, [A]);
       assert.notEqual(result.outcomes[0]?.storage, 'deleted');
     } finally {
-      await chmod(path.join(root, 'User', 'workspaceStorage'), 0o700);
+      await allowAccess(path.join(root, 'User', 'workspaceStorage'));
       await rm(root, { recursive: true, force: true });
     }
   },

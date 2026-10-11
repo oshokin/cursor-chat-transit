@@ -74,7 +74,7 @@ export interface ManagedPlanTarget {
   location: string;
   /** Project or storage path shown in the dialog. */
   pathLabel: string;
-  /** `dev:ino` of the workspace directory captured with the plan. */
+  /** `dev:ino:birthtimeMs` of the workspace directory captured with the plan. */
   directoryId?: string;
   /**
    * Hash of the selected global chat rows.
