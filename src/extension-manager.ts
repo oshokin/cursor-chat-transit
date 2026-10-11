@@ -1388,6 +1388,8 @@ export class ChatManager
         const roots = await this.getChildren();
 
         if (generation.aborted) return { failed: 0 };
+        const catalogueGeneration = this.generation;
+        const failed = new Set<string>();
 
         const rank = new Map(
           roots.map((root, index) => [
@@ -1399,21 +1401,57 @@ export class ChatManager
         const candidates: WorkspaceEntry[] = [];
         const retry = new Set<Promise<ManagedNode[]>>();
 
-        /** Publish headers only while this picker is still open. */
-        const publishHeaders = (
+        /**
+         * Show the terminal result already produced for this workspace.
+         * Replacing the list promise does not discard that result.
+         */
+        const publishRead = (
           workspace: WorkspaceEntry,
-          headers: ComposerHeader[],
+          nodes: ManagedNode[],
         ) => {
-          if (searchSignal.aborted || generation.aborted) return;
+          if (
+            searchSignal.aborted ||
+            generation.aborted ||
+            catalogueGeneration !== this.generation
+          )
+            return;
+          const key = workspaceStatisticsKey(workspace);
+          const error = nodes.find((node) => node.error)?.error;
+
+          if (error) {
+            failed.add(key);
+
+            append(managedSearchItems(workspace, [], error, rank.get(key)));
+
+            return;
+          }
+
+          const headers = this.headerCache.get(key);
+
+          if (!headers) return;
+          failed.delete(key);
 
           append(
-            managedSearchItems(
-              workspace,
-              headers,
-              undefined,
-              rank.get(workspaceStatisticsKey(workspace)),
-            ),
+            managedSearchItems(workspace, headers, undefined, rank.get(key)),
           );
+        };
+
+        /** True when the promise already has a result, without waiting for a worker. */
+        const settled = async (promise: Promise<ManagedNode[]>) => {
+          let done = false;
+
+          void promise.then(
+            () => {
+              done = true;
+            },
+            () => {
+              done = true;
+            },
+          );
+
+          await Promise.resolve();
+
+          return done;
         };
 
         // Cached headers are the full catalogue. The tree list is only the roots.
@@ -1428,24 +1466,45 @@ export class ChatManager
             continue;
           }
 
+          const wasSettled = await settled(cached);
           const nodes = await cached;
 
           if (generation.aborted) return { failed: 0 };
+
           const headers = this.headerCache.get(key);
 
           if (!nodes.some((node) => node.error) && headers) {
-            publishHeaders(root.workspace, headers);
+            publishRead(root.workspace, nodes);
+            continue;
+          }
+
+          // An in-flight read finished with this result. Do not start another.
+          if (!wasSettled) {
+            publishRead(root.workspace, nodes);
+
+            const current = this.lists.get(key);
+
+            if (
+              !nodes.some((node) => node.error) &&
+              !headers &&
+              current &&
+              current !== cached
+            )
+              publishRead(root.workspace, await current);
+
             continue;
           }
 
           if (this.lists.get(key) === cached) {
             candidates.push(root.workspace);
             retry.add(cached);
+            continue;
           }
+
+          publishRead(root.workspace, nodes);
         }
 
         if (generation.aborted) return { failed: 0 };
-        const catalogueGeneration = this.generation;
 
         const slots = new Map<
           string,
@@ -1522,12 +1581,9 @@ export class ChatManager
         };
 
         for (const item of joined) {
-          if (generation.aborted) break;
-          const nodes = await item.promise;
-          const headers = this.headerCache.get(item.key);
-
-          if (!nodes.some((node) => node.error) && headers)
-            publishHeaders(item.workspace, headers);
+          if (generation.aborted || catalogueGeneration !== this.generation)
+            break;
+          publishRead(item.workspace, await item.promise);
         }
 
         if (generation.aborted) {
@@ -1536,7 +1592,7 @@ export class ChatManager
           return { failed: 0 };
         }
 
-        if (!batch.length) return { failed: 0 };
+        if (!batch.length) return { failed: failed.size };
         const log = startOperationLog(this.operations, 'search managed chats');
 
         try {
@@ -1582,17 +1638,7 @@ export class ChatManager
 
                 if (row.error) releaseOwned(key, nodes);
                 else finishSlot(key, nodes);
-
-                if (searchSignal.aborted || generation.aborted) return;
-
-                append(
-                  managedSearchItems(
-                    workspace,
-                    headers,
-                    row.error,
-                    rank.get(key),
-                  ),
-                );
+                publishRead(workspace, nodes);
               },
             },
           );
@@ -1600,9 +1646,9 @@ export class ChatManager
           for (const key of slots.keys())
             if (!slots.get(key)?.done) releaseOwned(key, []);
 
-          log.finish(result.failed ? 'incomplete' : 'completed');
+          log.finish(result.failed || failed.size ? 'incomplete' : 'completed');
 
-          return result;
+          return { failed: failed.size };
         } catch (error) {
           const cancelled =
             generation.aborted || catalogueGeneration !== this.generation;

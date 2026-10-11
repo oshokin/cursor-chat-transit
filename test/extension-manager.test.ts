@@ -69,7 +69,9 @@ let holdScan: (() => Promise<void>) | undefined;
 let holdChats: (() => Promise<void>) | undefined;
 let holdCatalogue: (() => Promise<void>) | undefined;
 let inventoryError: Error | undefined;
-let catalogueFailure: 'none' | 'throw' | 'partial' = 'none';
+let catalogueFailure: 'none' | 'throw' | 'partial' | 'row' | 'rows' = 'none';
+let afterFirstCatalogueRow: (() => Promise<void>) | undefined;
+let failChatRoot: string | undefined;
 let emptyHold: Promise<void> | undefined;
 let emptyFail = false;
 
@@ -344,24 +346,43 @@ loader._load = function (id, parent, isMain) {
           await holdCatalogue?.();
           handlers.signal.throwIfAborted();
           if (catalogueFailure === 'throw') throw new Error('catalogue failed');
+          let failed = 0;
 
           for (let index = 0; index < job.workspaces.length; index++) {
             if (catalogueFailure === 'partial' && index > 0)
               throw new Error('catalogue failed');
 
-            handlers.onCatalogue?.({
-              index,
-              headers: catalogueHeaders,
-            });
+            if (
+              catalogueFailure === 'rows' ||
+              (catalogueFailure === 'row' && index > 0)
+            ) {
+              failed += 1;
+
+              handlers.onCatalogue?.({
+                index,
+                error: 'EACCES: workspace B cannot be read',
+              });
+            } else {
+              handlers.onCatalogue?.({
+                index,
+                headers: catalogueHeaders,
+              });
+            }
+
+            if (index === 0) await afterFirstCatalogueRow?.();
+            handlers.signal.throwIfAborted();
           }
 
-          return { failed: 0 };
+          return { failed };
         }
 
         if (job.kind === 'list-chats') {
           const headers = listedComposers.slice();
 
           await holdChats?.();
+
+          if (failChatRoot && job.workspace.workspaceDbPath === failChatRoot)
+            throw new Error('EACCES: workspace A cannot be read');
 
           return { allComposers: headers };
         }
@@ -431,6 +452,8 @@ beforeEach(() => {
   holdCatalogue = undefined;
   inventoryError = undefined;
   catalogueFailure = 'none';
+  afterFirstCatalogueRow = undefined;
+  failChatRoot = undefined;
   lockStatuses.length = 0;
   currentDatabase = undefined;
   savedSort = undefined;
@@ -814,7 +837,320 @@ test('accepting a loaded search row does not wait for the rest of the catalogue'
   }
 });
 
-test('a catalogue failure settles every joined tree read', async () => {
+test('a reopened search keeps a shared catalogue error', async () => {
+  catalogueFailure = 'row';
+  let releaseCatalogue: () => void = () => {};
+  let enteredCatalogue: () => void = () => {};
+
+  const enteredCatalogueP = new Promise<void>((resolve) => {
+    enteredCatalogue = resolve;
+  });
+
+  let releaseRow: () => void = () => {};
+  let enteredRow: () => void = () => {};
+
+  const enteredRowP = new Promise<void>((resolve) => {
+    enteredRow = resolve;
+  });
+
+  holdCatalogue = () => {
+    enteredCatalogue();
+
+    return new Promise<void>((resolve) => {
+      releaseCatalogue = resolve;
+    });
+  };
+
+  afterFirstCatalogueRow = () => {
+    enteredRow();
+
+    return new Promise<void>((resolve) => {
+      releaseRow = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const first = manager.find(async () => {});
+
+    await enteredCatalogueP;
+    searchPickers.at(-1)?.hide();
+    await first;
+
+    const second = manager.find(async () => {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseCatalogue();
+    await enteredRowP;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseRow();
+
+    const picker = await readySearch();
+    const roots = await manager.getChildren();
+
+    const failed = picker.items.filter(
+      (row) =>
+        !row.node.chat &&
+        row.node.workspace.workspaceDbPath ===
+          roots[1].workspace.workspaceDbPath,
+    );
+
+    assert.equal(picker.items.filter((row) => !row.node.chat).length, 2);
+    assert.match(failed[0]?.detail || '', /EACCES/);
+    assert.match(picker.title, /1 workspace unavailable/);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-catalogue').length,
+      1,
+    );
+
+    picker.hide();
+    await second;
+  } finally {
+    releaseCatalogue();
+    releaseRow();
+    manager.dispose();
+  }
+});
+
+test('a reopened search keeps rows already read when the shared batch throws', async () => {
+  catalogueFailure = 'partial';
+  let releaseCatalogue: () => void = () => {};
+  let enteredCatalogue: () => void = () => {};
+
+  const enteredCatalogueP = new Promise<void>((resolve) => {
+    enteredCatalogue = resolve;
+  });
+
+  let releaseRow: () => void = () => {};
+  let enteredRow: () => void = () => {};
+
+  const enteredRowP = new Promise<void>((resolve) => {
+    enteredRow = resolve;
+  });
+
+  holdCatalogue = () => {
+    enteredCatalogue();
+
+    return new Promise<void>((resolve) => {
+      releaseCatalogue = resolve;
+    });
+  };
+
+  afterFirstCatalogueRow = () => {
+    enteredRow();
+
+    return new Promise<void>((resolve) => {
+      releaseRow = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const first = manager.find(async () => {});
+
+    await enteredCatalogueP;
+    searchPickers.at(-1)?.hide();
+    await first;
+    const second = manager.find(async () => {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseCatalogue();
+    await enteredRowP;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    releaseRow();
+
+    const picker = await readySearch();
+    const roots = await manager.getChildren();
+
+    const ready = picker.items.filter(
+      (row) =>
+        row.node.chat &&
+        row.node.workspace.workspaceDbPath ===
+          roots[0].workspace.workspaceDbPath,
+    );
+
+    const failed = picker.items.filter(
+      (row) =>
+        row.node.workspace.workspaceDbPath ===
+        roots[1].workspace.workspaceDbPath,
+    );
+
+    assert.equal(ready.length > 0, true);
+
+    assert.equal(
+      failed.some((row) => row.node.chat),
+      false,
+    );
+
+    assert.match(failed[0]?.detail || '', /catalogue failed/);
+    assert.match(picker.title, /1 workspace unavailable/);
+    picker.hide();
+    await second;
+  } finally {
+    releaseCatalogue();
+    releaseRow();
+    manager.dispose();
+  }
+});
+
+test('a joined catalogue error stays in the search result', async () => {
+  let releaseB: () => void = () => {};
+  let enteredB: () => void = () => {};
+
+  const enteredBP = new Promise<void>((resolve) => {
+    enteredB = resolve;
+  });
+
+  let releaseA: () => void = () => {};
+  let enteredA: () => void = () => {};
+
+  const enteredAP = new Promise<void>((resolve) => {
+    enteredA = resolve;
+  });
+
+  let chatCalls = 0;
+
+  holdChats = () => {
+    chatCalls += 1;
+
+    if (chatCalls === 1) {
+      enteredB();
+
+      return new Promise<void>((resolve) => {
+        releaseB = resolve;
+      });
+    }
+
+    enteredA();
+
+    return new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+    const readingB = manager.getChildren(roots[1]);
+
+    await enteredBP;
+    const search = manager.find(async () => {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    failChatRoot = roots[0].workspace.workspaceDbPath;
+    const readingA = manager.getChildren(roots[0]);
+
+    await enteredAP;
+    releaseA();
+    await readingA;
+    releaseB();
+    await readingB;
+
+    const picker = await readySearch();
+
+    const failed = picker.items.filter(
+      (row) =>
+        row.node.workspace.workspaceDbPath ===
+        roots[0].workspace.workspaceDbPath,
+    );
+
+    assert.equal(
+      failed.some((row) => row.node.chat),
+      false,
+    );
+
+    assert.match(failed[0]?.detail || '', /EACCES/);
+    assert.match(picker.title, /1 workspace unavailable/);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-catalogue').length,
+      0,
+    );
+
+    picker.hide();
+    await search;
+  } finally {
+    releaseA();
+    releaseB();
+    manager.dispose();
+  }
+});
+
+test('two catalogue errors are counted once each', async () => {
+  catalogueFailure = 'rows';
+  const manager = new Manager(context, log);
+
+  try {
+    const search = manager.find(async () => {});
+    const picker = await readySearch();
+
+    assert.equal(picker.items.filter((row) => !row.node.chat).length, 2);
+    assert.equal(picker.items.filter((row) => row.node.chat).length, 0);
+    assert.match(picker.title, /2 workspaces unavailable/);
+    picker.hide();
+    await search;
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a later search can read a workspace after its catalogue error is gone', async () => {
+  catalogueFailure = 'rows';
+  const manager = new Manager(context, log);
+
+  try {
+    const failed = manager.find(async () => {});
+    const first = await readySearch();
+
+    first.hide();
+    await failed;
+    catalogueFailure = 'none';
+
+    const search = manager.find(async () => {});
+    const picker = await readySearch();
+
+    assert.equal(picker.items.filter((row) => row.node.chat).length, 2);
+    assert.equal(picker.title.includes('unavailable'), false);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-catalogue').length,
+      2,
+    );
+
+    picker.hide();
+    await search;
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('refresh after a catalogue error does not keep that error in the new list', async () => {
+  catalogueFailure = 'row';
+  const manager = new Manager(context, log);
+
+  try {
+    const search = manager.find(async () => {});
+    const picker = await readySearch();
+
+    picker.hide();
+    await search;
+    manager.refresh();
+    const roots = await manager.getChildren();
+
+    assert.equal(
+      (await manager.getChildren(roots[1]))[0]?.chat?.composerId,
+      'chat',
+    );
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('refresh during a catalogue read drops that generation before a row is published', async () => {
   catalogueFailure = 'partial';
   let releaseCatalogue: () => void = () => {};
   let enteredCatalogue: () => void = () => {};
