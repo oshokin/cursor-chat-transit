@@ -69,6 +69,7 @@ let holdScan: (() => Promise<void>) | undefined;
 let holdChats: (() => Promise<void>) | undefined;
 let holdCatalogue: (() => Promise<void>) | undefined;
 let inventoryError: Error | undefined;
+let catalogueFailure: 'none' | 'throw' | 'partial' = 'none';
 let emptyHold: Promise<void> | undefined;
 let emptyFail = false;
 
@@ -341,12 +342,18 @@ loader._load = function (id, parent, isMain) {
 
         if (job.kind === 'workspace-catalogue') {
           await holdCatalogue?.();
+          handlers.signal.throwIfAborted();
+          if (catalogueFailure === 'throw') throw new Error('catalogue failed');
 
-          for (let index = 0; index < job.workspaces.length; index++)
+          for (let index = 0; index < job.workspaces.length; index++) {
+            if (catalogueFailure === 'partial' && index > 0)
+              throw new Error('catalogue failed');
+
             handlers.onCatalogue?.({
               index,
               headers: catalogueHeaders,
             });
+          }
 
           return { failed: 0 };
         }
@@ -423,6 +430,7 @@ beforeEach(() => {
   holdChats = undefined;
   holdCatalogue = undefined;
   inventoryError = undefined;
+  catalogueFailure = 'none';
   lockStatuses.length = 0;
   currentDatabase = undefined;
   savedSort = undefined;
@@ -587,6 +595,272 @@ test('an inventory error finishes the status and refresh can read again', async 
 
     assert.equal((await manager.getChildren()).length, 2);
   } finally {
+    manager.dispose();
+  }
+});
+
+test('clearing check results drops a cached filtered root list', async () => {
+  hideFirst = true;
+  const manager = new Manager(context, log);
+
+  try {
+    assert.equal((await manager.getChildren()).length, 1);
+    const visible = await manager.getChildren();
+
+    await manager.select(visible[0], true);
+    manager.invalidateCheckResults();
+
+    assert.equal(manager.selection.values().length, 1);
+    assert.equal((await manager.getChildren()).length, 2);
+
+    const before = jobs.filter(
+      (job) => job.kind === 'workspace-statistics',
+    ).length;
+
+    assert.equal((await manager.getChildren()).length, 2);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-statistics').length,
+      before,
+    );
+
+    manager.toggleVisibility();
+    manager.toggleVisibility();
+    manager.sortWorkspaces('recent');
+    assert.equal((await manager.getChildren()).length, 2);
+    manager.sortWorkspaces('name');
+    assert.equal((await manager.getChildren()).length, 2);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a failed workspace check is shown again after results are cleared', async () => {
+  failedFirst = true;
+  const manager = new Manager(context, log);
+
+  try {
+    assert.equal((await manager.getChildren()).length, 1);
+    manager.invalidateCheckResults();
+    assert.equal((await manager.getChildren()).length, 2);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('search does not reread a workspace the tree finished while search waited', async () => {
+  let releaseB: () => void = () => {};
+  let enteredB: () => void = () => {};
+
+  const enteredBP = new Promise<void>((resolve) => {
+    enteredB = resolve;
+  });
+
+  let releaseA: () => void = () => {};
+  let enteredA: () => void = () => {};
+
+  const enteredAP = new Promise<void>((resolve) => {
+    enteredA = resolve;
+  });
+
+  let chatCalls = 0;
+
+  holdChats = () => {
+    chatCalls += 1;
+
+    if (chatCalls === 1) {
+      enteredB();
+
+      return new Promise<void>((resolve) => {
+        releaseB = resolve;
+      });
+    }
+
+    enteredA();
+
+    return new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+    const readingB = manager.getChildren(roots[1]);
+
+    await enteredBP;
+    const search = manager.find(async () => {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const readingA = manager.getChildren(roots[0]);
+
+    await enteredAP;
+    releaseA();
+    await readingA;
+    releaseB();
+    await readingB;
+
+    const picker = await readySearch();
+
+    picker.hide();
+    await search;
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-catalogue').length,
+      0,
+    );
+
+    assert.equal(jobs.filter((job) => job.kind === 'list-chats').length, 2);
+  } finally {
+    releaseA();
+    releaseB();
+    manager.dispose();
+  }
+});
+
+test('closing search releases the picker while the shared catalogue continues', async () => {
+  let releaseCatalogue: () => void = () => {};
+  let enteredCatalogue: () => void = () => {};
+
+  const enteredCatalogueP = new Promise<void>((resolve) => {
+    enteredCatalogue = resolve;
+  });
+
+  holdCatalogue = () => {
+    enteredCatalogue();
+
+    return new Promise<void>((resolve) => {
+      releaseCatalogue = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    let settled = false;
+
+    const search = manager
+      .find(async () => {})
+      .then(() => {
+        settled = true;
+      });
+
+    await enteredCatalogueP;
+    searchPickers.at(-1)?.hide();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(settled, true);
+
+    const reopened = manager.find(async () => {});
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(searchPickers.length, 2);
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'workspace-catalogue').length,
+      1,
+    );
+
+    searchPickers.at(-1)?.hide();
+    releaseCatalogue();
+    await search;
+    await reopened;
+  } finally {
+    releaseCatalogue();
+    manager.dispose();
+  }
+});
+
+test('accepting a loaded search row does not wait for the rest of the catalogue', async () => {
+  const manager = new Manager(context, log);
+
+  try {
+    const roots = await manager.getChildren();
+
+    await manager.getChildren(roots[0]);
+    let releaseCatalogue: () => void = () => {};
+    let enteredCatalogue: () => void = () => {};
+
+    const enteredCatalogueP = new Promise<void>((resolve) => {
+      enteredCatalogue = resolve;
+    });
+
+    holdCatalogue = () => {
+      enteredCatalogue();
+
+      return new Promise<void>((resolve) => {
+        releaseCatalogue = resolve;
+      });
+    };
+
+    let revealed = false;
+
+    const search = manager.find(async () => {
+      revealed = true;
+    });
+
+    await enteredCatalogueP;
+    const picker = searchPickers.at(-1);
+    const index = picker?.items.findIndex((row) => row.node.chat) ?? -1;
+
+    assert.equal(index >= 0, true);
+    picker?.accept(index);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(revealed, true);
+    releaseCatalogue();
+    await search;
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('a catalogue failure settles every joined tree read', async () => {
+  catalogueFailure = 'partial';
+  let releaseCatalogue: () => void = () => {};
+  let enteredCatalogue: () => void = () => {};
+
+  const enteredCatalogueP = new Promise<void>((resolve) => {
+    enteredCatalogue = resolve;
+  });
+
+  holdCatalogue = () => {
+    enteredCatalogue();
+
+    return new Promise<void>((resolve) => {
+      releaseCatalogue = resolve;
+    });
+  };
+
+  const manager = new Manager(context, log);
+
+  try {
+    const search = manager.find(async () => {});
+
+    await enteredCatalogueP;
+    const roots = await manager.getChildren();
+    const left = manager.getChildren(roots[0]);
+    const right = manager.getChildren(roots[1]);
+
+    manager.refresh();
+    releaseCatalogue();
+    await left;
+    await right;
+    const roots2 = await manager.getChildren();
+
+    assert.equal(
+      (await manager.getChildren(roots2[0]))[0]?.chat?.composerId,
+      'chat',
+    );
+
+    assert.equal(
+      jobs.filter((job) => job.kind === 'list-chats').length >= 1,
+      true,
+    );
+
+    searchPickers.at(-1)?.hide();
+    await search;
+  } finally {
+    releaseCatalogue();
     manager.dispose();
   }
 });

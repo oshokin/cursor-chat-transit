@@ -63,7 +63,7 @@ export function showManagedSearch(options: {
   picker: vscode.QuickPick<ManagedSearchItem>;
   /** Append workspace groups in presentation order; shared readers stay in a worker. */
   load: (
-    /** Cancellation for the catalogue read. */
+    /** Stops UI updates. A shared catalogue read keeps running for the tree. */
     signal: AbortSignal,
     append: (/** Rows already loaded. */ rows: ManagedSearchItem[]) => void,
   ) => Promise<{
@@ -109,7 +109,8 @@ export function showManagedSearch(options: {
         options.load(abort.signal, (batch) => {
           if (closed || abort.signal.aborted) return;
           for (const row of batch) rows.push(row);
-          timer ??= setTimeout(render, 100);
+          if (!picker.items.length) render();
+          else timer ??= setTimeout(render, 100);
         }),
       )
       .then(
@@ -122,9 +123,10 @@ export function showManagedSearch(options: {
         },
       )
       .catch((error: unknown) => {
-        if (closed || abort.signal.aborted) return;
-        picker.title = 'Search incomplete — see operation log';
+        if (abort.signal.aborted) return;
         options.onError(error);
+        if (closed) return;
+        picker.title = 'Search incomplete — see operation log';
       })
       .finally(() => {
         render();
@@ -144,8 +146,9 @@ export function showManagedSearch(options: {
         clearTimeout(timer);
         for (const subscription of subscriptions) subscription.dispose();
         picker.dispose();
-        // Release the worker before revealing a row that could trigger another read.
-        void loading.then(() => resolve(selected));
+        // The picker closes now. The shared catalogue keeps running for the tree.
+        resolve(selected);
+        void loading.catch(() => {});
       }),
     ];
 

@@ -165,8 +165,7 @@ export class ChatManager
   /** Keep the visibility command present in both states. */
   toggleVisibility(): void {
     this.showAll = !this.showAll;
-    this.viewRevision += 1;
-    this.orderedRoots = undefined;
+    this.invalidateVisibleOrder();
 
     void vscode.commands.executeCommand(
       'setContext',
@@ -680,9 +679,16 @@ export class ChatManager
     });
   }
 
+  /** Drop a cached visible-root order. Inventory and chat headers stay. */
+  private invalidateVisibleOrder(): void {
+    this.viewRevision += 1;
+    this.orderedRoots = undefined;
+  }
+
   /** Drop check labels after the property budget changes. Selection stays. */
   invalidateCheckResults(): void {
     this.results.clear();
+    this.invalidateVisibleOrder();
     this.changed.fire(undefined);
   }
 
@@ -741,8 +747,7 @@ export class ChatManager
   /** Remember the workspace order without rereading Cursor. */
   sortWorkspaces(mode: 'name' | 'recent'): void {
     this.workspaceSort = mode;
-    this.viewRevision += 1;
-    this.orderedRoots = undefined;
+    this.invalidateVisibleOrder();
     void this.context.globalState.update('manageWorkspaceSort', mode);
     this.changed.fire(undefined);
   }
@@ -1130,7 +1135,12 @@ export class ChatManager
 
       return this.storeCatalogue(workspace, result.allComposers, generation);
     } catch (error) {
-      if (generation !== this.generation) return [];
+      if (generation !== this.generation) {
+        log.finish('cancelled');
+
+        return [];
+      }
+
       log.finish(signal.aborted ? 'cancelled' : 'failed', undefined, error);
 
       return [
@@ -1370,15 +1380,14 @@ export class ChatManager
           `Search failed: ${error instanceof Error ? error.message : String(error)}`,
         ),
       load: async (
-        /** Cancellation for this search. */
+        /** Closes search UI updates. It does not cancel a tree that joined the read. */
         searchSignal,
         /** Append the next batch of search rows. */
         append,
       ) => {
         const roots = await this.getChildren();
 
-        if (searchSignal.aborted || generation.aborted) return { failed: 0 };
-        const pending: WorkspaceEntry[] = [];
+        if (generation.aborted) return { failed: 0 };
 
         const rank = new Map(
           roots.map((root, index) => [
@@ -1387,33 +1396,55 @@ export class ChatManager
           ]),
         );
 
+        const candidates: WorkspaceEntry[] = [];
+        const retry = new Set<Promise<ManagedNode[]>>();
+
+        /** Publish headers only while this picker is still open. */
+        const publishHeaders = (
+          workspace: WorkspaceEntry,
+          headers: ComposerHeader[],
+        ) => {
+          if (searchSignal.aborted || generation.aborted) return;
+
+          append(
+            managedSearchItems(
+              workspace,
+              headers,
+              undefined,
+              rank.get(workspaceStatisticsKey(workspace)),
+            ),
+          );
+        };
+
         // Cached headers are the full catalogue. The tree list is only the roots.
         for (const root of roots) {
+          if (generation.aborted) return { failed: 0 };
+          if (searchSignal.aborted) break;
           const key = workspaceStatisticsKey(root.workspace);
           const cached = this.lists.get(key);
 
-          if (cached) {
-            const nodes = await cached;
+          if (!cached) {
+            candidates.push(root.workspace);
+            continue;
+          }
 
-            if (searchSignal.aborted || generation.aborted)
-              return { failed: 0 };
-            const headers = this.headerCache.get(key);
+          const nodes = await cached;
 
-            if (nodes.some((node) => node.error) || !headers)
-              pending.push(root.workspace);
-            else
-              append(
-                managedSearchItems(
-                  root.workspace,
-                  headers,
-                  undefined,
-                  rank.get(key),
-                ),
-              );
-          } else pending.push(root.workspace);
+          if (generation.aborted) return { failed: 0 };
+          const headers = this.headerCache.get(key);
+
+          if (!nodes.some((node) => node.error) && headers) {
+            publishHeaders(root.workspace, headers);
+            continue;
+          }
+
+          if (this.lists.get(key) === cached) {
+            candidates.push(root.workspace);
+            retry.add(cached);
+          }
         }
 
-        if (!pending.length) return { failed: 0 };
+        if (generation.aborted) return { failed: 0 };
         const catalogueGeneration = this.generation;
 
         const slots = new Map<
@@ -1425,10 +1456,17 @@ export class ChatManager
           }
         >();
 
-        for (const workspace of pending) {
-          const key = workspaceStatisticsKey(workspace);
+        const batch: WorkspaceEntry[] = [];
 
-          if (this.lists.has(key)) continue;
+        const joined: Array<{
+          workspace: WorkspaceEntry;
+          key: string;
+          promise: Promise<ManagedNode[]>;
+        }> = [];
+
+        /** One producer for this physical workspace in the current generation. */
+        const reserve = (workspace: WorkspaceEntry) => {
+          const key = workspaceStatisticsKey(workspace);
           let resolve: (nodes: ManagedNode[]) => void = () => {};
 
           const promise = new Promise<ManagedNode[]>((done) => {
@@ -1437,9 +1475,29 @@ export class ChatManager
 
           this.lists.set(key, promise);
           slots.set(key, { promise, resolve, done: false });
-        }
+          batch.push(workspace);
+        };
 
-        const log = startOperationLog(this.operations, 'search managed chats');
+        for (const workspace of candidates) {
+          const key = workspaceStatisticsKey(workspace);
+          const cached = this.lists.get(key);
+
+          if (cached && !retry.has(cached)) {
+            joined.push({ workspace, key, promise: cached });
+            continue;
+          }
+
+          if (cached && this.lists.get(key) === cached) this.lists.delete(key);
+
+          const current = this.lists.get(key);
+
+          if (current) {
+            joined.push({ workspace, key, promise: current });
+            continue;
+          }
+
+          reserve(workspace);
+        }
 
         /** Finish a reserved read without hanging a tree that joined it. */
         const finishSlot = (key: string, nodes: ManagedNode[]) => {
@@ -1449,6 +1507,37 @@ export class ChatManager
           slot.done = true;
           slot.resolve(nodes);
         };
+
+        /** Drop a reservation only when it is still the promise this search created. */
+        const releaseOwned = (key: string, nodes: ManagedNode[]) => {
+          const slot = slots.get(key);
+
+          if (slot && this.lists.get(key) === slot.promise) {
+            if (catalogueGeneration === this.generation && nodes.length)
+              this.lists.set(key, Promise.resolve(nodes));
+            else this.lists.delete(key);
+          }
+
+          finishSlot(key, nodes);
+        };
+
+        for (const item of joined) {
+          if (generation.aborted) break;
+          const nodes = await item.promise;
+          const headers = this.headerCache.get(item.key);
+
+          if (!nodes.some((node) => node.error) && headers)
+            publishHeaders(item.workspace, headers);
+        }
+
+        if (generation.aborted) {
+          for (const key of slots.keys()) releaseOwned(key, []);
+
+          return { failed: 0 };
+        }
+
+        if (!batch.length) return { failed: 0 };
+        const log = startOperationLog(this.operations, 'search managed chats');
 
         try {
           /** How many items failed. */
@@ -1460,22 +1549,27 @@ export class ChatManager
               kind: 'workspace-catalogue',
               ...(await prepareSqlite(this.context)),
               ...transferSettings(),
-              workspaces: pending,
+              workspaces: batch,
             },
             {
               signal: generation,
               onEvent: log.event,
               onNote: log.note,
               onCatalogue: (row) => {
-                if (
-                  generation.aborted ||
-                  catalogueGeneration !== this.generation
-                )
-                  return;
-                const workspace = pending[row.index];
+                const workspace = batch[row.index];
 
                 if (!workspace) return;
                 const key = workspaceStatisticsKey(workspace);
+
+                if (
+                  generation.aborted ||
+                  catalogueGeneration !== this.generation
+                ) {
+                  releaseOwned(key, []);
+
+                  return;
+                }
+
                 const headers = orderedChatHeaders(row.headers || []);
 
                 const nodes = row.error
@@ -1486,12 +1580,10 @@ export class ChatManager
                       catalogueGeneration,
                     );
 
-                if (row.error && catalogueGeneration === this.generation)
-                  this.lists.set(key, Promise.resolve(nodes));
+                if (row.error) releaseOwned(key, nodes);
+                else finishSlot(key, nodes);
 
-                finishSlot(key, nodes);
-
-                if (searchSignal.aborted) return;
+                if (searchSignal.aborted || generation.aborted) return;
 
                 append(
                   managedSearchItems(
@@ -1505,7 +1597,8 @@ export class ChatManager
             },
           );
 
-          for (const [key, slot] of slots) if (!slot.done) finishSlot(key, []);
+          for (const key of slots.keys())
+            if (!slots.get(key)?.done) releaseOwned(key, []);
 
           log.finish(result.failed ? 'incomplete' : 'completed');
 
@@ -1514,12 +1607,22 @@ export class ChatManager
           const cancelled =
             generation.aborted || catalogueGeneration !== this.generation;
 
+          const message =
+            error instanceof Error
+              ? error.message
+              : 'Read failed — see operation log';
+
           for (const [key, slot] of slots) {
             if (slot.done) continue;
 
-            if (catalogueGeneration === this.generation) this.lists.delete(key);
+            const workspace = batch.find(
+              (item) => workspaceStatisticsKey(item) === key,
+            );
 
-            finishSlot(key, []);
+            releaseOwned(
+              key,
+              !cancelled && workspace ? [{ workspace, error: message }] : [],
+            );
           }
 
           log.finish(cancelled ? 'cancelled' : 'failed', undefined, error);

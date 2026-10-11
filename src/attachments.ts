@@ -149,10 +149,15 @@ function attachmentNameRank(
   return null;
 }
 
-/** Locate a chat image under the workspace `images/` directory. */
+/**
+ * Locate a chat image under the workspace `images/` directory.
+ * A missing directory is absence. An unreadable directory is an error.
+ */
 export async function resolveAttachmentPath(
   workspace: WorkspaceEntry,
   uuid: string,
+  /** Stops the lookup. Cancellation is not a missing file. */
+  signal?: AbortSignal,
 ): Promise<{
   /** Absolute path of the cache file. */
   filePath: string;
@@ -161,16 +166,27 @@ export async function resolveAttachmentPath(
 } | null> {
   if (!IMAGE_UUID.test(uuid))
     fail('INVALID_RESOURCE', 'Invalid attachment id.');
+  signal?.throwIfAborted();
   const dir = attachmentDirectory(workspace);
   let names: string[];
 
   try {
     const st = await fs.promises.lstat(dir);
 
+    signal?.throwIfAborted();
     if (st.isSymbolicLink() || !st.isDirectory()) return null;
     names = await fs.promises.readdir(dir);
-  } catch {
-    return null;
+    signal?.throwIfAborted();
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code === 'ENOENT') return null;
+
+    throw Object.assign(
+      new Error(`Cannot read attachments in ${dir}`, { cause: error }),
+      { code },
+    );
   }
 
   const matches: Array<{
@@ -193,7 +209,22 @@ export async function resolveAttachmentPath(
       fail('INVALID_RESOURCE', 'Attachment path escapes workspace storage.');
     }
 
-    const lst = await fs.promises.lstat(filePath);
+    let lst: fs.Stats;
+
+    try {
+      lst = await fs.promises.lstat(filePath);
+      signal?.throwIfAborted();
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+
+      if (code === 'ENOENT') continue;
+
+      throw Object.assign(
+        new Error(`Cannot read attachment ${filePath}`, { cause: error }),
+        { code },
+      );
+    }
 
     if (!lst.isFile() && !lst.isSymbolicLink()) continue;
     matches.push({ filePath, extension: ranked.extension, rank: ranked.rank });

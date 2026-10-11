@@ -1,6 +1,6 @@
 import { transferEvent } from './transfer-events';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import fs from 'node:fs';
 import { open } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -26,7 +26,7 @@ export async function hashFile(
 
   try {
     await pipeline(
-      createReadStream(filePath, { signal }),
+      fs.createReadStream(filePath, { signal }),
       new Transform({
         /** Hash each chunk and count bytes. */
         transform(
@@ -70,7 +70,7 @@ export async function writeHexFile(
   source: string,
   dest: string,
 ): Promise<void> {
-  const input = createReadStream(source, { highWaterMark: 1024 * 1024 });
+  const input = fs.createReadStream(source, { highWaterMark: 1024 * 1024 });
   const handle = await open(dest, 'wx');
 
   try {

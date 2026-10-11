@@ -125,9 +125,10 @@ test('native search sorts cached and streamed groups together without resetting 
   assert.equal((await f.result)?.chat?.composerId, 'found');
 });
 
-test('search dismissal cancels header loading and waits for cleanup; losing focus does not', async () => {
+test('search dismissal releases the picker before header loading finishes; losing focus does not', async () => {
   let signal!: AbortSignal;
   let release!: () => void;
+  let loadFinished = false;
 
   const f = fixture(async (value) => {
     signal = value;
@@ -135,6 +136,8 @@ test('search dismissal cancels header loading and waits for cleanup; losing focu
     await new Promise<void>((resolve) => {
       release = resolve;
     });
+
+    loadFinished = true;
 
     return { failed: 0 };
   });
@@ -144,17 +147,13 @@ test('search dismissal cancels header loading and waits for cleanup; losing focu
   assert.equal(signal.aborted, false);
   f.picker.hide();
   assert.equal(signal.aborted, true);
-  let finished = false;
-
-  void f.result.then(() => {
-    finished = true;
-  });
-
-  await tick();
-  assert.equal(finished, false);
-  release();
   assert.equal(await f.result, undefined);
+  assert.equal(loadFinished, false);
   assert.equal(f.picker.disposed, true);
+  release();
+  await tick();
+  assert.equal(loadFinished, true);
+  assert.equal(f.errors.length, 0);
 });
 
 test('search retains partial results and makes unavailable workspaces explicit', async () => {

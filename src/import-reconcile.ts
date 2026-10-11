@@ -381,7 +381,13 @@ export async function pendingResourceMatches(
       return imageChecksum(dest, dep.sha256, opts.signal);
     }
 
-    const found = await resolveAttachmentPath(opts.workspace, dep.id);
+    opts.signal?.throwIfAborted();
+
+    const found = await resolveAttachmentPath(
+      opts.workspace,
+      dep.id,
+      opts.signal,
+    );
 
     if (!found) return false;
 
