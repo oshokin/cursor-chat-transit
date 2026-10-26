@@ -35,6 +35,19 @@ test('already imported plus skipped chats is incomplete, without a restart', () 
   assert.equal(notice.restart, false);
 });
 
+test('repaired imported models request one Cursor restart', () => {
+  const notice = formatImportNotice(
+    result({
+      alreadyImported: 1,
+      modelConfigsRepaired: 1,
+    }),
+  );
+
+  assert.equal(notice.title, 'Repaired 1 imported chat model');
+  assert.equal(notice.restart, true);
+  assert.match(notice.detail, /Quit Cursor and reopen/);
+});
+
 test('history-only updated copy remains incomplete', () => {
   const notice = formatImportNotice(
     result({ imported: 1, newVersions: 1, historyOnly: 1 }),

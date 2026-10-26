@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import { operationTempDir } from './operation-temp';
@@ -7,6 +8,7 @@ import { ordinalName } from './bundle-names';
 import type { ConversationLayout } from './bundle-writer';
 import { rewriteCanvasReferences } from './canvases';
 import { remapJsonObject } from './chat-json';
+import { remapConversationStateIds } from './conversation-state';
 import { remapFamilyRecord } from './chat-family';
 import { sqlText } from './core';
 import * as db from './db';
@@ -39,6 +41,12 @@ import { KV_ROW_MISMATCH_SQL } from './kv-compare';
 import { readNdjson } from './ndjson-io';
 import { rewritePlanReferences } from './plans';
 import { parseBoundedJson } from './record-json';
+import {
+  MODEL_PROJECTION_VERSION,
+  modelConfigHash,
+  resolveModelConfig,
+  sameModelConfig,
+} from './model-compatibility';
 import { BUBBLE_BODY_POINTERS, BUBBLE_KEYED_FIELDS } from './schema';
 import { execSql } from './sqlite';
 import { SqliteSession } from './sqlite-session';
@@ -395,6 +403,7 @@ export async function assembleComposer(
   >;
 
   fields.composerId = opts.row.targetId;
+  normalizeComposerModel(opts.ctx, fields);
 
   if (layout === 'empty') fields.fullConversationHeadersOnly = [];
 
@@ -449,6 +458,272 @@ export async function assembleComposer(
   }
 }
 
+/** Replace an unavailable archived model with the destination selection. */
+export function normalizeComposerModel(
+  ctx: TransferContext,
+  fields: Record<string, unknown>,
+): boolean {
+  if (!ctx.modelImportPolicy || fields.modelConfig === undefined) return false;
+
+  const resolved = resolveModelConfig(
+    fields.modelConfig,
+    ctx.modelImportPolicy,
+  );
+
+  if (!resolved.replaced) return false;
+  fields.modelConfig = resolved.config;
+
+  transferEvent({
+    action: 'Replace unavailable imported model',
+    status: 'info',
+    detail: `${resolved.sourceModel || 'unknown'} -> ${resolved.fallbackModel || 'default'}`,
+  });
+
+  return true;
+}
+
+/** Upgrade one same-snapshot destination projection without overwriting user state. */
+export async function projectImportedModel(opts: {
+  /** Transfer hooks, destination policy, and cancellation. */
+  ctx: TransferContext;
+  /** Read-only destination global connection. */
+  connGl: import('./types').SqliteConn;
+  /** Destination workspace. */
+  workspace: WorkspaceEntry;
+  /** Extracted bundle root. */
+  root: string;
+  /** Source chat ordinal in the bundle. */
+  ordinal: number;
+  /** Existing destination composer id. */
+  targetComposerId: string;
+  /** Scanned source and target identities. */
+  row: ChatRow;
+  /** Immutable source snapshot hash from the verified receipt. */
+  snapshotHash: string;
+  /** Durable projection state and audit store. */
+  journal: JournalStore;
+}): Promise<
+  'applied' | 'already-current' | 'user-owned' | 'conflict' | 'not-needed'
+> {
+  if (!opts.ctx.modelImportPolicy) return 'not-needed';
+  const dir = path.join(opts.root, 'chats', ordinalName(opts.ordinal));
+
+  const archived = asObject(
+    parseBoundedJson(
+      await readFile(path.join(dir, 'composer.json')),
+      'composer',
+      opts.ctx.maxJsonProperties,
+      'composer',
+    ),
+    'composer',
+  );
+
+  const archivedFields = asObject(archived.fields, 'composer fields');
+
+  const resolved = resolveModelConfig(
+    archivedFields.modelConfig,
+    opts.ctx.modelImportPolicy,
+  );
+
+  if (!resolved.replaced) return 'not-needed';
+  const key = `composerData:${opts.targetComposerId}`;
+  const desiredHash = modelConfigHash(resolved.config);
+
+  const previous = await opts.journal.projection({
+    sourceComposerId: opts.row.sourceId,
+    snapshotHash: opts.snapshotHash,
+    targetComposerId: opts.targetComposerId,
+  });
+
+  for (let attempt = 0; attempt < CAS_ATTEMPTS; attempt++) {
+    const raw = await db.readKvText(opts.connGl, key);
+
+    if (raw === null) return 'conflict';
+
+    const current = asObject(
+      parseBoundedJson(
+        Buffer.from(raw),
+        'destination composer',
+        opts.ctx.maxJsonProperties,
+        'composer',
+      ),
+      'destination composer',
+    );
+
+    const currentHash = modelConfigHash(current.modelConfig);
+
+    if (currentHash === desiredHash) {
+      const operation = projectionOperation(opts, currentHash, desiredHash);
+
+      await opts.journal.beginProjection(operation);
+
+      await opts.journal.completeProjection(
+        operation,
+        'already-current',
+        desiredHash,
+      );
+
+      return 'already-current';
+    }
+
+    const importerOwned =
+      previous?.managedHash === currentHash ||
+      sameModelConfig(current.modelConfig, archivedFields.modelConfig);
+
+    if (!importerOwned) {
+      const operation = projectionOperation(
+        opts,
+        currentHash,
+        desiredHash,
+        previous?.managedHash ?? modelConfigHash(archivedFields.modelConfig),
+      );
+
+      await opts.journal.beginProjection(operation);
+
+      await opts.journal.completeProjection(
+        operation,
+        'user-owned',
+        currentHash,
+        operation.managedHash,
+      );
+
+      return 'user-owned';
+    }
+
+    const operation = projectionOperation(opts, currentHash, desiredHash);
+
+    await opts.journal.beginProjection(operation);
+    const next = JSON.stringify({ ...current, modelConfig: resolved.config });
+    const write = connOf(opts.ctx, opts.workspace.globalDbPath, false);
+
+    try {
+      await execSql({
+        ...write,
+        sql: [
+          'BEGIN IMMEDIATE;',
+          db.kvCasReplaceSql(key, raw, next),
+          'COMMIT;',
+        ].join('\n'),
+      });
+    } catch (error) {
+      await opts.journal.clearPendingProjection(operation.operationId);
+
+      if (isCasConflict(error) && attempt < CAS_ATTEMPTS - 1) continue;
+      if (isCasConflict(error)) return 'conflict';
+
+      throw error;
+    }
+
+    const stored = await db.readKvText(opts.connGl, key);
+
+    if (!stored) {
+      throw new TransferError('Imported model projection disappeared.');
+    }
+
+    const storedBody = asObject(
+      parseBoundedJson(
+        Buffer.from(stored),
+        'projected composer',
+        opts.ctx.maxJsonProperties,
+        'composer',
+      ),
+      'projected composer',
+    );
+
+    if (modelConfigHash(storedBody.modelConfig) !== desiredHash) {
+      throw new TransferError('Imported model projection verification failed.');
+    }
+
+    await opts.journal.completeProjection(operation, 'applied', desiredHash);
+
+    transferEvent({
+      action: 'Project imported model compatibility',
+      status: 'completed',
+      chatId: opts.targetComposerId,
+      detail: `${resolved.sourceModel || 'unknown'} -> ${resolved.fallbackModel || 'default'} version=${MODEL_PROJECTION_VERSION}`,
+    });
+
+    return 'applied';
+  }
+
+  return 'conflict';
+}
+
+/** Build one durable model projection operation. */
+function projectionOperation(
+  opts: Parameters<typeof projectImportedModel>[0],
+  beforeHash: string,
+  desiredHash: string,
+  managedHash = beforeHash,
+): import('./journal-db').PendingProjection {
+  return {
+    operationId: randomUUID(),
+    sourceComposerId: opts.row.sourceId,
+    snapshotHash: opts.snapshotHash,
+    targetComposerId: opts.targetComposerId,
+    projectionVersion: MODEL_PROJECTION_VERSION,
+    beforeHash,
+    managedHash,
+    desiredHash,
+    outcome: 'conflict',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** Reconcile a projection process that stopped around the destination CAS. */
+export async function reconcilePendingProjection(opts: {
+  /** Transfer hooks and cancellation. */
+  ctx: TransferContext;
+  /** Read-only destination global connection. */
+  connGl: import('./types').SqliteConn;
+  /** Durable projection state and audit store. */
+  journal: JournalStore;
+}): Promise<void> {
+  const pending = await opts.journal.pendingProjection();
+
+  if (!pending) return;
+
+  const raw = await db.readKvText(
+    opts.connGl,
+    `composerData:${pending.targetComposerId}`,
+  );
+
+  if (!raw) {
+    await opts.journal.clearPendingProjection(pending.operationId);
+
+    return;
+  }
+
+  const body = asObject(
+    parseBoundedJson(
+      Buffer.from(raw),
+      'pending projected composer',
+      opts.ctx.maxJsonProperties,
+      'composer',
+    ),
+    'pending projected composer',
+  );
+
+  const currentHash = modelConfigHash(body.modelConfig);
+
+  if (currentHash === pending.desiredHash) {
+    await opts.journal.completeProjection(pending, 'applied', currentHash);
+
+    return;
+  }
+
+  await opts.journal.clearPendingProjection(pending.operationId);
+
+  if (currentHash !== pending.beforeHash) {
+    transferEvent({
+      action: 'Reconcile imported model projection',
+      status: 'info',
+      chatId: pending.targetComposerId,
+      detail: 'Destination model changed outside the interrupted projection',
+    });
+  }
+}
+
 /** Rewrite composer and bubble ids and resource paths for the destination. */
 export async function remapValue(
   opts: {
@@ -483,6 +758,17 @@ export async function remapValue(
   const ids = new Map<string, string>([[opts.row.sourceId, opts.row.targetId]]);
 
   if (sourceBubbleId && targetBubbleId) ids.set(sourceBubbleId, targetBubbleId);
+
+  if (!sourceBubbleId && record.conversationState !== undefined) {
+    await opts.work.queryLines(
+      `SELECT json_array(source_id, target_id) FROM bubble WHERE ordinal = ${opts.ordinal};`,
+      (line) => {
+        const pair = JSON.parse(line) as [string, string];
+
+        ids.set(pair[0], pair[1]);
+      },
+    );
+  }
 
   // Query only known schema references in this bounded record, never the whole chat.
   const references = new Set<string>();
@@ -569,9 +855,9 @@ export async function remapValue(
       if (typeof id === 'string') familyIds.add(id);
   }
 
-  if (familyIds.size) {
-    const familyMap = new Map<string, string>();
+  const familyMap = new Map<string, string>();
 
+  if (familyIds.size) {
     await opts.work.queryLines(
       `SELECT json_array(source_id, target_id) FROM chat WHERE source_id IN (${[...familyIds].map(sqlText).join(',')});`,
       (line) => {
@@ -582,6 +868,15 @@ export async function remapValue(
     );
 
     rewritten = remapFamilyRecord(rewritten, familyMap);
+  }
+
+  if (rewritten.conversationState !== undefined) {
+    const stateIds = new Map([...ids, ...familyMap]);
+
+    rewritten.conversationState = remapConversationStateIds(
+      rewritten.conversationState,
+      stateIds,
+    );
   }
 
   if (maps) {
@@ -602,7 +897,10 @@ export async function remapValue(
   }
 
   rewritten.composerId = opts.row.targetId;
-  if (targetBubbleId) rewritten.bubbleId = targetBubbleId;
+
+  if (targetBubbleId && record.bubbleId === sourceBubbleId) {
+    rewritten.bubbleId = targetBubbleId;
+  }
 
   return rewritten;
 }

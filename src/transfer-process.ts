@@ -2,6 +2,7 @@ import type { DeletionJob } from './deletion-types';
 import type { RecoveryPreview } from './recovery-preview';
 import type { StatisticsJob, StatisticsUpdate } from './statistics';
 import type { TransferEvent } from './transfer-events';
+import type { ModelImportPolicy } from './model-compatibility';
 import type {
   TransferPhase,
   TransferPhaseMetrics,
@@ -21,7 +22,11 @@ export interface TransferJob {
   initFile: string;
   /** Per-process sqlite timeout. */
   timeoutMs?: number;
+  /** SQLite busy timeout. */
   busyTimeoutMs?: number;
+  /** Destination model compatibility facts for import. */
+  modelImportPolicy?: ModelImportPolicy;
+  /** Plans directory. */
   plansDir?: string;
   /** Object-property budget for one JSON payload during this operation. */
   maxJsonProperties?: number;

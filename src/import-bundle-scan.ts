@@ -2,12 +2,14 @@ import { coherentFamilyAssignment } from './chat-family';
 import { adjustFamilyPlan, type CatalogFamilyRow } from './import-family-plan';
 import { textRecovery } from './text-recovery';
 import { randomUUID } from 'node:crypto';
+import { decodeState } from './conversation-state';
 import path from 'node:path';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import { ordinalName } from './bundle-names';
 import type { BundleResourceRef, ConversationLayout } from './bundle-writer';
 import { canvasFilenamesFromChat, isCanvasFilename } from './canvases';
 import { sqlText } from './core';
+import * as db from './db';
 import {
   blobKeysFromComposerBody,
   imageUuidsFromBubbles,
@@ -71,6 +73,7 @@ export async function scanAll(opts: {
     create: [],
     skipped: [],
     already: [],
+    repair: [],
     newVersions: [],
     restored: [],
   };
@@ -135,8 +138,8 @@ export async function scanAll(opts: {
           snapshotHash: scanned.hash,
         },
         receipts,
-        async (targetComposerId) =>
-          classifyTargetObservation(
+        async (targetComposerId) => {
+          const observed = classifyTargetObservation(
             await observeTargetComposer({
               targetComposerId,
               workspace: opts.workspace,
@@ -145,7 +148,22 @@ export async function scanAll(opts: {
               wsInfo: opts.pair.wsInfo.layout,
               glInfo: opts.pair.glInfo.layout,
             }),
-          ),
+          );
+
+          if (
+            observed === 'available' &&
+            targetComposerId !== sourceId &&
+            (await stateContainsSourceId(
+              opts.pair.connGl,
+              targetComposerId,
+              sourceId,
+            ))
+          ) {
+            return 'deleted';
+          }
+
+          return observed;
+        },
       );
 
       const name = typeof rec.name === 'string' ? rec.name : undefined;
@@ -198,6 +216,11 @@ export async function scanAll(opts: {
           reason: 'already imported',
         });
 
+        plan.repair.push({
+          ordinal,
+          targetComposerId: decision.targetComposerId,
+        });
+
         continue;
       }
 
@@ -240,6 +263,27 @@ export async function scanAll(opts: {
   );
 
   return plan;
+}
+
+/** Detect copies made before opaque conversation-state ids were remapped. */
+async function stateContainsSourceId(
+  conn: import('./types').SqliteConn,
+  targetComposerId: string,
+  sourceComposerId: string,
+): Promise<boolean> {
+  const raw = await db.readKvText(conn, `composerData:${targetComposerId}`);
+
+  if (!raw) return false;
+
+  try {
+    const body = JSON.parse(raw) as { conversationState?: unknown };
+
+    return decodeState(body.conversationState).includes(
+      Buffer.from(sourceComposerId),
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Keep a reused family on one destination copy. A split pair becomes a new family. */
@@ -330,6 +374,12 @@ async function realignSkippedFamilies(
         (item) => !remove.has(item.composerId),
       );
 
+      const removedOrdinals = new Set(members.map((member) => member.ordinal));
+
+      plan.repair = plan.repair.filter(
+        (item) => !removedOrdinals.has(item.ordinal),
+      );
+
       continue;
     }
 
@@ -345,6 +395,12 @@ async function realignSkippedFamilies(
       const already = alreadyBySource.get(member.sourceId);
 
       if (already) already.targetComposerId = targetId;
+
+      const repair = plan.repair.find(
+        (item) => item.ordinal === member.ordinal,
+      );
+
+      if (repair) repair.targetComposerId = targetId;
     }
   }
 }
@@ -571,11 +627,54 @@ export async function scanChat(
         need('canvas', name);
       }
 
+      const slash = bubbleId.indexOf('/');
+      let targetBubbleId: string = randomUUID();
+
+      if (slash > 0) {
+        const sourceRoot = bubbleId.slice(0, slash);
+
+        const targetRoot = (
+          await opts.work.exec(
+            `SELECT target_id FROM bubble_root WHERE ordinal=${ordinal} AND source_id=${sqlText(sourceRoot)};`,
+          )
+        ).trim();
+
+        targetBubbleId = targetRoot ? targetRoot + bubbleId.slice(slash) : '';
+      } else {
+        await opts.work.exec(
+          `INSERT INTO bubble_root(ordinal, source_id, target_id)
+           VALUES (${ordinal}, ${sqlText(bubbleId)}, ${sqlText(targetBubbleId)});`,
+        );
+      }
+
       await opts.work.exec(
         `INSERT INTO bubble(ordinal, source_id, target_id, component)
-         VALUES (${ordinal}, ${sqlText(bubbleId)}, ${sqlText(randomUUID())}, ${sqlText(component)});`,
+         VALUES (${ordinal}, ${sqlText(bubbleId)}, ${sqlText(targetBubbleId)}, ${sqlText(component)});`,
       );
     }
+  }
+
+  await opts.work.exec(
+    `UPDATE bubble
+     SET target_id=(
+       SELECT root.target_id || substr(bubble.source_id, instr(bubble.source_id, '/'))
+       FROM bubble_root root
+       WHERE root.ordinal=bubble.ordinal
+         AND root.source_id=substr(bubble.source_id, 1, instr(bubble.source_id, '/') - 1)
+     )
+     WHERE ordinal=${ordinal} AND target_id='';`,
+  );
+
+  const unresolvedNested = (
+    await opts.work.exec(
+      `SELECT source_id FROM bubble WHERE ordinal=${ordinal} AND target_id='' LIMIT 1;`,
+    )
+  ).trim();
+
+  if (unresolvedNested) {
+    throw new Error(
+      `Chat ${sourceId} stores nested message ${unresolvedNested} without its root.`,
+    );
   }
 
   const missingReference = (

@@ -2,7 +2,7 @@
   "name": "cursor-chat-transit",
   "displayName": "Cursor Chat Transit",
   "description": "Move your Cursor chats between workspaces and devices.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "oshokin",
   "icon": "resources/marketplace.png",
   "license": "MIT",
@@ -181,12 +181,12 @@
       },
       {
         "command": "cursorChatTransit.manageSortWorkspaces",
-        "title": "Sort workspaces\u2026",
+        "title": "Sort workspaces…",
         "category": "Cursor Chat Transit"
       },
       {
         "command": "cursorChatTransit.manageSortName",
-        "title": "Name (A\u2013Z)",
+        "title": "Name (A–Z)",
         "category": "Cursor Chat Transit"
       },
       {
@@ -214,7 +214,7 @@
       },
       {
         "command": "cursorChatTransit.manageSearch",
-        "title": "Find chats and workspaces\u2026",
+        "title": "Find chats and workspaces…",
         "category": "Cursor Chat Transit",
         "icon": "$(search)"
       },
@@ -250,19 +250,19 @@
       },
       {
         "command": "cursorChatTransit.manageDelete",
-        "title": "Delete selected\u2026",
+        "title": "Delete selected…",
         "category": "Cursor Chat Transit",
         "icon": "$(trash)"
       },
       {
         "command": "cursorChatTransit.manageDeleteItem",
-        "title": "Delete chat\u2026",
+        "title": "Delete chat…",
         "category": "Cursor Chat Transit",
         "icon": "$(trash)"
       },
       {
         "command": "cursorChatTransit.manageDeleteWorkspaceData",
-        "title": "Delete workspace data\u2026",
+        "title": "Delete workspace data…",
         "category": "Cursor Chat Transit",
         "icon": "$(trash)"
       }

@@ -213,6 +213,7 @@ function seedPlan(rows: readonly CatalogFamilyRow[]): Plan {
     create: [],
     skipped: [],
     already: [],
+    repair: [],
     newVersions: [],
     restored: [],
   };

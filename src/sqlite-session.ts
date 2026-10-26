@@ -21,6 +21,8 @@ export class SqliteSession {
   private failure?: Error;
   /** True after the child has exited. */
   private closed = false;
+  /** True after shutdown was requested but before the close event. */
+  private stopping = false;
   /** Resolves when the child closes. */
   private readonly exited: Promise<void>;
   /** Wall-clock limit for the statement in flight. */
@@ -233,7 +235,8 @@ PRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
     clearTimeout(this.timer);
     this.waiter?.reject(this.failure);
     this.waiter = undefined;
-    if (this.closed) return;
+    if (this.closed || this.stopping) return;
+    this.stopping = true;
     // Drain discarded stdout so child close is not held by paused pipe buffers.
     this.child.stdout.resume();
     killSqliteChild(this.child);

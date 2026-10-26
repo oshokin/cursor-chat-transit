@@ -51,6 +51,7 @@ test('family plan drop, promote, and an unchanged skip match one literal result'
   const plan: Plan = {
     create: [1, 2, 3],
     skipped: [],
+    repair: [],
     already: [
       {
         composerId: 'parent',
@@ -108,6 +109,7 @@ test('family plan drop, promote, and an unchanged skip match one literal result'
         reason: 'already imported',
       },
     ],
+    repair: [],
     newVersions: [
       { composerId: 'child', name: 'Child', reason: 'updated version' },
       {
@@ -141,6 +143,7 @@ test('a drop does not allocate an id', () => {
     create: [2],
     skipped: [],
     already: [],
+    repair: [],
     newVersions: [],
     restored: [],
   };

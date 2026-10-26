@@ -34,6 +34,7 @@ export {
   isResourceConflict,
   itemCasReplaceSql,
   itemReplaceSql,
+  kvCasReplaceSql,
   kvInsertSql,
   kvInsertTypedSql,
   sqliteResourceLiteral,

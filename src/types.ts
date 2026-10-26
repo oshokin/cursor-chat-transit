@@ -212,6 +212,8 @@ export interface TransferContext {
   timeoutMs?: number;
   /** SQLite busy timeout applied through the init file. */
   busyTimeoutMs?: number;
+  /** Destination model compatibility facts for imported composer bodies. */
+  modelImportPolicy?: import('./model-compatibility').ModelImportPolicy;
   /** Progress callback for named phases. */
   onPhase?: (
     phase: TransferPhase,
@@ -468,6 +470,8 @@ export interface ImportResult {
   alreadyPresent: number;
   /** Changed snapshots added as extra copies. */
   newVersions: number;
+  /** Existing same-snapshot copies whose unavailable model was repaired. */
+  modelConfigsRepaired?: number;
   /** Incomplete outcomes in this run. */
   incomplete: number;
   /** Destination composer ids created in this run. */

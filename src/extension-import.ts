@@ -35,6 +35,8 @@ import { startOperationLog } from './operation-log';
 import { formatImportNotice, resolveSelectedWorkspace } from './operation-ui';
 import { type TransitLog } from './output-ui';
 import type { WorkspaceEntry } from './types';
+import { readModelImportPolicy } from './model-compatibility';
+import { connOf } from './transfer-context';
 
 /** Import chats from a local ZIP archive into a picked workspace. */
 export async function doImport(opts: {
@@ -225,6 +227,20 @@ export async function doImport(opts: {
 
         const settings = transferSettings();
 
+        const modelImportPolicy = await readModelImportPolicy(
+          connOf(
+            {
+              executable: sqlite.executable,
+              initFile: sqlite.initFile,
+              timeoutMs: settings.timeoutMs,
+              busyTimeoutMs: settings.busyTimeoutMs,
+              signal,
+            },
+            destination.globalDbPath,
+            true,
+          ),
+        );
+
         log.file(src.fsPath, bytes);
 
         const zipPath = await localBundlePath(
@@ -244,6 +260,7 @@ export async function doImport(opts: {
               initFile: sqlite.initFile,
               timeoutMs: settings.timeoutMs,
               busyTimeoutMs: settings.busyTimeoutMs,
+              modelImportPolicy,
               plansDir: settings.plansDir,
               maxJsonProperties: settings.maxJsonProperties,
               temporaryDirectory: settings.temporaryDirectory,
@@ -330,7 +347,7 @@ export async function doImport(opts: {
     const notice = formatImportNotice(result);
 
     log.fact(
-      `Import summary: imported=${result.imported} alreadyImported=${result.alreadyImported} newVersions=${result.newVersions} historyOnly=${result.historyOnly} skippedUnusable=${result.skipped}`,
+      `Import summary: imported=${result.imported} alreadyImported=${result.alreadyImported} modelConfigsRepaired=${result.modelConfigsRepaired || 0} newVersions=${result.newVersions} historyOnly=${result.historyOnly} skippedUnusable=${result.skipped}`,
     );
 
     log.finish(notice.status === 'incomplete' ? 'incomplete' : 'completed');

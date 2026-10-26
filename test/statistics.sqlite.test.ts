@@ -210,6 +210,18 @@ function healthId(name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** Minimal protobuf state containing exact UUID string fields. */
+function conversationState(...ids: string[]): string {
+  return `~${Buffer.concat(
+    ids.map((id) =>
+      Buffer.concat([
+        Buffer.from([0x0a, Buffer.byteLength(id)]),
+        Buffer.from(id),
+      ]),
+    ),
+  ).toString('base64')}`;
+}
+
 test(
   'deep checks distinguish complete legacy history, empty chats, missing messages and lost bodies',
   { skip },
@@ -232,6 +244,15 @@ test(
         fullConversationHeadersOnly: [{ bubbleId: 'lost', type: 1 }],
       },
       [healthId('orphan')]: { fullConversationHeadersOnly: [] },
+      [healthId('state-backed')]: {
+        _v: 18,
+        isNAL: true,
+        conversationState: conversationState(
+          healthId('state-backed'),
+          healthId('state-backed-root'),
+        ),
+        fullConversationHeadersOnly: [],
+      },
     };
 
     await execSqlScript({
@@ -244,7 +265,7 @@ test(
         )
         .join(
           '\n',
-        )} INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('good')}:msg','{"bubbleId":"msg","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('orphan')}:msg','{"type":1,"text":"Keep history"}');`,
+        )} INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('good')}:msg','{"bubbleId":"msg","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('orphan')}:msg','{"type":2,"text":"Keep uncertain history"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}','{"bubbleId":"${healthId('state-backed-root')}","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}/s:1','{"bubbleId":"${healthId('state-backed-root')}","type":2,"text":"stream"}');`,
     });
 
     const before = await fs.readFile(workspace.globalDbPath);
@@ -268,6 +289,8 @@ test(
     assert.match(rows[2].detail, /Incomplete/);
     assert.equal(rows[3].eligible, false);
     assert.match(rows[3].detail, /unknown/);
+    assert.equal(rows[4].eligible, true);
+    assert.match(rows[4].detail, /^1 user message · Agent format/);
     assert.deepEqual(await fs.readFile(workspace.globalDbPath), before);
 
     assert.equal(
@@ -349,6 +372,102 @@ INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + stored + ':kept')},${sql
           note.includes('referenced message bodies are missing') &&
           note.includes('first missing message=gone'),
       ),
+      true,
+    );
+  },
+);
+
+test(
+  'deep checks reject stale state ids, orphan nested rows, and missing family composers',
+  { skip },
+  async (t) => {
+    const { ctx, workspace } = await fixture(t);
+    const healthy = healthId('healthy-v18');
+    const healthyRoot = healthId('healthy-v18-root');
+    const stale = healthId('stale-v18');
+    const staleRoot = healthId('stale-v18-root');
+    const sourceId = healthId('old-source-v18');
+    const orphan = healthId('orphan-nested-v18');
+    const orphanRoot = healthId('orphan-nested-v18-root');
+    const family = healthId('missing-family-v18');
+    const familyRoot = healthId('missing-family-v18-root');
+    const missingChild = healthId('missing-child-v18');
+
+    const composer = (id: string, state: string, extra = {}) =>
+      `INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${id}`)},${sqlText(
+        JSON.stringify({
+          _v: 18,
+          conversationState: state,
+          fullConversationHeadersOnly: [],
+          ...extra,
+        }),
+      )});`;
+
+    const bubble = (id: string, bubbleId: string, payloadBubbleId = bubbleId) =>
+      `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${bubbleId}`)},${sqlText(
+        JSON.stringify({ bubbleId: payloadBubbleId, type: 1, text: 'kept' }),
+      )});`;
+
+    await execSqlScript({
+      ...ctx,
+      database: workspace.globalDbPath,
+      sql: `DELETE FROM cursorDiskKV;
+${composer(healthy, conversationState(healthy, healthyRoot))}
+${bubble(healthy, healthyRoot)}
+${composer(stale, conversationState(sourceId, staleRoot))}
+${bubble(stale, staleRoot)}
+${composer(sourceId, conversationState(sourceId))}
+${composer(orphan, conversationState(orphan, orphanRoot))}
+${bubble(orphan, `${orphanRoot}/s:1`, orphanRoot)}
+${composer(family, conversationState(family, familyRoot), {
+  subagentComposerIds: [missingChild],
+})}
+${bubble(family, familyRoot)}`,
+    });
+
+    const rows: StatisticsUpdate[] = [];
+    const notes: string[] = [];
+
+    const result = await runTransfer<{ failed: number }>(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        deepCheck: true,
+        workspace,
+        chats: [
+          { composerId: healthy, name: 'Healthy v18' },
+          { composerId: stale, name: 'Stale v18' },
+          { composerId: orphan, name: 'Orphan nested v18' },
+          { composerId: family, name: 'Missing family v18' },
+        ],
+      },
+      {
+        onStatistics: (row) => rows.push(row),
+        onNote: (note) => notes.push(note),
+      },
+    );
+
+    assert.equal(result.failed, 0);
+
+    assert.deepEqual(
+      rows.map((row) => row.health),
+      ['ready', 'incomplete', 'incomplete', 'incomplete'],
+    );
+
+    assert.equal(
+      notes.some((note) =>
+        note.includes('does not reference its current composer'),
+      ),
+      true,
+    );
+
+    assert.equal(
+      notes.some((note) => note.includes('has no stored root')),
+      true,
+    );
+
+    assert.equal(
+      notes.some((note) => note.includes(missingChild)),
       true,
     );
   },

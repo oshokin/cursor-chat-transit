@@ -205,6 +205,7 @@ async function run(
     initFile: job.initFile,
     timeoutMs: job.timeoutMs,
     busyTimeoutMs: job.busyTimeoutMs,
+    modelImportPolicy: job.modelImportPolicy,
     plansDir: job.plansDir,
     canvasesDir: job.canvasesDir,
     maxJsonProperties: job.maxJsonProperties,

@@ -84,6 +84,37 @@ test(
 );
 
 test(
+  'repeated stop signals remain idempotent until the child closes',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const controller = new AbortController();
+
+    const session = await SqliteSession.open({
+      ...options,
+      signal: controller.signal,
+    });
+
+    const query = session.exec(
+      'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n;',
+    );
+
+    const rejected = assert.rejects(query, /cancel/i);
+
+    controller.abort(new Error('Cancelled'));
+    await session.close();
+    await rejected;
+
+    await execSql({
+      ...options,
+      readOnly: false,
+      busyTimeoutMs: 0,
+      sql: 'BEGIN IMMEDIATE; INSERT INTO t VALUES(3); COMMIT;',
+    });
+  },
+);
+
+test(
   'session timeout rolls back its transaction and closes the writer',
   { skip },
   async (t) => {

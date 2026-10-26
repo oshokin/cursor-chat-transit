@@ -18,6 +18,7 @@ import {
   saveJournal,
   targetKeyFor,
 } from '../src/journal';
+import { JournalStore } from '../src/journal-db';
 import { TransferError } from '../src/types';
 import type {
   ExportObject,
@@ -68,6 +69,46 @@ function payload(
     ),
     bubbles: Object.fromEntries(ids.map((row) => [row.id, []] as const)),
     resources: { kv: [], attachments: [], plans: [] },
+  };
+}
+
+/** Fixture whose source composer selects one model. */
+function modelPayload(modelId: string) {
+  const value = payload();
+  const body = JSON.parse(value.composers[A]!) as Record<string, unknown>;
+
+  body.modelConfig = {
+    modelName: modelId,
+    maxMode: false,
+    selectedModels: [
+      {
+        modelId,
+        parameters: [{ id: 'effort', value: 'high' }],
+      },
+    ],
+  };
+
+  body.stateMarker = 'unchanged-state';
+  value.composers[A] = JSON.stringify(body);
+
+  return value;
+}
+
+/** Destination policy that exposes only the named current model. */
+function withModelPolicy(
+  ctx: TransferContext,
+  modelId: string,
+): TransferContext {
+  return {
+    ...ctx,
+    modelImportPolicy: {
+      availableModelIds: ['default', modelId],
+      fallback: {
+        modelName: modelId,
+        maxMode: false,
+        selectedModels: [{ modelId, parameters: [] }],
+      },
+    },
   };
 }
 
@@ -180,6 +221,214 @@ test(
     assert.equal(await bodyCount(gl), 1);
     assert.equal(second.imported, 0);
     assert.equal(second.alreadyImported, 1);
+  },
+);
+
+test(
+  'repeat import restores a legacy copy whose opaque state kept the source id',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = payload();
+    const body = JSON.parse(source.composers[A]) as Record<string, unknown>;
+
+    const state = Buffer.concat([
+      Buffer.from([0xa2, 0x06, Buffer.byteLength(A)]),
+      Buffer.from(A),
+    ]);
+
+    body.conversationState = `~${state.toString('base64')}`;
+    source.composers[A] = JSON.stringify(body);
+    const first = await transfer.importFromObject(ctx, source, workspace);
+    const firstId = first.composerIds[0]!;
+
+    const stored = JSON.parse(
+      (await db.readKvText(gl, `composerData:${firstId}`)) || '{}',
+    ) as Record<string, unknown>;
+
+    stored.conversationState = body.conversationState;
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(stored))} WHERE key=${sqlText(`composerData:${firstId}`)};`,
+    });
+
+    const second = await transfer.importFromObject(ctx, source, workspace);
+
+    assert.equal(second.imported, 1);
+    assert.notEqual(second.composerIds[0], firstId);
+    assert.equal(await bodyCount(gl), 2);
+  },
+);
+
+test(
+  'new import replaces only an unavailable model config',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+
+    const result = await transfer.importFromObject(
+      withModelPolicy(ctx, 'target-custom'),
+      modelPayload('source-custom'),
+      workspace,
+    );
+
+    const stored = JSON.parse(
+      (await db.readKvText(gl, `composerData:${result.composerIds[0]}`)) ||
+        '{}',
+    ) as {
+      modelConfig?: { modelName?: string };
+      stateMarker?: string;
+    };
+
+    assert.equal(stored.modelConfig?.modelName, 'target-custom');
+    assert.equal(stored.stateMarker, 'unchanged-state');
+  },
+);
+
+test(
+  'new import preserves an available model config including unknown fields',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = modelPayload('source-custom');
+
+    const sourceBody = JSON.parse(source.composers[A]!) as {
+      modelConfig: Record<string, unknown>;
+    };
+
+    sourceBody.modelConfig.future = { preserved: true };
+    source.composers[A] = JSON.stringify(sourceBody);
+
+    const result = await transfer.importFromObject(
+      withModelPolicy(ctx, 'source-custom'),
+      source,
+      workspace,
+    );
+
+    const stored = JSON.parse(
+      (await db.readKvText(gl, `composerData:${result.composerIds[0]}`)) ||
+        '{}',
+    ) as { modelConfig?: unknown };
+
+    assert.deepEqual(stored.modelConfig, sourceBody.modelConfig);
+  },
+);
+
+test(
+  'repeat import repairs the archived unavailable model in the existing copy',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = modelPayload('source-custom');
+    const first = await transfer.importFromObject(ctx, source, workspace);
+    const id = first.composerIds[0]!;
+
+    const second = await transfer.importFromObject(
+      withModelPolicy(ctx, 'target-custom'),
+      source,
+      workspace,
+    );
+
+    const stored = JSON.parse(
+      (await db.readKvText(gl, `composerData:${id}`)) || '{}',
+    ) as {
+      modelConfig?: { modelName?: string };
+      stateMarker?: string;
+    };
+
+    assert.equal(second.imported, 0);
+    assert.equal(second.modelConfigsRepaired, 1);
+    assert.equal(stored.modelConfig?.modelName, 'target-custom');
+    assert.equal(stored.stateMarker, 'unchanged-state');
+
+    const journal = await JournalStore.open({
+      executable: ctx.executable,
+      journalDir: path.join(workspace.storageRoot, 'cursor-chat-transit'),
+      targetKey: await targetKeyFor(workspace),
+    });
+
+    const receipts = await journal.receipts();
+
+    const projection = await journal.projection({
+      sourceComposerId: A,
+      snapshotHash: receipts[0]!.snapshotHash,
+      targetComposerId: id,
+    });
+
+    await journal.close();
+    assert.equal(receipts.length, 1);
+    assert.equal(projection?.projectionVersion, 'model-compat-v2');
+    assert.equal(projection?.outcome, 'applied');
+  },
+);
+
+test(
+  'repeat projection is idempotent and does not mint another chat',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = modelPayload('source-custom');
+
+    await transfer.importFromObject(ctx, source, workspace);
+
+    const repaired = await transfer.importFromObject(
+      withModelPolicy(ctx, 'target-custom'),
+      source,
+      workspace,
+    );
+
+    const repeated = await transfer.importFromObject(
+      withModelPolicy(ctx, 'target-custom'),
+      source,
+      workspace,
+    );
+
+    assert.equal(repaired.modelConfigsRepaired, 1);
+    assert.equal(repeated.modelConfigsRepaired, 0);
+    assert.equal(repeated.alreadyImported, 1);
+    assert.equal(await bodyCount(gl), 1);
+  },
+);
+
+test(
+  'repeat import does not overwrite a model selected after import',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = modelPayload('source-custom');
+    const first = await transfer.importFromObject(ctx, source, workspace);
+    const id = first.composerIds[0]!;
+    const key = `composerData:${id}`;
+
+    const body = JSON.parse((await db.readKvText(gl, key)) || '{}') as Record<
+      string,
+      unknown
+    >;
+
+    body.modelConfig = {
+      modelName: 'manually-selected',
+      maxMode: false,
+      selectedModels: [{ modelId: 'manually-selected', parameters: [] }],
+    };
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(body))} WHERE key=${sqlText(key)};`,
+    });
+
+    const second = await transfer.importFromObject(
+      withModelPolicy(ctx, 'target-custom'),
+      source,
+      workspace,
+    );
+
+    const stored = JSON.parse((await db.readKvText(gl, key)) || '{}') as {
+      modelConfig?: { modelName?: string };
+    };
+
+    assert.equal(second.modelConfigsRepaired, 0);
+    assert.equal(stored.modelConfig?.modelName, 'manually-selected');
   },
 );
 
@@ -1552,6 +1801,90 @@ function familyPayload(extra = '') {
 
   return result;
 }
+
+/** New Cursor state fixture with embedded composer and bubble UUID strings. */
+function stateFamilyPayload() {
+  const result = familyPayload() as unknown as ExportObject;
+  const bubble = X;
+
+  const stateBytes = Buffer.concat(
+    [A, B, bubble].map((id) =>
+      Buffer.concat([
+        Buffer.from([0xa2, 0x06, Buffer.byteLength(id)]),
+        Buffer.from(id),
+      ]),
+    ),
+  );
+
+  const state = `~${stateBytes.toString('base64')}`;
+  const parent = JSON.parse(result.composers[A]) as Record<string, unknown>;
+
+  parent.conversationState = state;
+  result.composers[A] = JSON.stringify(parent);
+
+  result.bubbles![A] = [
+    {
+      key: `bubbleId:${A}:${bubble}`,
+      bubbleId: bubble,
+      value: JSON.stringify({
+        _v: 3,
+        composerId: A,
+        bubbleId: bubble,
+        type: 1,
+        text: 'state-backed message',
+      }),
+    },
+  ];
+
+  return result;
+}
+
+test(
+  'new Cursor state remaps parent, child, and bubble ids together',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+
+    const result = await transfer.importFromObject(
+      ctx,
+      stateFamilyPayload(),
+      workspace,
+    );
+
+    const parent = result.composerIds[0]!;
+    const child = result.composerIds[1]!;
+
+    const body = JSON.parse(
+      (await db.readKvText(gl, `composerData:${parent}`)) || '{}',
+    ) as { conversationState: string };
+
+    const state = Buffer.from(
+      body.conversationState.slice(1),
+      'base64',
+    ).toString('utf8');
+
+    const bubbleKey = (
+      await sql.execSql({
+        ...gl,
+        sql: `SELECT key FROM cursorDiskKV WHERE key >= ${sqlText(`bubbleId:${parent}:`)} AND key < ${sqlText(`bubbleId:${parent};`)} LIMIT 1;`,
+      })
+    ).trim();
+
+    const bubble = bubbleKey.slice(`bubbleId:${parent}:`.length);
+
+    const childBody = JSON.parse(
+      (await db.readKvText(gl, `composerData:${child}`)) || '{}',
+    ) as { subagentInfo?: { parentComposerId?: string } };
+
+    assert.equal(state.includes(parent), true);
+    assert.equal(state.includes(child), true);
+    assert.equal(state.includes(bubble), true);
+    assert.equal(state.includes(A), false);
+    assert.equal(state.includes(B), false);
+    assert.equal(state.includes(X), false);
+    assert.equal(childBody.subagentInfo?.parentComposerId, parent);
+  },
+);
 
 test(
   'a changed family is not copied again on the next identical import',
