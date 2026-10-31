@@ -172,6 +172,7 @@ test('family references use the destination composer map', async () => {
       },
       subagentComposerIds: [C],
       toolFormerData: {
+        result: JSON.stringify({ agentId: C, isBackground: true }),
         additionalData: {
           subagentComposerId: C,
           supersededSubagentComposerIds: [A, C],
@@ -211,6 +212,15 @@ test('family references use the destination composer map', async () => {
 
   assert.equal(additional.composerData.composerId, 'new-grand');
   assert.equal(additional.composerData.text, `keep ${A}`);
+
+  assert.deepEqual(
+    JSON.parse((result.toolFormerData as { result: string }).result),
+    {
+      agentId: 'new-grand',
+      isBackground: true,
+    },
+  );
+
   assert.equal(result.text, `keep ${A} in the message`);
 
   assert.equal(

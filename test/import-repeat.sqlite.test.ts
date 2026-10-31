@@ -1860,7 +1860,9 @@ function familyPayload(extra = '') {
           name: 'task_v2',
           tool: 48,
           status: 'completed',
-          additionalData: { subagentComposerId: B },
+          toolCallId: 'call_child',
+          result: JSON.stringify({ agentId: B, isBackground: true }),
+          additionalData: {},
         },
       }),
     },
@@ -1972,7 +1974,12 @@ test(
       }
     ).additionalData;
 
+    const taskResult = JSON.parse(
+      (taskRows[0]!.toolFormerData as { result: string }).result,
+    ) as { agentId: string };
+
     assert.equal(additional.subagentComposerId, child);
+    assert.equal(taskResult.agentId, child);
     assert.equal(JSON.stringify(taskRows).includes(B), false);
 
     const catalogs = await Promise.all(

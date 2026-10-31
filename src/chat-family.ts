@@ -406,6 +406,14 @@ export function remapFamilyRecord(
       next[key] = remapEmbeddedFamilyPointers(next[key], composerIds);
   }
 
+  const tool = next.toolFormerData;
+
+  if (tool && typeof tool === 'object' && !Array.isArray(tool))
+    next.toolFormerData = remapTaskResult(
+      tool as Record<string, unknown>,
+      composerIds,
+    );
+
   return next;
 }
 
@@ -427,8 +435,71 @@ export function familyRecordIds(record: Record<string, unknown>): Set<string> {
 
   collectEmbeddedFamilyIds(record.toolFormerData, ids);
   collectEmbeddedFamilyIds(record.additionalData, ids);
+  collectTaskResultIds(record.toolFormerData, ids);
 
   return ids;
+}
+
+/** Collect task-result child IDs stored in JSON strings or objects. */
+function collectTaskResultIds(value: unknown, ids: Set<string>): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+  const result = (value as Record<string, unknown>).result;
+  let parsed: unknown = result;
+
+  if (typeof result === 'string')
+    try {
+      parsed = JSON.parse(result);
+    } catch {
+      return;
+    }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+  const id = (parsed as Record<string, unknown>).agentId;
+
+  if (typeof id === 'string') ids.add(id);
+}
+
+/** Remap TASK_V2 result.agentId and publish an explicit highest-priority target. */
+function remapTaskResult(
+  tool: Record<string, unknown>,
+  composerIds: ReadonlyMap<string, string>,
+): Record<string, unknown> {
+  const next = { ...tool };
+  const result = tool.result;
+  let parsed: unknown = result;
+
+  if (typeof result === 'string')
+    try {
+      parsed = JSON.parse(result);
+    } catch {
+      return next;
+    }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    return next;
+  const resultRecord = { ...(parsed as Record<string, unknown>) };
+  const source = resultRecord.agentId;
+
+  const target =
+    typeof source === 'string' ? composerIds.get(source) : undefined;
+
+  if (!target) return next;
+  resultRecord.agentId = target;
+
+  next.result =
+    typeof result === 'string' ? JSON.stringify(resultRecord) : resultRecord;
+
+  const additional =
+    next.additionalData &&
+    typeof next.additionalData === 'object' &&
+    !Array.isArray(next.additionalData)
+      ? { ...(next.additionalData as Record<string, unknown>) }
+      : {};
+
+  additional.subagentComposerId = target;
+  next.additionalData = additional;
+
+  return next;
 }
 
 /** Walk only structured metadata and collect known composer-ID properties. */
