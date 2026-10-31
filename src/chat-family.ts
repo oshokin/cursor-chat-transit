@@ -401,6 +401,66 @@ export function remapFamilyRecord(
     );
   }
 
+  for (const key of ['toolFormerData', 'additionalData']) {
+    if (next[key] && typeof next[key] === 'object')
+      next[key] = remapEmbeddedFamilyPointers(next[key], composerIds);
+  }
+
+  return next;
+}
+
+/** Rewrite family pointers nested in TASK_V2 metadata without touching free text. */
+function remapEmbeddedFamilyPointers(
+  value: unknown,
+  composerIds: ReadonlyMap<string, string>,
+): unknown {
+  if (Array.isArray(value))
+    return value.map((item) => remapEmbeddedFamilyPointers(item, composerIds));
+  if (!value || typeof value !== 'object') return value;
+  const next: Record<string, unknown> = {};
+
+  for (const [key, nested] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (
+      [
+        'subagentComposerId',
+        'parentComposerId',
+        'rootParentConversationId',
+      ].includes(key) &&
+      typeof nested === 'string'
+    ) {
+      next[key] = composerIds.get(nested) || nested;
+    } else if (
+      key === 'supersededSubagentComposerIds' &&
+      Array.isArray(nested)
+    ) {
+      next[key] = nested.map((id) =>
+        typeof id === 'string' ? composerIds.get(id) || id : id,
+      );
+    } else if (
+      key === 'composerData' &&
+      nested &&
+      typeof nested === 'object' &&
+      !Array.isArray(nested)
+    ) {
+      const composer = {
+        ...(remapEmbeddedFamilyPointers(nested, composerIds) as Record<
+          string,
+          unknown
+        >),
+      };
+
+      const id = composer.composerId;
+
+      if (typeof id === 'string' && composerIds.has(id))
+        composer.composerId = composerIds.get(id);
+      next[key] = composer;
+    } else {
+      next[key] = remapEmbeddedFamilyPointers(nested, composerIds);
+    }
+  }
+
   return next;
 }
 

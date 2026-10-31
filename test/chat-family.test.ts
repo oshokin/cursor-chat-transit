@@ -41,6 +41,13 @@ test('a child hangs under its direct parent, including a grandchild', () => {
         subagentTypeName: 'generalPurpose',
       },
       subagentComposerIds: [C],
+      toolFormerData: {
+        additionalData: {
+          subagentComposerId: C,
+          supersededSubagentComposerIds: [A, C],
+          composerData: { composerId: C, text: `keep ${A}` },
+        },
+      },
     }),
     header(C, {
       isSubagent: true,
@@ -164,6 +171,13 @@ test('family references use the destination composer map', async () => {
         toolCallId: 'tool_1',
       },
       subagentComposerIds: [C],
+      toolFormerData: {
+        additionalData: {
+          subagentComposerId: C,
+          supersededSubagentComposerIds: [A, C],
+          composerData: { composerId: C, text: `keep ${A}` },
+        },
+      },
     },
     '',
     '',
@@ -177,6 +191,26 @@ test('family references use the destination composer map', async () => {
   assert.equal(info.parentComposerId, 'new-root');
   assert.equal(info.toolCallId, 'tool_1');
   assert.deepEqual(result.subagentComposerIds, ['new-grand']);
+
+  const additional = (
+    result.toolFormerData as {
+      additionalData: {
+        subagentComposerId: string;
+        supersededSubagentComposerIds: string[];
+        composerData: { composerId: string; text: string };
+      };
+    }
+  ).additionalData;
+
+  assert.equal(additional.subagentComposerId, 'new-grand');
+
+  assert.deepEqual(additional.supersededSubagentComposerIds, [
+    'new-root',
+    'new-grand',
+  ]);
+
+  assert.equal(additional.composerData.composerId, 'new-grand');
+  assert.equal(additional.composerData.text, `keep ${A}`);
   assert.equal(result.text, `keep ${A} in the message`);
 
   assert.equal(

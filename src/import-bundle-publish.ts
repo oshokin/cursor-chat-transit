@@ -127,9 +127,39 @@ export async function writeOne(opts: {
     ) as unknown as ComposerHeader;
 
     header.composerId = opts.row.targetId;
+    const headerFamilyIds = new Set<string>();
+    const headerInfo = header.subagentInfo;
+
+    if (headerInfo && typeof headerInfo === 'object') {
+      for (const key of ['parentComposerId', 'rootParentConversationId']) {
+        const value = (headerInfo as Record<string, unknown>)[key];
+
+        if (typeof value === 'string') headerFamilyIds.add(value);
+      }
+    }
+
+    if (Array.isArray(header.subagentComposerIds))
+      for (const id of header.subagentComposerIds)
+        if (typeof id === 'string') headerFamilyIds.add(id);
+    const headerFamilyMap = new Map<string, string>();
+
+    if (headerFamilyIds.size)
+      await opts.work.queryLines(
+        `SELECT json_array(source_id, target_id) FROM chat WHERE source_id IN (${[...headerFamilyIds].map(sqlText).join(',')});`,
+        (line) => {
+          const pair = JSON.parse(line) as [string, string];
+
+          headerFamilyMap.set(pair[0], pair[1]);
+        },
+      );
+
+    const remappedHeader = remapFamilyRecord(
+      header as Record<string, unknown>,
+      headerFamilyMap,
+    ) as unknown as ComposerHeader;
 
     const bound = bindWorkspace(
-      header,
+      remappedHeader,
       opts.workspace.storageId,
       opts.workspace.identity,
     );

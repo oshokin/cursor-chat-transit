@@ -386,7 +386,12 @@ export function rewriteCanvasReferences(
   for (const [key, nested] of Object.entries(rec)) {
     if (key === 'text' || key === 'rawText') continue;
     if (key === 'relativeWorkspacePath') continue;
-    rec[key] = rewriteCanvasReferences(nested, destByFilename, depth + 1);
+    const name = canvasFilenameFromRef(key);
+    const dest = name ? destByFilename.get(name) : undefined;
+    const targetKey = dest ? fileUriForCanvas(dest) : key;
+
+    if (targetKey !== key) delete rec[key];
+    rec[targetKey] = rewriteCanvasReferences(nested, destByFilename, depth + 1);
   }
 
   return rec;

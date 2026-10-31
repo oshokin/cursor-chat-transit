@@ -1934,6 +1934,40 @@ test(
     assert.equal(state.includes(B), false);
     assert.equal(state.includes(X), false);
     assert.equal(childBody.subagentInfo?.parentComposerId, parent);
+
+    const catalogs = await Promise.all(
+      [
+        [gl, 'composer.composerHeaders'],
+        [
+          { ...ctx, database: workspace.workspaceDbPath },
+          'composer.composerData',
+        ],
+      ].map(async ([conn, key]) =>
+        JSON.parse(
+          (await db.readItemText(
+            conn as TransferContext & { database: string },
+            key as string,
+          )) || '{}',
+        ),
+      ),
+    );
+
+    for (const catalog of catalogs) {
+      const headers = catalog.allComposers as Array<{
+        composerId: string;
+        subagentComposerIds?: string[];
+        subagentInfo?: { parentComposerId?: string };
+      }>;
+
+      const parentHeader = headers.find(
+        (header) => header.composerId === parent,
+      );
+
+      const childHeader = headers.find((header) => header.composerId === child);
+
+      assert.deepEqual(parentHeader?.subagentComposerIds, [child]);
+      assert.equal(childHeader?.subagentInfo?.parentComposerId, parent);
+    }
   },
 );
 

@@ -1498,6 +1498,9 @@ test(
           path: marker,
           external: pathToFileURL(marker).href,
         },
+        originalFileStates: {
+          [pathToFileURL(marker).href]: { contentKey: marker },
+        },
       },
       bubbleText: `see ${marker}`,
     });
@@ -1550,6 +1553,17 @@ test(
     );
 
     assert.equal(uri?.fsPath, destCanvas);
+
+    const states = (
+      parsed as {
+        originalFileStates?: Record<string, unknown>;
+      }
+    ).originalFileStates;
+
+    assert.deepEqual(Object.keys(states || {}), [
+      pathToFileURL(destCanvas).href,
+    ]);
+
     assert.equal(bubbleText, `see ${marker}`);
   },
 );
