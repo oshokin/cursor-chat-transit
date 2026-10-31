@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cloneExportObjectForCopy } from '../src/transfer';
-import { remapConversationStateIds } from '../src/conversation-state';
+import {
+  conversationStateIds,
+  remapConversationStateIds,
+} from '../src/conversation-state';
+import { assertCanonicalClientRowId } from '../src/client-row-key';
+import { bubbleFromFields } from '../src/db';
 
 /** Composer id used as the source chat in clone fixtures. */
 const A = '11111111-1111-4111-8111-111111111111';
@@ -67,30 +72,23 @@ test('clone remaps opaque conversation state with its generated ids', async () =
   assert.equal(state.includes(bubble || ''), true);
 });
 
-test('clone preserves nested stream and tool suffixes under the remapped root', async () => {
+test('clone preserves canonical stream and repeated tool suffixes under the remapped root', async () => {
   const input = payload();
   const root = input.bubbles[A][0];
 
-  input.bubbles[A].push(
-    {
-      key: `${root.key}/s:1`,
-      bubbleId: `${root.bubbleId}/s:1`,
+  for (const suffix of ['s:1', 't:call', 't2:call', 't17:other']) {
+    const bubbleId = `${root.bubbleId}/${suffix}`;
+
+    input.bubbles[A].push({
+      key: `bubbleId:${A}:${bubbleId}`,
+      bubbleId,
       value: JSON.stringify({
         _v: 3,
-        bubbleId: root.bubbleId,
+        bubbleId,
         type: 2,
       }),
-    },
-    {
-      key: `${root.key}/t:call`,
-      bubbleId: `${root.bubbleId}/t:call`,
-      value: JSON.stringify({
-        _v: 3,
-        bubbleId: root.bubbleId,
-        type: 2,
-      }),
-    },
-  );
+    });
+  }
 
   const { cloned } = await cloneExportObjectForCopy(input);
   const composer = cloned.allComposers[0].composerId;
@@ -99,8 +97,10 @@ test('clone preserves nested stream and tool suffixes under the remapped root', 
 
   assert.equal(rows[2].bubbleId, `${remappedRoot}/s:1`);
   assert.equal(rows[3].bubbleId, `${remappedRoot}/t:call`);
-  assert.equal(JSON.parse(rows[2].value).bubbleId, remappedRoot);
-  assert.equal(JSON.parse(rows[3].value).bubbleId, remappedRoot);
+  assert.equal(rows[4].bubbleId, `${remappedRoot}/t2:call`);
+  assert.equal(rows[5].bubbleId, `${remappedRoot}/t17:other`);
+  for (const row of rows.slice(2))
+    assert.equal(JSON.parse(row.value).bubbleId, row.bubbleId);
 });
 
 test('clone accepts nested rows before their root and rejects inconsistent prepared ids', async () => {
@@ -110,7 +110,11 @@ test('clone accepts nested rows before their root and rejects inconsistent prepa
   const nested = {
     key: `${root.key}/s:1`,
     bubbleId: `${root.bubbleId}/s:1`,
-    value: JSON.stringify({ _v: 3, bubbleId: root.bubbleId, type: 2 }),
+    value: JSON.stringify({
+      _v: 3,
+      bubbleId: `${root.bubbleId}/s:1`,
+      type: 2,
+    }),
   };
 
   input.bubbles[A].unshift(nested);
@@ -129,6 +133,202 @@ test('clone accepts nested rows before their root and rejects inconsistent prepa
       ]),
     }),
     /inconsistent nested target/i,
+  );
+});
+
+test('clone accepts standalone canonical rows and preserves checkpoint order', async () => {
+  const input = payload();
+  const turn = '55555555-5555-4555-8555-555555555555';
+  const ids = [`${turn}/s:17`, `${turn}/s:2`, `${turn}/u`];
+
+  input.bubbles[A] = ids.map((bubbleId) => ({
+    key: `bubbleId:${A}:${bubbleId}`,
+    bubbleId,
+    value: JSON.stringify({ _v: 3, bubbleId, type: 2 }),
+  }));
+
+  const body = JSON.parse(input.composers[A]) as Record<string, unknown>;
+
+  body.fullConversationHeadersOnly = ids.map((bubbleId) => ({ bubbleId }));
+  input.composers[A] = JSON.stringify(body);
+
+  const { cloned } = await cloneExportObjectForCopy(input);
+  const composer = cloned.allComposers[0].composerId;
+  const rows = cloned.bubbles?.[composer] || [];
+  const mappedRoot = rows[0].bubbleId.slice(0, rows[0].bubbleId.indexOf('/'));
+
+  assert.deepEqual(
+    rows.map((row) => row.bubbleId),
+    [`${mappedRoot}/s:17`, `${mappedRoot}/s:2`, `${mappedRoot}/u`],
+  );
+
+  assert.deepEqual(
+    (
+      JSON.parse(cloned.composers[composer]) as {
+        fullConversationHeadersOnly: Array<{ bubbleId: string }>;
+      }
+    ).fullConversationHeadersOnly.map((header) => header.bubbleId),
+    rows.map((row) => row.bubbleId),
+  );
+
+  const preparedRoot = D;
+
+  const retried = await cloneExportObjectForCopy(input, {
+    bubbleMap: new Map([
+      [`${A}\0${ids[0]}`, `${preparedRoot}/s:17`],
+      [`${A}\0${ids[1]}`, `${preparedRoot}/s:2`],
+      [`${A}\0${ids[2]}`, `${preparedRoot}/u`],
+    ]),
+  });
+
+  assert.deepEqual(
+    retried.cloned.bubbles?.[retried.cloned.allComposers[0].composerId].map(
+      (row) => row.bubbleId,
+    ),
+    [`${preparedRoot}/s:17`, `${preparedRoot}/s:2`, `${preparedRoot}/u`],
+  );
+});
+
+test('Cursor client-row grammar accepts canonical IDs and rejects ambiguous spellings', () => {
+  for (const id of [
+    B,
+    `${B}/u`,
+    `${B}/s:0`,
+    `${B}/s:17`,
+    `${B}/t:call-id`,
+    `${B}/t2:call-id`,
+    `${B}/t17:call-id`,
+  ])
+    assert.doesNotThrow(() => assertCanonicalClientRowId(id));
+
+  for (const id of [
+    `${B}/`,
+    `${B}/s:`,
+    `${B}/s:-1`,
+    `${B}/s:01`,
+    `${B}/t:`,
+    `${B}/t1:call`,
+    `${B}/t0:call`,
+    `${B}/s:1/extra`,
+    `/s:0`,
+  ])
+    assert.throws(() => assertCanonicalClientRowId(id), /client-row/i);
+});
+
+test('SQLite bubble decoding keeps colons and client-row suffixes in the exact ID', () => {
+  for (const bubbleId of [`${B}/s:17`, `${B}/t:call:id`, `${B}/t2:call:id`]) {
+    const key = `bubbleId:${A}:${bubbleId}`;
+
+    assert.deepEqual(
+      bubbleFromFields([
+        Buffer.from(key),
+        Buffer.from('text'),
+        Buffer.from(JSON.stringify({ bubbleId })),
+      ]),
+      {
+        key,
+        bubbleId,
+        value: JSON.stringify({ bubbleId }),
+      },
+    );
+  }
+});
+
+test('clone rejects body IDs that differ from their exact canonical storage ID', async () => {
+  const input = payload();
+  const root = input.bubbles[A][0];
+  const nestedId = `${root.bubbleId}/s:0`;
+
+  input.bubbles[A].push({
+    key: `bubbleId:${A}:${nestedId}`,
+    bubbleId: nestedId,
+    value: JSON.stringify({ _v: 3, bubbleId: root.bubbleId, type: 2 }),
+  });
+
+  await assert.rejects(cloneExportObjectForCopy(input), /body ID mismatch/i);
+});
+
+test('state remapping preserves unknown fields byte-for-byte and only rewrites exact UUID strings', () => {
+  const len = (field: number, bytes: Buffer) =>
+    Buffer.concat([Buffer.from([(field << 3) | 2, bytes.length]), bytes]);
+
+  const unknownVarint = Buffer.from([0x78, 0xac, 0x02]);
+  const nested = len(3, Buffer.concat([len(2, Buffer.from(B)), unknownVarint]));
+
+  const original = Buffer.concat([
+    unknownVarint,
+    len(1, Buffer.from(A)),
+    len(4, Buffer.from(`prefix-${A}`)),
+    nested,
+  ]);
+
+  const state = `~${original.toString('base64')}`;
+
+  const remapped = String(
+    remapConversationStateIds(
+      state,
+      new Map([
+        [A, C],
+        [B, D],
+      ]),
+    ),
+  );
+
+  const expected = Buffer.concat([
+    unknownVarint,
+    len(1, Buffer.from(C)),
+    len(4, Buffer.from(`prefix-${A}`)),
+    len(3, Buffer.concat([len(2, Buffer.from(D)), unknownVarint])),
+  ]);
+
+  assert.equal(
+    Buffer.from(remapped.slice(1), 'base64').toString('hex'),
+    expected.toString('hex'),
+  );
+
+  assert.deepEqual(conversationStateIds(remapped), new Set([C, D]));
+});
+
+test('state remapping preserves every supported unknown protobuf wire type', () => {
+  const fixed64 = Buffer.concat([Buffer.from([0x09]), Buffer.alloc(8, 0xa1)]);
+  const fixed32 = Buffer.concat([Buffer.from([0x15]), Buffer.alloc(4, 0xb2)]);
+
+  const duplicateRaw = Buffer.concat([
+    Buffer.from([0x1a, 0x03]),
+    Buffer.from([0xff, 0x00, 0x7f]),
+  ]);
+
+  const uuid = Buffer.concat([Buffer.from([0x22, A.length]), Buffer.from(A)]);
+
+  const bytes = Buffer.concat([
+    Buffer.from([0x08, 0xac, 0x02]),
+    fixed64,
+    fixed32,
+    duplicateRaw,
+    duplicateRaw,
+    uuid,
+  ]);
+
+  const remapped = String(
+    remapConversationStateIds(
+      `~${bytes.toString('base64')}`,
+      new Map([[A, C]]),
+    ),
+  );
+
+  const expected = Buffer.concat([
+    Buffer.from([0x08, 0xac, 0x02]),
+    fixed64,
+    fixed32,
+    duplicateRaw,
+    duplicateRaw,
+    Buffer.from([0x22, C.length]),
+    Buffer.from(C),
+  ]);
+
+  assert.equal(
+    Buffer.from(remapped.slice(1), 'base64').toString('hex'),
+    expected.toString('hex'),
   );
 });
 

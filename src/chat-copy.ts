@@ -5,6 +5,7 @@ import {
   parseRemappableJson,
   remapJsonObject,
 } from './chat-json';
+import { assertCanonicalClientRowId } from './client-row-key';
 import { parseExportResources } from './dependencies';
 import { remapConversationStateIds } from './conversation-state';
 import { assertExportShape, incompleteComposers } from './format';
@@ -69,8 +70,8 @@ export async function cloneExportObjectForCopy(
       throw err;
     }
 
-    const sourceIds = new Set(list.map((bubble) => bubble?.bubbleId));
     const targets = new Set<string>();
+    const targetRoots = new Map<string, string>();
 
     for (const bubble of list) {
       if (++steps % 32 === 0) await yieldToHost(options?.signal);
@@ -82,6 +83,15 @@ export async function cloneExportObjectForCopy(
         err.code = 'UNSUPPORTED_BODY';
 
         throw err;
+      }
+
+      try {
+        assertCanonicalClientRowId(bubble.bubbleId);
+      } catch (cause) {
+        throw Object.assign(new TransferError('Invalid Cursor client-row ID'), {
+          code: 'UNSUPPORTED_BODY',
+          cause,
+        });
       }
 
       if (bubble.key !== `bubbleId:${oldComposerId}:${bubble.bubbleId}`) {
@@ -106,11 +116,7 @@ export async function cloneExportObjectForCopy(
 
       if (
         parsed.bubbleId !== undefined &&
-        parsed.bubbleId !== bubble.bubbleId &&
-        !(
-          typeof parsed.bubbleId === 'string' &&
-          bubble.bubbleId.startsWith(`${parsed.bubbleId}/`)
-        )
+        parsed.bubbleId !== bubble.bubbleId
       ) {
         const err = new TransferError('Bubble body ID mismatch');
 
@@ -132,28 +138,35 @@ export async function cloneExportObjectForCopy(
 
       const slash = bubble.bubbleId.indexOf('/');
 
-      if (slash > 0 && !sourceIds.has(bubble.bubbleId.slice(0, slash))) {
-        const err = new TransferError(
-          `Nested bubble ${bubble.bubbleId} has no root.`,
+      const sourceRoot =
+        slash < 0 ? bubble.bubbleId : bubble.bubbleId.slice(0, slash);
+
+      if (!targetRoots.has(sourceRoot)) {
+        const suffix = slash < 0 ? '' : bubble.bubbleId.slice(slash);
+        const prepared = options?.bubbleMap?.get(compound);
+
+        const preparedRoot = options?.bubbleMap?.get(
+          `${oldComposerId}\0${sourceRoot}`,
         );
 
-        err.code = 'UNSUPPORTED_BODY';
+        const nestedRoot =
+          prepared && suffix && prepared.endsWith(suffix)
+            ? prepared.slice(0, -suffix.length)
+            : undefined;
 
-        throw err;
-      }
+        const targetRoot = preparedRoot || nestedRoot || randomUUID();
 
-      if (slash < 0) {
-        const target = options?.bubbleMap?.get(compound) || randomUUID();
-
-        if (targets.has(target)) {
+        if (targets.has(targetRoot)) {
           throw Object.assign(new TransferError('Duplicate target bubble ID'), {
             code: 'UNSUPPORTED_BODY',
           });
         }
 
-        targets.add(target);
-        bubbleMap.set(compound, target);
+        targetRoots.set(sourceRoot, targetRoot);
+        targets.add(targetRoot);
       }
+
+      if (slash < 0) bubbleMap.set(compound, targetRoots.get(sourceRoot)!);
     }
 
     for (const bubble of list) {
@@ -162,7 +175,7 @@ export async function cloneExportObjectForCopy(
       if (slash < 0) continue;
       const compound = `${oldComposerId}\0${bubble.bubbleId}`;
       const sourceRoot = bubble.bubbleId.slice(0, slash);
-      const targetRoot = bubbleMap.get(`${oldComposerId}\0${sourceRoot}`)!;
+      const targetRoot = targetRoots.get(sourceRoot)!;
       const target = targetRoot + bubble.bubbleId.slice(slash);
       const prepared = options?.bubbleMap?.get(compound);
 

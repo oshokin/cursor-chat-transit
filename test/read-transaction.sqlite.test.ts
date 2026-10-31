@@ -62,6 +62,60 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
 }
 
 test(
+  'ItemTable reader distinguishes absence, NULL, empty bytes, text, blob, and unsupported classes',
+  { skip },
+  async (t) => {
+    const { conn, writer } = await fixture(t);
+
+    await writer.exec(`
+      INSERT INTO ItemTable VALUES('null', NULL);
+      INSERT INTO ItemTable VALUES('empty-text', '');
+      INSERT INTO ItemTable VALUES('empty-blob', X'');
+      INSERT INTO ItemTable VALUES('text', 'hello');
+      INSERT INTO ItemTable VALUES('blob', X'68656c6c6f');
+      INSERT INTO ItemTable VALUES('integer', 42);
+      INSERT INTO ItemTable VALUES('real', 4.2);
+    `);
+
+    assert.deepEqual(await db.readItemTextState(conn, 'absent'), {
+      status: 'absent',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'null'), {
+      status: 'null',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'empty-text'), {
+      status: 'empty',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'empty-blob'), {
+      status: 'empty',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'text'), {
+      status: 'text',
+      text: 'hello',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'blob'), {
+      status: 'text',
+      text: 'hello',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'integer'), {
+      status: 'unsupported',
+      storageClass: 'integer',
+    });
+
+    assert.deepEqual(await db.readItemTextState(conn, 'real'), {
+      status: 'unsupported',
+      storageClass: 'real',
+    });
+  },
+);
+
+test(
   'read view sees committed WAL, stays stable under writes, and releases checkpoint before returning',
   { skip },
   async (t) => {
