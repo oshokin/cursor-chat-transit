@@ -64,7 +64,7 @@ async function runHost(root: string, tmp: string): Promise<void> {
           `--user-data-dir=${path.join(tmp, 'data')}`,
           `--extensions-dir=${path.join(tmp, 'ext')}`,
         ],
-        version: process.env.VSCODE_TEST_VERSION || '1.125.0',
+        version: process.env.VSCODE_TEST_VERSION || '1.128.0',
         timeout: 60_000,
       });
 

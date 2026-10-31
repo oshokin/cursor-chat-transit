@@ -7,7 +7,7 @@
   "icon": "resources/marketplace.png",
   "license": "MIT",
   "engines": {
-    "vscode": "^1.125.0"
+    "vscode": "^1.128.0"
   },
   "categories": [
     "Other"
@@ -439,16 +439,16 @@
     "@types/yauzl": "3.4.0",
     "@types/yazl": "3.3.1",
     "@vscode/test-electron": "^3.1.0",
-    "@vscode/vsce": "^4.0.0",
-    "eslint": "^10.11.0",
-    "eslint-plugin-jsdoc": "65.1.0",
+    "@vscode/vsce": "^4.1.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-jsdoc": "65.4.2",
     "globals": "^17.13.0",
-    "prettier": "^3.9.9",
-    "release-it": "21.1.0",
+    "prettier": "^3.9.10",
+    "release-it": "21.1.2",
     "semver": "7.8.5",
     "tsx": "^4.23.15",
     "typescript": "6.0.3",
-    "typescript-eslint": "^8.71.0",
+    "typescript-eslint": "^8.72.1",
     "yauzl": "3.4.0",
     "yazl": "3.3.1"
   },
