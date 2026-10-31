@@ -1,6 +1,9 @@
 import path from 'node:path';
 import { ORDINAL_WIDTH } from './bundle-limits';
 
+/** Largest archive member name accepted by the reader and writer. */
+export const MAX_ARCHIVE_ENTRY_NAME_CHARS = 512;
+
 /** Zero-padded ordinal used for generated archive paths. */
 export function ordinalName(
   /** Ordinal to pad. */
@@ -29,7 +32,8 @@ export function assertArchivePath(name: string): void {
     throw new Error('Archive entry name is missing.');
   }
 
-  if (name.length > 512) throw new Error('Archive entry name is too long.');
+  if (name.length > MAX_ARCHIVE_ENTRY_NAME_CHARS)
+    throw new Error('Archive entry name is too long.');
 
   if (
     name.startsWith('/') ||

@@ -48,6 +48,51 @@ The storage id Cursor assigns when a workspace opens is a separate fact from dat
 
 The adapter inspects the actual schema before operating. A Cursor version string alone does not establish support.
 
+### Dual storage authority in Cursor 3.27
+
+Inspection of the installed Cursor 3.27.22 agent-host code revealed a second,
+private persistence path. This is observed implementation behavior, not a public API
+or a promise about another build:
+
+- A renderer-owned chat uses `User/globalStorage/state.vscdb` as its durable local
+  authority. This is the representation Transit reads and writes.
+- A host-owned chat uses
+  `User/globalStorage/anysphere.cursor-agent-host/sessions/<sessionId>/session.sqlite`
+  after Cursor has atomically committed a supported manifest there. For that chat,
+  the host database is the read authority and `state.vscdb` is a compatibility and
+  catalogue projection. The existence of a directory or SQLite file without a
+  committed manifest does not transfer authority.
+
+Cursor's observed creation gate is evaluated in this order: feature gate
+`cursor_agent_host_owned_session_storage`, environment variable
+`CURSOR_AGENT_HOST_OWNED_SESSION_STORAGE`, then application setting
+`cursorAgentHost.experimentalHostOwnedSessionStorage`. The environment variable is
+true only for `1` or case-insensitive `true`; the setting defaults to false and is
+read at agent-host startup. The gate controls creation of new host stores, not
+reopening an already committed host store. Creation additionally requires supplied,
+seedable initial history; ordinary renderer chats that already contain turns are not
+implicitly migrated. Before committing a seed, Cursor validates the reachable
+content-addressed closure. A failed or uncommitted seed is not authoritative.
+
+When a committed host store exists, Cursor opens it even with creation disabled,
+checks the session identity and closure, and compares it with surface renderer
+history. Equal and host-ahead histories use the host. A renderer-ahead history may
+be copied and committed by Cursor. Divergence or an invalid closure is not silently
+merged. Once host-owned, renderer blob fallback is treated as a correctness fault;
+normal writes are mirrored from the host authority to the renderer projection.
+Transit must therefore never independently edit both authorities.
+
+Transit never synthesizes, rewrites, merges, or remotely recreates host-owned
+stores. When a supported committed store exists, export takes a WAL-aware SQLite
+snapshot plus its validated `meta.json`. Import restores that component only under
+its original session/composer ID, only when both renderer and host destinations are
+free, and only after schema, manifest, root, and identity validation. The staged
+directory is then published by rename and the matching renderer projection is
+published through the normal journaled path. Any collision or unsupported layout
+falls back to a remapped renderer-owned copy; Transit does not rewrite private
+protobuf/CAS state. Profile-global agent-host `data.sqlite` is never copied or
+merged.
+
 | Table             | Relevant columns                                                              | Use                                                      |
 | ----------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
 | `ItemTable`       | `key`, `value`                                                                | Workspace lists and global header lists                  |
@@ -123,7 +168,12 @@ Snapshot comparison ignores known presentation-only changes such as `grouping.te
 
 ## Archive contract
 
-Format version 4 is the only file format read and written by this build. An archive is a ZIP directory containing a manifest, catalog parts, per-chat headers and composer fields, conversation/message parts, inventory data, and content-addressed resources. There is no custom JSON parser and no monolithic JSON import fallback.
+Current code writes format version 5 and reads versions 5 and 4. Version 5 uses a
+hashed `index.sqlite` as the authoritative inventory and catalog, declares required
+`sqlite-index-v1` and `content-addressed-blobs-v1` capabilities, and stores immutable
+payloads by SHA-256. A reader rejects an unknown required capability. Version 4 uses
+the bounded NDJSON inventory. Other versions are rejected; there is no monolithic
+JSON import fallback.
 
 | Limit                   | Value                                                                                  |
 | ----------------------- | -------------------------------------------------------------------------------------- |
@@ -175,6 +225,32 @@ Local release preparation updates version files and the changelog only when expl
 The test suite covers format handling, identity, repeat imports, recovery, SQLite contention and cancellation, picker state, statistics, logging, and packaging. Synthetic fixtures and a VS Code host smoke test do not prove continuation support in every Cursor build. Release acceptance includes opening imported chats in Cursor, checking supported attachments, and trying a new message in both local and remote workspace scenarios.
 
 The extension does not transfer the project tree, recreate unavailable server state, guarantee continuation of legacy chats, vacuum Cursor databases, or delete unidentified workspaces.
+
+### Completeness and continuation claims
+
+Transfer results use four practical completeness classes:
+
+- **Complete:** every supported renderer record and referenced supported resource
+  required by the exporter was present and validated.
+- **History-only:** readable history was preserved, but labelled recovery or a
+  missing Agent dependency prevents a continuation claim.
+- **Unavailable:** the chat cannot be represented safely by the supported reader,
+  so it is not published as a usable import.
+- **Already imported / unchanged:** the same semantic snapshot is already recorded
+  in this destination; this is identity policy, not a new completeness result.
+
+“Complete” is scoped to the renderer contract this build understands. It is not
+proof that a host-owned source had no unmirrored state, that server-side state still
+exists, or that Cursor accepts a new turn. The strongest defensible continuation
+statement is narrower: a particular imported copy was reopened and accepted a new
+disposable message in a recorded Cursor build, account, workspace kind, and time.
+It does not generalize to another build, account, machine, remote authority, or
+future date.
+
+The real-Cursor checklist in `scripts/acceptance-cursor.sh` records the executable
+hash and environment facts without changing chat data by default. Its manual
+mutation step is opt-in because an actual continuation test necessarily writes a
+new message.
 
 ## Design references
 

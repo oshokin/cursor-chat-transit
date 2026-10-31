@@ -16,6 +16,7 @@ import { hashFile } from './hash-file';
 import { sha256Hex } from './resource-bytes';
 import type { Layout, SqliteConn, WorkspaceEntry } from './types';
 import { TransferError } from './types';
+import { ERROR_DETAIL_CHARS } from './log-format';
 
 /** Fail closed so a half-finished import is never treated as a new copy. */
 export function needsAttention(
@@ -29,7 +30,7 @@ export function needsAttention(
   err.code = 'NEEDS_ATTENTION';
 
   if (detail) {
-    err.detail = detail.replace(/[\r\n\t]/g, ' ').slice(0, 800);
+    err.detail = detail.replace(/[\r\n\t]/g, ' ').slice(0, ERROR_DETAIL_CHARS);
   }
 
   return err;

@@ -6,6 +6,9 @@ import {
   type DiagnosticReport,
 } from './diagnostics-report';
 
+/** Checks summarized in the notification before linking to the full report. */
+const DIAGNOSTICS_NOTIFICATION_CHECKS = 8;
+
 /** Diagnostics types owned by the report module. */
 export type { DiagnosticCheck, DiagnosticReport } from './diagnostics-report';
 export {
@@ -26,12 +29,12 @@ export async function showDiagnosticsDialog(
     `VS Code API ${displayLine(report.editorApiVersion)}`,
     '',
     ...report.checks
-      .slice(0, 8)
+      .slice(0, DIAGNOSTICS_NOTIFICATION_CHECKS)
       .map(
         (check) =>
           `${check.status.toUpperCase()} — ${displayLine(check.label)}: ${displayLine(check.summary, 100)}`,
       ),
-    ...(report.checks.length > 8
+    ...(report.checks.length > DIAGNOSTICS_NOTIFICATION_CHECKS
       ? ['Additional checks are in the report.']
       : []),
     '',

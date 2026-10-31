@@ -4,6 +4,10 @@ import { validTimestamp } from './activity';
 import { bubbleKeySql, detectLayout, readSchema } from './schema';
 import { execSql, execSqlByteRows, withSqlite } from './sqlite';
 import type { BubbleRecord, ComposerHeader, Layout, SqliteConn } from './types';
+import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+
+/** Maximum blob keys read by one generated SQLite query. */
+const BLOB_READ_BATCH_ROWS = 32;
 
 /** Decode UTF-8 bytes as JSON, or null if empty. */
 export function jsonFromBuf(buf: Buffer): unknown {
@@ -396,8 +400,8 @@ export async function readKvBlobs(
   const out = new Map<string, KvBytes>();
   const unique = [...new Set(keys)];
 
-  for (let offset = 0; offset < unique.length; offset += 32) {
-    const chunk = unique.slice(offset, offset + 32);
+  for (let offset = 0; offset < unique.length; offset += BLOB_READ_BATCH_ROWS) {
+    const chunk = unique.slice(offset, offset + BLOB_READ_BATCH_ROWS);
 
     for (const key of chunk)
       if (!/^agentKv:blob:[0-9a-f]{64}$/.test(key))
@@ -483,7 +487,10 @@ export async function forEachBubble(
     sql,
     readOnly: true,
     onRow: async (fields) => {
-      if (fields[3] && Number(fields[3].toString('utf8')) > 33554432)
+      if (
+        fields[3] &&
+        Number(fields[3].toString('utf8')) > MAX_SQLITE_VALUE_BYTES
+      )
         throw new Error('Message exceeds the SQLite value size limit.');
       const bubble = bubbleFromFields(fields);
 

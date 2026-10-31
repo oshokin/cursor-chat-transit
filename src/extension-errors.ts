@@ -1,6 +1,7 @@
 import { logValue } from './log-format';
 import { notifyCompletion } from './notifications';
 import { formatLogLine } from './log-format';
+import { ERROR_DETAIL_CHARS } from './log-format';
 import * as vscode from 'vscode';
 import { setUi } from './extension-state';
 import { revealOutput, yieldToHost, type TransitLog } from './output-ui';
@@ -102,7 +103,7 @@ export function showFail(
   if (code === 'LOCK_RECOVERY_REQUIRED' && log) {
     const detail = (err instanceof Error ? err.message : String(err))
       .replace(/[\r\n\t]+/g, ' ')
-      .slice(0, 800);
+      .slice(0, ERROR_DETAIL_CHARS);
 
     log.error(detail);
   }
@@ -114,7 +115,7 @@ export function showFail(
         : '';
 
     if (detail) {
-      log.error(detail.replace(/[\r\n\t]+/g, ' ').slice(0, 800));
+      log.error(detail.replace(/[\r\n\t]+/g, ' ').slice(0, ERROR_DETAIL_CHARS));
     }
   }
 

@@ -190,18 +190,20 @@ export function withDirectoryRemoval<T>(
   return removalScope.run(remove, fn);
 }
 
+/** Delays before each bounded workspace-directory removal attempt. */
+export const WORKSPACE_REMOVAL_RETRY_DELAYS_MS = [0, 200, 400] as const;
+
 /**
  * Delete one verified directory.
- * At most three attempts and one second of backoff, without Node's nested retries.
+ * Uses the bounded local retry schedule without Node's nested retries.
  */
 export async function removeWorkspaceDirectory(
   /** Directory returned by `resolveWorkspaceDirectory`. */
   directory: string,
 ): Promise<void> {
-  const delays = [0, 200, 400];
   let last: unknown;
 
-  for (const delay of delays) {
+  for (const delay of WORKSPACE_REMOVAL_RETRY_DELAYS_MS) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
 
     try {

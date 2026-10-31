@@ -1,7 +1,10 @@
 import * as vscode from 'vscode';
 import { acquireLock, type LockHandle } from './lock';
 import { startOperationLog } from './operation-log';
-import { ProgressModel } from './progress-model';
+import {
+  ProgressModel,
+  PROGRESS_UI_REFRESH_INTERVAL_MS,
+} from './progress-model';
 import { humanDuration } from './duration';
 import { phaseMessage, type TransferKind } from './operation-ui';
 import { TransferSidebar, type SidebarState } from './sidebar-provider';
@@ -91,7 +94,7 @@ export function attachPhaseProgress(
   runtime.progressTimer = setInterval(() => {
     if (runtime.busy && runtime.uiState.status === 'running')
       setUi(model.snapshot());
-  }, 1000);
+  }, PROGRESS_UI_REFRESH_INTERVAL_MS);
 
   return (
     phase,

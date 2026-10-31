@@ -6,6 +6,10 @@ import type {
   WorkspaceEntry,
 } from './types';
 import { chatListLabel } from './picker';
+import { DISPLAY_NAME_CHARS } from './log-format';
+
+/** Default number of chat names shown in a grouped issue notice. */
+export const DEFAULT_ISSUE_NOTICE_NAMES = 3;
 
 /** Selected workspace still present, never chosen, or gone from disk. */
 export type WorkspaceResolve =
@@ -97,7 +101,7 @@ export function formatIncompleteExportNotice(
   /** Export problems already recorded. */
   issues: ExportChatIssue[],
   /** How many chat names to include. */
-  maxNames = 3,
+  maxNames = DEFAULT_ISSUE_NOTICE_NAMES,
 ): {
   /** Short notice title. */
   toast: string;
@@ -220,7 +224,7 @@ function chatItemLabel(chat: {
   reason?: string;
 }): string {
   const raw = typeof chat.name === 'string' ? chat.name.trim() : '';
-  const name = raw ? raw.slice(0, 120) : chat.composerId;
+  const name = raw ? raw.slice(0, DISPLAY_NAME_CHARS) : chat.composerId;
 
   return chat.reason ? `${name} — ${chat.reason}` : name;
 }
@@ -244,6 +248,18 @@ export function formatImportNotice(
 
   /** Format `1 chat` versus `N chats` for the import notice. */
   const chats = (n: number) => `${n} chat${n === 1 ? '' : 's'}`;
+  const repaired = result.modelConfigsRepaired || 0;
+
+  const repairedClause =
+    repaired > 0
+      ? `${repaired} existing imported ${repaired === 1 ? 'chat now uses' : 'chats now use'} an available model.`
+      : '';
+
+  /** Append a material compatibility outcome without exposing model ids. */
+  const withRepair = (
+    /** Primary completion detail. */
+    detail: string,
+  ) => [detail, repairedClause].filter(Boolean).join(' ');
 
   const already =
     result.alreadyImported > 0
@@ -268,6 +284,7 @@ export function formatImportNotice(
       details.push(
         `${chats(result.skipped)} ${result.skipped === 1 ? 'was' : 'were'} skipped.`,
       );
+    if (repairedClause) details.push(repairedClause);
     if (restart) details.push(load);
     const detail = details.join(' ');
 
@@ -281,8 +298,7 @@ export function formatImportNotice(
     };
   }
 
-  if ((result.modelConfigsRepaired || 0) > 0 && result.imported === 0) {
-    const repaired = result.modelConfigsRepaired || 0;
+  if (repaired > 0 && result.imported === 0) {
     const repairedTitle = `Repaired ${repaired} imported chat model${repaired === 1 ? '' : 's'}`;
     const detail = 'Quit Cursor and reopen it to load the compatible model.';
 
@@ -321,8 +337,8 @@ export function formatImportNotice(
 
     return {
       title: restoredTitle,
-      detail: loadRestored,
-      toast: `${restoredTitle}. ${loadRestored}`,
+      detail: withRepair(loadRestored),
+      toast: `${restoredTitle}. ${withRepair(loadRestored)}`,
       items,
       restart,
       status: 'completed',
@@ -336,7 +352,10 @@ export function formatImportNotice(
   ) {
     const n = result.newVersions;
     const title = `Added ${n} updated chat version${n === 1 ? '' : 's'}`;
-    const detail = `${n === 1 ? 'A separate copy was' : 'Separate copies were'} created. Your existing ${n === 1 ? 'chat was' : 'chats were'} kept. ${load}`;
+
+    const detail = withRepair(
+      `${n === 1 ? 'A separate copy was' : 'Separate copies were'} created. Your existing ${n === 1 ? 'chat was' : 'chats were'} kept. ${load}`,
+    );
 
     return {
       title,
@@ -350,8 +369,8 @@ export function formatImportNotice(
 
   return {
     title,
-    detail: restart ? load : 'No changes made.',
-    toast: restart ? `${title}. ${load}` : title,
+    detail: withRepair(restart ? load : 'No changes made.'),
+    toast: restart ? `${title}. ${withRepair(load)}` : title,
     items,
     restart,
     status: 'completed',

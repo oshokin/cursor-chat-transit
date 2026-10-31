@@ -5,6 +5,11 @@ import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
 
+/** Bundle benchmark defaults and controller-memory sampling cadence. */
+const defaultMessageCount = 3_000;
+const defaultMessageBytes = 16_384;
+const memorySampleIntervalMs = 25;
+
 /** Opt-in repeatable benchmark; only temporary databases are opened. Compile first. */
 async function main(): Promise<void> {
   const project =
@@ -49,8 +54,11 @@ async function main(): Promise<void> {
     path.join(project, 'out/sqlite.js'),
   ) as typeof import('../src/sqlite');
 
-  const count = Number(process.env.CCT_BENCH_MESSAGES || 3000);
-  const payloadBytes = Number(process.env.CCT_BENCH_MESSAGE_BYTES || 16384);
+  const count = Number(process.env.CCT_BENCH_MESSAGES || defaultMessageCount);
+
+  const payloadBytes = Number(
+    process.env.CCT_BENCH_MESSAGE_BYTES || defaultMessageBytes,
+  );
 
   if (
     !Number.isSafeInteger(count) ||
@@ -65,7 +73,7 @@ async function main(): Promise<void> {
 
   const sample = setInterval(() => {
     rss = Math.max(rss, process.memoryUsage().rss);
-  }, 25);
+  }, memorySampleIntervalMs);
 
   try {
     const ctx: TransferContext = {};

@@ -5,7 +5,7 @@ import { JournalStore, type PendingChatRow } from './journal-db';
 import { SqliteSession } from './sqlite-session';
 import { traceIO } from './transfer-events';
 import { TransferError, type Layout, type SqliteConn } from './types';
-import { IMPORT_BATCH_BYTES } from './import-batches';
+import { IMPORT_BATCH_BYTES, IMPORT_BATCH_ROWS } from './import-batches';
 
 /** Recover an unpublished partial chat; never delete modified, unknown or published rows. */
 export async function cleanUnpublishedBubbles(opts: {
@@ -113,7 +113,7 @@ COMMIT;`),
 
       if (
         batch.length &&
-        (bytes + size > IMPORT_BATCH_BYTES || batch.length >= 128)
+        (bytes + size > IMPORT_BATCH_BYTES || batch.length >= IMPORT_BATCH_ROWS)
       )
         await flush();
       batch.push([key, text]);

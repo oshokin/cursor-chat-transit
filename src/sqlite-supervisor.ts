@@ -1,5 +1,9 @@
 import type { ChildProcess } from 'node:child_process';
-import { sqliteTimeoutError } from './sqlite-timeout';
+import {
+  SQLITE_SUPERVISOR_CANCEL_GRACE_MS,
+  SQLITE_SUPERVISOR_MAX_TIMEOUT_MS,
+  sqliteTimeoutError,
+} from './sqlite-timeout';
 import type { SqlWatch } from './sqlite-protocol';
 
 /** Parent-owned deadlines remain runnable while native SQLite blocks a worker. */
@@ -33,7 +37,7 @@ export class SqliteSupervisor {
             this.stopping ??= sqliteTimeoutError(message.timeoutMs!);
             this.child.kill('SIGKILL');
           },
-          Math.min(message.timeoutMs!, 3600000),
+          Math.min(message.timeoutMs!, SQLITE_SUPERVISOR_MAX_TIMEOUT_MS),
         ),
       );
 
@@ -41,7 +45,7 @@ export class SqliteSupervisor {
   }
 
   /** Allow cooperative cleanup, then force termination with a bounded grace period. */
-  cancel(graceMs = 2000): void {
+  cancel(graceMs = SQLITE_SUPERVISOR_CANCEL_GRACE_MS): void {
     this.cancelTimer ??= setTimeout(() => {
       this.stopping ??= new DOMException('Cancelled', 'AbortError');
       this.child.kill('SIGKILL');

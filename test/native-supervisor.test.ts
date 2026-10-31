@@ -9,6 +9,14 @@ import os from 'node:os';
 import { SqliteSupervisor } from '../src/sqlite-supervisor';
 import { SqliteSession } from '../src/sqlite-session';
 
+/** Watchdog harness timing and eventual-cleanup policy. */
+const watchdogTimeoutMs = 10;
+const watchdogObservationDelayMs = 30;
+const invalidPacketObservationDelayMs = 20;
+const integrationTestTimeoutMs = 10_000;
+const writerReleaseAttempts = 30;
+const writerReleasePollMs = 50;
+
 function fake() {
   let kills = 0;
 
@@ -28,8 +36,16 @@ function fake() {
 test('parent deadline kills a worker without executing its event loop', async () => {
   const { supervisor, kills } = fake();
 
-  supervisor.observe({ type: 'sqlite-start', requestId: 1, timeoutMs: 10 });
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  supervisor.observe({
+    type: 'sqlite-start',
+    requestId: 1,
+    timeoutMs: watchdogTimeoutMs,
+  });
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, watchdogObservationDelayMs),
+  );
+
   assert.equal(kills(), 1);
 
   assert.equal(
@@ -43,9 +59,22 @@ test('parent deadline kills a worker without executing its event loop', async ()
 test('completed SQL cancels the external deadline', async () => {
   const { supervisor, kills } = fake();
 
-  supervisor.observe({ type: 'sqlite-start', requestId: 1, timeoutMs: 10 });
-  supervisor.observe({ type: 'sqlite-end', requestId: 1, timeoutMs: 10 });
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  supervisor.observe({
+    type: 'sqlite-start',
+    requestId: 1,
+    timeoutMs: watchdogTimeoutMs,
+  });
+
+  supervisor.observe({
+    type: 'sqlite-end',
+    requestId: 1,
+    timeoutMs: watchdogTimeoutMs,
+  });
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, watchdogObservationDelayMs),
+  );
+
   assert.equal(kills(), 0);
   supervisor.dispose();
 });
@@ -56,7 +85,11 @@ test('invalid watchdog packets never schedule a process kill', async () => {
   for (const timeoutMs of [-1, 0, Number.NaN, Number.POSITIVE_INFINITY])
     supervisor.observe({ type: 'sqlite-start', requestId: 1, timeoutMs });
   assert.equal(supervisor.observe({}), false);
-  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, invalidPacketObservationDelayMs),
+  );
+
   assert.equal(kills(), 0);
   supervisor.dispose();
 });
@@ -64,16 +97,20 @@ test('invalid watchdog packets never schedule a process kill', async () => {
 test('cancellation grace is idempotent and disposal cancels it', async () => {
   const { supervisor, kills } = fake();
 
-  supervisor.cancel(10);
-  supervisor.cancel(10);
+  supervisor.cancel(watchdogTimeoutMs);
+  supervisor.cancel(watchdogTimeoutMs);
   supervisor.dispose();
-  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, watchdogObservationDelayMs),
+  );
+
   assert.equal(kills(), 0);
 });
 
 test(
   'external watchdog terminates real synchronous native SQL and rolls back its writer',
-  { timeout: 10000 },
+  { timeout: integrationTestTimeoutMs },
   async (t) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-real-watchdog-'));
     const database = path.join(root, 'test.sqlite');
@@ -131,7 +168,7 @@ test(
 
 test(
   'loss of the supervising host stops a native writer even while its event loop is blocked',
-  { timeout: 10000 },
+  { timeout: integrationTestTimeoutMs },
   async (t) => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-orphan-writer-'));
     const database = path.join(root, 'test.sqlite');
@@ -168,7 +205,11 @@ test(
     assert.equal(orphaned, true);
     let checked = false;
 
-    for (let attempt = 0; attempt < 30 && !checked; attempt++) {
+    for (
+      let attempt = 0;
+      attempt < writerReleaseAttempts && !checked;
+      attempt++
+    ) {
       const verify = await SqliteSession.open({ database, busyTimeoutMs: 0 });
 
       try {
@@ -187,7 +228,10 @@ test(
         await verify.close();
       }
 
-      if (!checked) await new Promise((resolve) => setTimeout(resolve, 50));
+      if (!checked)
+        await new Promise((resolve) =>
+          setTimeout(resolve, writerReleasePollMs),
+        );
     }
 
     assert.equal(

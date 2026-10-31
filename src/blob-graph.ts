@@ -34,7 +34,11 @@ const STATE_BLOB_KIND: Record<number, Kind> = {
 };
 
 /** Stop a runaway graph. Real chats stay well under this. */
-const MAX_NODES = 100_000;
+export const MAX_BLOB_GRAPH_NODES = 100_000;
+/** Maximum nested conversation-state wrappers followed. */
+export const MAX_CONVERSATION_STATE_DEPTH = 4;
+/** Maximum generic protobuf containers scanned for known blob ids. */
+export const MAX_BLOB_SCAN_DEPTH = 32;
 
 /** `agentKv:blob:` plus a digest. */
 function blobKey(digest: string): string {
@@ -75,7 +79,8 @@ function refsFromState(
   /** Remaining recursion depth. */
   depth = 0,
 ): Node[] {
-  if (depth > 4) throw new Error('Nested conversation state is too deep.');
+  if (depth > MAX_CONVERSATION_STATE_DEPTH)
+    throw new Error('Nested conversation state is too deep.');
   const out: Node[] = [];
 
   for (const field of readFields(bytes)) {
@@ -232,7 +237,7 @@ function looseDigests(bytes: Buffer): string[] {
     /** Current walk depth. */
     depth: number,
   ): void => {
-    if (depth > 32) return;
+    if (depth > MAX_BLOB_SCAN_DEPTH) return;
     const fields = tryFields(buf);
 
     if (!fields) return;
@@ -347,7 +352,7 @@ function createGraph(
     const role = `${node.digest}:${node.kind}`;
 
     if (roles.has(role)) return;
-    if (roles.size >= MAX_NODES)
+    if (roles.size >= MAX_BLOB_GRAPH_NODES)
       throw new Error('Blob graph exceeds 100000 roles.');
     roles.add(role);
     queue.push(node);

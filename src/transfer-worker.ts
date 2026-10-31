@@ -17,6 +17,11 @@ import type { TransferJob } from './transfer-process';
 import type { TransferContext } from './types';
 import { runCatalogue, type CatalogueJob } from './workspace-catalogue';
 
+/** Grace period for disconnect-triggered cleanup before forced exit. */
+export const WORKER_DISCONNECT_EXIT_TIMEOUT_MS = 5_000;
+/** Grace period for IPC shutdown after the final result is delivered. */
+export const WORKER_FINAL_EXIT_TIMEOUT_MS = 1_000;
+
 /** Cancels the worker when the extension host disconnects. */
 const abort = new AbortController();
 
@@ -28,8 +33,13 @@ let finishing = false;
 // Losing the Extension Host must release writers, not orphan them.
 process.once('disconnect', () => {
   if (finishing) return;
+
   abort.abort();
-  disconnectedExit = setTimeout(() => process.exit(1), 5000);
+
+  disconnectedExit = setTimeout(
+    () => process.exit(1),
+    WORKER_DISCONNECT_EXIT_TIMEOUT_MS,
+  );
 });
 
 process.once('SIGTERM', () => abort.abort());
@@ -56,7 +66,10 @@ function finishWorker(code: number, message: Record<string, unknown>): void {
     process.send(message, () => {
       process.disconnect();
 
-      const force = setTimeout(() => process.exit(code), 1000);
+      const force = setTimeout(
+        () => process.exit(code),
+        WORKER_FINAL_EXIT_TIMEOUT_MS,
+      );
 
       force.unref();
     });

@@ -1,5 +1,7 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { sqliteTimeoutError } from './sqlite-timeout';
 import { SqliteError } from './types';
@@ -9,7 +11,21 @@ import type {
   SqlParams,
   SqlRow,
 } from './sqlite-native';
-import type { SqlReply, SqlWatch } from './sqlite-protocol';
+import type {
+  SqlReply,
+  SqlSpill,
+  SqlWatch,
+  SqlWireRow,
+} from './sqlite-protocol';
+import {
+  isSqlSpill,
+  SQLITE_COLLECTED_RESULT_BYTES,
+  SQLITE_IDLE_WORKER_LIMIT,
+  SQLITE_IDLE_WORKER_TIMEOUT_MS,
+  SQLITE_INLINE_VALUE_BYTES,
+  SQLITE_OPERATION_TIMEOUT_MS,
+  SQLITE_WORKER_START_TIMEOUT_MS,
+} from './sqlite-protocol';
 
 /** Warm workers have no database handles; limit idle memory and never keep the host alive. */
 const idleWorkers: ChildProcess[] = [];
@@ -21,7 +37,7 @@ function releaseWorker(child: ChildProcess): void {
   child.removeAllListeners('error');
   child.on('error', () => undefined);
 
-  if (!child.connected || idleWorkers.length >= 2) {
+  if (!child.connected || idleWorkers.length >= SQLITE_IDLE_WORKER_LIMIT) {
     child.kill('SIGKILL');
 
     return;
@@ -36,7 +52,7 @@ function releaseWorker(child: ChildProcess): void {
 
     if (index >= 0) idleWorkers.splice(index, 1);
     child.kill('SIGKILL');
-  }, 2000);
+  }, SQLITE_IDLE_WORKER_TIMEOUT_MS);
 
   timer.unref();
   idleTimers.set(child, timer);
@@ -67,6 +83,7 @@ export class SqliteSession {
   private exited: Promise<void> = Promise.resolve();
   private releaseExit?: () => void;
   private failure?: Error;
+  private spillDir?: string;
   private closed = false;
   private waiter?: {
     resolve: () => void;
@@ -120,7 +137,7 @@ export class SqliteSession {
 
     return this.rows(sql, parameters, (row) => {
       text += row.map(cellText).join(separator) + '\n';
-      if (Buffer.byteLength(text) > 4 * 1024 * 1024)
+      if (Buffer.byteLength(text) > SQLITE_COLLECTED_RESULT_BYTES)
         throw new Error('SQLite collected result exceeds 4 MiB; use rows.');
     }).then(() => text);
   }
@@ -135,7 +152,8 @@ export class SqliteSession {
       const line = row.map(cellText).join('|');
 
       if (
-        Buffer.byteLength(line) > (this.options.maxLineBytes ?? 4 * 1024 * 1024)
+        Buffer.byteLength(line) >
+        (this.options.maxLineBytes ?? SQLITE_COLLECTED_RESULT_BYTES)
       )
         throw new Error('SQLite result row exceeds the configured byte limit.');
       await onLine(line);
@@ -179,11 +197,11 @@ export class SqliteSession {
             () =>
               this.stop(
                 sqliteTimeoutError(
-                  this.options.timeoutMs ?? 120000,
+                  this.options.timeoutMs ?? SQLITE_OPERATION_TIMEOUT_MS,
                   this.options.database,
                 ),
               ),
-            this.options.timeoutMs ?? 120000,
+            this.options.timeoutMs ?? SQLITE_OPERATION_TIMEOUT_MS,
           );
 
           await new Promise<void>((resolve, reject) => {
@@ -198,7 +216,7 @@ export class SqliteSession {
               },
             };
 
-            this.child!.send({ type: 'query', sql, parameters }, (error) => {
+            this.sendQuery(sql, parameters).catch((error) => {
               if (error) this.stop(error);
             });
           });
@@ -240,13 +258,15 @@ export class SqliteSession {
     await this.exited;
     await this.consuming;
     await this.chain;
+    if (this.spillDir)
+      await rm(this.spillDir, { recursive: true, force: true });
   }
 
   private startWatch(): SqlWatch {
     const event: SqlWatch = {
       type: 'sqlite-start',
       requestId: ++requestSequence,
-      timeoutMs: this.options.timeoutMs ?? 120000,
+      timeoutMs: this.options.timeoutMs ?? SQLITE_OPERATION_TIMEOUT_MS,
     };
 
     if (process.connected) process.send?.(event);
@@ -332,7 +352,11 @@ export class SqliteSession {
       if (message.type === 'rows') {
         this.consuming = this.consuming
           .then(async () => {
-            await this.waiter?.rows(message.rows);
+            const rows: SqlRow[] = [];
+
+            for (const row of message.rows)
+              rows.push(await this.readWireRow(row));
+            await this.waiter?.rows(rows);
             if (!this.failure && child.connected)
               child.send({ type: 'ack' }, () => undefined);
           })
@@ -358,9 +382,17 @@ export class SqliteSession {
     const timer = setTimeout(
       () =>
         this.stop(
-          sqliteTimeoutError(Math.max(10000, this.options.timeoutMs ?? 120000)),
+          sqliteTimeoutError(
+            Math.max(
+              SQLITE_WORKER_START_TIMEOUT_MS,
+              this.options.timeoutMs ?? SQLITE_OPERATION_TIMEOUT_MS,
+            ),
+          ),
         ),
-      Math.max(10000, this.options.timeoutMs ?? 120000),
+      Math.max(
+        SQLITE_WORKER_START_TIMEOUT_MS,
+        this.options.timeoutMs ?? SQLITE_OPERATION_TIMEOUT_MS,
+      ),
     );
 
     try {
@@ -385,6 +417,62 @@ export class SqliteSession {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async sendQuery(sql: string, parameters: SqlParams): Promise<void> {
+    const wire: Array<SqlParams[number] | SqlSpill> = [];
+
+    for (const value of parameters) {
+      const bytes = Buffer.isBuffer(value)
+        ? value.length
+        : typeof value === 'string'
+          ? Buffer.byteLength(value)
+          : 0;
+
+      if (bytes <= SQLITE_INLINE_VALUE_BYTES) {
+        wire.push(value);
+        continue;
+      }
+
+      this.spillDir ??= await mkdtemp(path.join(os.tmpdir(), 'cct-sqlite-'));
+      const file = path.join(this.spillDir, `${wire.length}-${Date.now()}`);
+
+      await writeFile(file, value as string | Buffer, { flag: 'wx' });
+
+      wire.push({
+        type: 'spill',
+        path: file,
+        byteLength: bytes,
+        encoding: Buffer.isBuffer(value) ? 'buffer' : 'utf8',
+      });
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.child!.send({ type: 'query', sql, parameters: wire }, (error) =>
+        error ? reject(error) : resolve(),
+      );
+    });
+  }
+
+  private async readWireRow(row: SqlWireRow): Promise<SqlRow> {
+    const decoded: SqlRow = [];
+
+    for (const value of row) {
+      if (!isSqlSpill(value)) {
+        decoded.push(value);
+        continue;
+      }
+
+      const bytes = await readFile(value.path);
+
+      await rm(value.path, { force: true });
+
+      decoded.push(
+        value.encoding === 'buffer' ? bytes : bytes.toString('utf8'),
+      );
+    }
+
+    return decoded;
   }
 }
 

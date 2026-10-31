@@ -7,6 +7,7 @@ import {
 } from './dependencies';
 import { canvasFilenamesFromChat } from './canvases';
 import { planFilenamesFromChat } from './plans';
+import { ARTIFACT_SNAPSHOT_DEPTH } from './artifact-support';
 import { SnapshotHasher } from './snapshot-hash';
 import type { BubbleRecord, ComposerHeader, ExportResources } from './types';
 
@@ -52,7 +53,8 @@ export function canonicalJson(
   /** Remaining recursion depth. */
   depth = 0,
 ): string {
-  if (depth > 128) throw new Error('Snapshot nesting limit');
+  if (depth > ARTIFACT_SNAPSHOT_DEPTH)
+    throw new Error('Snapshot nesting limit');
   if (value === null) return 'null';
 
   if (typeof value === 'string' || typeof value === 'boolean') {

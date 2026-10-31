@@ -1,6 +1,15 @@
 import type Database from 'better-sqlite3';
 import { sqliteBinding } from './sqlite-binding';
+import {
+  SQLITE_BUSY_TIMEOUT_MS,
+  SQLITE_MAX_BUSY_TIMEOUT_MS,
+  SQLITE_PREPARED_SQL_CHARS,
+  SQLITE_PREPARED_STATEMENT_LIMIT,
+} from './sqlite-protocol';
 import { SqliteError } from './types';
+
+/** SQLite cache retained per native connection, in KiB. */
+const SQLITE_CACHE_KIB = 2_000;
 
 /** Parameters and rows cross IPC as typed values, never hex protocol text. */
 export type SqlValue = string | number | bigint | Buffer | null;
@@ -22,11 +31,15 @@ export class NativeDatabase {
   private readonly prepared = new Map<string, Database.Statement>();
 
   constructor(options: NativeOptions) {
-    const timeout = options.busyTimeoutMs ?? 5000;
+    const timeout = options.busyTimeoutMs ?? SQLITE_BUSY_TIMEOUT_MS;
 
-    if (!Number.isInteger(timeout) || timeout < 0 || timeout > 30000)
+    if (
+      !Number.isInteger(timeout) ||
+      timeout < 0 ||
+      timeout > SQLITE_MAX_BUSY_TIMEOUT_MS
+    )
       throw new TypeError(
-        'SQLite busy timeout must be between 0 and 30000 ms.',
+        `SQLite busy timeout must be between 0 and ${SQLITE_MAX_BUSY_TIMEOUT_MS} ms.`,
       );
 
     const Binding = sqliteBinding();
@@ -38,7 +51,7 @@ export class NativeDatabase {
     });
 
     try {
-      this.db.pragma('cache_size=-2000');
+      this.db.pragma(`cache_size=-${SQLITE_CACHE_KIB}`);
       this.db.pragma('temp_store=FILE');
       this.db.pragma('foreign_keys=ON');
       this.db.pragma('synchronous=FULL');
@@ -67,8 +80,8 @@ export class NativeDatabase {
       if (!statement) {
         statement = this.db.prepare(sql);
 
-        if (parameters.length && sql.length <= 32768) {
-          if (this.prepared.size >= 128)
+        if (parameters.length && sql.length <= SQLITE_PREPARED_SQL_CHARS) {
+          if (this.prepared.size >= SQLITE_PREPARED_STATEMENT_LIMIT)
             this.prepared.delete(this.prepared.keys().next().value!);
           this.prepared.set(sql, statement);
         }

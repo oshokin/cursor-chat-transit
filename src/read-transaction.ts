@@ -1,4 +1,4 @@
-import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { MAX_SQLITE_ROW_LINE_BYTES } from './bundle-limits';
 import { SqliteSession } from './sqlite-session';
 import { traceIO, transferEvent } from './transfer-events';
 import type { SqliteConn } from './types';
@@ -13,7 +13,7 @@ export async function openReadTransaction(conn: SqliteConn): Promise<{
   const session = await SqliteSession.open({
     ...conn,
     readOnly: true,
-    maxLineBytes: 2 * MAX_SQLITE_VALUE_BYTES + 65536,
+    maxLineBytes: MAX_SQLITE_ROW_LINE_BYTES,
   });
 
   let closing: Promise<void> | undefined;

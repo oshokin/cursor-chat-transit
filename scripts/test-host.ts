@@ -4,6 +4,13 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { runTests, TestRunFailedError } from '@vscode/test-electron';
 
+/** Retry and deadline policy for the network-dependent VS Code host smoke. */
+const hostDownloadAttempts = 3;
+const hostSmokeTimeoutMs = 60_000;
+const hostRetryBackoffMs = 5_000;
+/** Bound recursive error inspection in case an error contains cycles. */
+const downloadErrorPartLimit = 20;
+
 /** Compile the extension, sidebar client and host test, then run the VS Code smoke. */
 async function main(): Promise<void> {
   const root = path.resolve(__dirname, '..');
@@ -50,10 +57,9 @@ async function main(): Promise<void> {
 
 /** Download VS Code and run the smoke. A dropped connection is tried again. */
 async function runHost(root: string, tmp: string): Promise<void> {
-  const attempts = 3;
   let failure: unknown;
 
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  for (let attempt = 1; attempt <= hostDownloadAttempts; attempt++) {
     try {
       await runTests({
         extensionDevelopmentPath: root,
@@ -65,24 +71,26 @@ async function runHost(root: string, tmp: string): Promise<void> {
           `--extensions-dir=${path.join(tmp, 'ext')}`,
         ],
         version: process.env.VSCODE_TEST_VERSION || '1.128.0',
-        timeout: 60_000,
+        timeout: hostSmokeTimeoutMs,
       });
 
       return;
     } catch (error) {
       failure = error;
       if (
-        attempt === attempts ||
+        attempt === hostDownloadAttempts ||
         error instanceof TestRunFailedError ||
         !downloadFailure(error)
       )
         throw error;
 
       console.error(
-        `VS Code download failed (${attempt} of ${attempts}). Retrying.`,
+        `VS Code download failed (${attempt} of ${hostDownloadAttempts}). Retrying.`,
       );
 
-      await new Promise((resolve) => setTimeout(resolve, attempt * 5000));
+      await new Promise((resolve) =>
+        setTimeout(resolve, attempt * hostRetryBackoffMs),
+      );
     }
   }
 
@@ -94,7 +102,12 @@ function downloadFailure(error: unknown): boolean {
   const text: string[] = [];
 
   const visit = (value: unknown): void => {
-    if (text.length > 20 || value === undefined || value === null) return;
+    if (
+      text.length > downloadErrorPartLimit ||
+      value === undefined ||
+      value === null
+    )
+      return;
 
     if (typeof value === 'string') {
       text.push(value);

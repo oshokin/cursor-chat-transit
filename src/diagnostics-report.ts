@@ -1,3 +1,6 @@
+/** Default maximum length of one displayed diagnostic value. */
+export const DIAGNOSTIC_DISPLAY_CHARS = 150;
+
 /** One redacted diagnostics probe shown in the report. */
 export interface DiagnosticCheck {
   /** Short probe name shown in the report. */
@@ -26,7 +29,7 @@ export interface DiagnosticReport {
 export function displayLine(
   /** Diagnostic value to print. */
   value: string,
-  maxLength = 150,
+  maxLength = DIAGNOSTIC_DISPLAY_CHARS,
 ): string {
   return value.replace(/[\r\n\t]/g, ' ').slice(0, maxLength);
 }

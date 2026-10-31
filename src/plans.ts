@@ -1,11 +1,12 @@
-import { pathInside, staysInRoot, writeFileNoClobber } from './resource-files';
+import { pathInside, writeFileNoClobber } from './resource-files';
+import { readArtifactSource } from './artifact-source';
+import { ARTIFACT_SNAPSHOT_DEPTH } from './artifact-support';
 import {
   MAX_RESOURCE_BYTES,
   sha256Hex,
   decodeCanonicalBase64,
   resourceError as fail,
 } from './resource-bytes';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -111,7 +112,8 @@ export function planFilenamesFromChat(
     /** Current walk depth. */
     depth: number,
   ) => {
-    if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
+    if (depth > ARTIFACT_SNAPSHOT_DEPTH)
+      fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
 
     if (Array.isArray(value)) {
       for (const item of value) visit(item, depth + 1);
@@ -228,28 +230,14 @@ export async function readPlanFile(
   /** Basename, not a path. */
   filename: string,
 ): Promise<PlanResource | null> {
-  const dest = planFilePath(plansDir, filename);
+  const source = await readArtifactSource({
+    root: plansDir,
+    filename,
+    isBasename: isPlanFilename,
+    kind: 'Plan',
+  });
 
-  try {
-    const dirStat = await fs.promises.lstat(plansDir);
-
-    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
-  } catch {
-    return null;
-  }
-
-  if (!staysInRoot(plansDir, dest)) return null;
-
-  try {
-    const lst = await fs.promises.lstat(dest);
-
-    if (!lst.isFile() || lst.isSymbolicLink()) return null;
-    const bytes = await fs.promises.readFile(dest);
-
-    return encodePlan(filename, bytes);
-  } catch {
-    return null;
-  }
+  return source ? encodePlan(filename, source.bytes) : null;
 }
 
 /** Write a plan; reuse identical bytes, never overwrite a different file. */
@@ -320,7 +308,8 @@ export function rewritePlanReferences(
   /** Remaining recursion depth. */
   depth = 0,
 ): unknown {
-  if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
+  if (depth > ARTIFACT_SNAPSHOT_DEPTH)
+    fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
 
   if (Array.isArray(value)) {
     return value.map((item) =>

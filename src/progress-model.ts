@@ -1,5 +1,12 @@
 import type { TransferPhase, TransferPhaseMetrics } from './types';
 
+/** Minimum cadence shared intentionally by transfer progress producers. */
+export const TRANSFER_PROGRESS_THROTTLE_MS = 250;
+/** Sidebar and elapsed-time refresh cadence. */
+export const PROGRESS_UI_REFRESH_INTERVAL_MS = 1_000;
+/** Delay without advancement before progress is reported as stalled. */
+export const PROGRESS_STALL_THRESHOLD_MS = 10_000;
+
 /** Native phase order, independent of guessed percentage weights. */
 const steps = {
   export: [
@@ -108,9 +115,9 @@ export class ProgressModel {
 
     const remaining =
       valid &&
-      elapsed >= 1000 &&
+      elapsed >= PROGRESS_UI_REFRESH_INTERVAL_MS &&
       advanced > 0 &&
-      now - this.lastAdvance < 10000 &&
+      now - this.lastAdvance < PROGRESS_STALL_THRESHOLD_MS &&
       m.processed! < m.total!
         ? (elapsed * (m.total! - m.processed!)) / advanced
         : undefined;
@@ -123,10 +130,10 @@ export class ProgressModel {
     const estimate =
       valid && m.processed! >= m.total!
         ? 'Step complete'
-        : now - this.lastAdvance >= 10000 && valid
+        : now - this.lastAdvance >= PROGRESS_STALL_THRESHOLD_MS && valid
           ? `No measured progress for ${duration(now - this.lastAdvance)}`
           : remaining !== undefined
-            ? `About ${duration(Math.max(1000, Math.ceil(remaining / 1000) * 1000))} left in this ${m.file && !m.scope ? 'file' : 'step'}`
+            ? `About ${duration(Math.max(PROGRESS_UI_REFRESH_INTERVAL_MS, Math.ceil(remaining / PROGRESS_UI_REFRESH_INTERVAL_MS) * PROGRESS_UI_REFRESH_INTERVAL_MS))} left in this ${m.file && !m.scope ? 'file' : 'step'}`
             : '';
 
     const counts = valid

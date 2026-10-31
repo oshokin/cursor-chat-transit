@@ -1,3 +1,14 @@
+/** Shared presentation caps for names, errors, references, and log fields. */
+export const DISPLAY_NAME_CHARS = 120;
+/** Maximum user-facing error detail retained in logs. */
+export const ERROR_DETAIL_CHARS = 800;
+/** Maximum structured free-text field retained in an operation log. */
+export const LOG_FIELD_CHARS = 4_096;
+/** Default cap for operation log messages. */
+export const LOG_MESSAGE_CHARS = 300;
+/** Minimum interval between repeated phase log entries. */
+export const OPERATION_LOG_HEARTBEAT_MS = 5_000;
+
 /** Human log timestamp: local clock, milliseconds and an explicit UTC offset. */
 export function logTimestamp(date = new Date()): string {
   const offset = -date.getTimezoneOffset();

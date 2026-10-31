@@ -1,7 +1,11 @@
-import { mapInBatches } from './bounded-io';
 import { randomUUID } from 'node:crypto';
 import { transferEvent, transferProgress, traceIO } from './transfer-events';
-import { MAX_JSON_RECORD_BYTES, MAX_MANIFEST_BYTES } from './bundle-limits';
+import {
+  MAX_EXPANDED_ARCHIVE_BYTES,
+  MAX_JSON_RECORD_BYTES,
+  MAX_MANIFEST_BYTES,
+  MAX_ZIP_COMPRESSION_RATIO,
+} from './bundle-limits';
 import { createHash } from 'node:crypto';
 import { createWriteStream, createReadStream } from 'node:fs';
 import { mkdir, rename, rm, statfs, stat } from 'node:fs/promises';
@@ -12,6 +16,12 @@ import type * as Yauzl from 'yauzl';
 import { yauzl, yazl } from './zip-lib';
 import { MAX_ZIP_ENTRIES } from './bundle-limits';
 import { assertArchivePath } from './bundle-names';
+import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
+
+/** Minimum interval between ZIP pack progress updates. */
+export const ZIP_PACK_PROGRESS_INTERVAL_MS = 500;
+/** Free space left untouched while extracting an archive. */
+export const ZIP_EXTRACTION_DISK_RESERVE_BYTES = 64 * 1024 * 1024;
 
 /** One ZIP member written to disk with its content hash. */
 export interface ExtractedEntry {
@@ -24,52 +34,21 @@ export interface ExtractedEntry {
   sha256: string;
 }
 
+/** One source entry accepted by the streaming ZIP packer. */
+export interface ZipSourceEntry {
+  diskPath: string;
+  name: string;
+}
+
 /** Pack files into `destPath` via a sibling partial, then rename. */
 export async function packZip(
   destPath: string,
   /** Files to pack, in archive order. */
-  files: Array<{
-    /** Absolute path of the file. */
-    diskPath: string;
-    /** Path of that file inside the archive. */
-    name: string;
-  }>,
+  files: Iterable<ZipSourceEntry> | AsyncIterable<ZipSourceEntry>,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (files.length > MAX_ZIP_ENTRIES) {
-    throw new Error(
-      `Archive has ${files.length} entries; the limit is ${MAX_ZIP_ENTRIES}.`,
-    );
-  }
-
   signal?.throwIfAborted();
-  const sizes = new Map<string, number>();
   let totalBytes = 0;
-
-  for await (const batch of mapInBatches(
-    files,
-    async (file) => {
-      assertArchivePath(file.name);
-
-      const info = await traceIO(
-        'Inspect ZIP source',
-        { path: file.diskPath },
-        () => stat(file.diskPath),
-      );
-
-      if (!info.isFile())
-        throw new Error(`ZIP source is not a regular file: ${file.diskPath}`);
-
-      return { file, size: info.size };
-    },
-    signal,
-  )) {
-    for (const { file, size } of batch) {
-      sizes.set(file.diskPath, size);
-      totalBytes += size;
-    }
-  }
-
   const partial = `${destPath}.${randomUUID()}.partial`;
 
   transferEvent({
@@ -82,7 +61,6 @@ export async function packZip(
     scope: 'archive-packing',
     file: destPath,
     processed: 0,
-    total: totalBytes,
     unit: 'bytes',
   });
 
@@ -103,7 +81,7 @@ export async function packZip(
     zip.outputStream.on('data', (chunk: Buffer) => {
       written += chunk.length;
 
-      if (Date.now() - last >= 500) {
+      if (Date.now() - last >= ZIP_PACK_PROGRESS_INTERVAL_MS) {
         last = Date.now();
 
         transferProgress('pack', {
@@ -117,9 +95,27 @@ export async function packZip(
       }
     });
 
-    for (const file of files) {
+    let entries = 0;
+
+    for await (const file of files) {
       signal?.throwIfAborted();
       assertArchivePath(file.name);
+
+      if (++entries > MAX_ZIP_ENTRIES) {
+        throw new Error(`Archive exceeds ${MAX_ZIP_ENTRIES} entries.`);
+      }
+
+      const info = await traceIO(
+        'Inspect ZIP source',
+        { path: file.diskPath },
+        () => stat(file.diskPath),
+      );
+
+      if (!info.isFile())
+        throw new Error(`ZIP source is not a regular file: ${file.diskPath}`);
+      const size = info.size;
+
+      totalBytes += size;
 
       transferEvent({
         action: 'Queue file for ZIP',
@@ -152,7 +148,7 @@ export async function packZip(
               action: 'Read file for ZIP',
               status: 'completed',
               path: file.diskPath,
-              bytes: sizes.get(file.diskPath),
+              bytes: size,
             });
           } catch (error) {
             transferEvent({
@@ -174,7 +170,7 @@ export async function packZip(
       );
 
       zip.addReadStream(source, file.name, {
-        size: sizes.get(file.diskPath),
+        size,
         compress: true,
         mtime: new Date(0),
         mode: 0o644,
@@ -230,6 +226,27 @@ export async function extractZip(
   destDir: string,
   signal?: AbortSignal,
 ): Promise<ExtractedEntry[]> {
+  const entries: ExtractedEntry[] = [];
+
+  await visitZip(
+    zipPath,
+    destDir,
+    (entry) => {
+      entries.push(entry);
+    },
+    signal,
+  );
+
+  return entries;
+}
+
+/** Extract sequentially and await the visitor before advancing to the next entry. */
+export async function visitZip(
+  zipPath: string,
+  destDir: string,
+  visitor: (entry: ExtractedEntry) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
   // A metadata-only pass gives a stable byte denominator across small files.
   const metadata = await openZip(zipPath);
   let totalBytes = 0;
@@ -241,9 +258,25 @@ export async function extractZip(
         throw new Error(`Archive exceeds ${MAX_ZIP_ENTRIES} entries.`);
       assertArchivePath(entry.fileName);
       rejectSpecialEntry(entry);
-      if (!entry.fileName.endsWith('/')) totalBytes += entry.uncompressedSize;
+
+      if (!entry.fileName.endsWith('/')) {
+        if (
+          entry.fileName === 'manifest.json' &&
+          entry.uncompressedSize > MAX_MANIFEST_BYTES
+        ) {
+          throw new Error(
+            `Archive entry exceeds its size or available disk budget: ${entry.fileName}`,
+          );
+        }
+
+        rejectCompressionRatio(entry);
+        totalBytes += entry.uncompressedSize;
+      }
+
       if (!Number.isSafeInteger(totalBytes))
         throw new Error('Archive byte count exceeds the supported range.');
+      if (totalBytes > MAX_EXPANDED_ARCHIVE_BYTES)
+        throw new Error('Archive exceeds the aggregate expanded-size limit.');
     }
   } finally {
     metadata.close();
@@ -267,10 +300,13 @@ export async function extractZip(
     });
 
   report();
-  const entries: ExtractedEntry[] = [];
   const seen = new Set<string>();
   const space = await statfs(destDir);
-  let remaining = Math.max(0, space.bavail * space.bsize - 64 * 1024 * 1024);
+
+  let remaining = Math.max(
+    0,
+    space.bavail * space.bsize - ZIP_EXTRACTION_DISK_RESERVE_BYTES,
+  );
 
   try {
     for await (const entry of walkEntries(zip, signal)) {
@@ -279,7 +315,7 @@ export async function extractZip(
 
       assertArchivePath(name);
       rejectSpecialEntry(entry);
-      const folded = name.toLowerCase();
+      const folded = name.normalize('NFC').toLocaleLowerCase('en-US');
 
       if (seen.has(folded)) {
         throw new Error(`Archive entry is duplicated: ${name}`);
@@ -321,7 +357,10 @@ export async function extractZip(
           writeEntry(zip, entry, filePath, signal, (bytes) => {
             processed += bytes;
 
-            if (performance.now() - lastProgress >= 250) {
+            if (
+              performance.now() - lastProgress >=
+              TRANSFER_PROGRESS_THROTTLE_MS
+            ) {
               lastProgress = performance.now();
               report(filePath);
             }
@@ -334,7 +373,7 @@ export async function extractZip(
         );
       }
 
-      entries.push({
+      await visitor({
         name,
         filePath,
         bytes: hashed.bytes,
@@ -346,8 +385,18 @@ export async function extractZip(
   }
 
   report();
+}
 
-  return entries;
+function rejectCompressionRatio(entry: Yauzl.Entry): void {
+  if (
+    entry.uncompressedSize > MAX_JSON_RECORD_BYTES &&
+    (entry.compressedSize === 0 ||
+      entry.uncompressedSize / entry.compressedSize > MAX_ZIP_COMPRESSION_RATIO)
+  ) {
+    throw new Error(
+      `Archive entry has an unsafe compression ratio: ${entry.fileName}`,
+    );
+  }
 }
 
 /** Open a ZIP with strict names and validated sizes. */

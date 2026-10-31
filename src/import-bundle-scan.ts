@@ -3,8 +3,16 @@ import { adjustFamilyPlan, type CatalogFamilyRow } from './import-family-plan';
 import { textRecovery } from './text-recovery';
 import { randomUUID } from 'node:crypto';
 import { decodeState } from './conversation-state';
+import { hostSessionExists, userDataDirFromGlobalDb } from './host-snapshots';
 import path from 'node:path';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
+import {
+  CHAT_KV_REGISTRY_VERSION,
+  auxiliaryKeysFromJson,
+  classifyChatKvKey,
+  parseChatKvJson,
+} from './chat-kv-registry';
 import { ordinalName } from './bundle-names';
 import type { BundleResourceRef, ConversationLayout } from './bundle-writer';
 import { canvasFilenamesFromChat, isCanvasFilename } from './canvases';
@@ -522,7 +530,64 @@ export async function scanChat(
   const layout = composer.conversation as ConversationLayout;
   const fields = asObject(composer.fields, 'composer fields');
   const hasher = new SnapshotHasher();
-  const targetId = randomUUID();
+  const hostComponent = path.join(dir, 'host-snapshot', 'component.json');
+  let targetId: string = randomUUID() as string;
+
+  try {
+    const component = asObject(
+      parseBoundedJson(
+        await readFile(hostComponent),
+        'host snapshot component',
+        opts.ctx.maxJsonProperties,
+      ),
+      'host snapshot component',
+    );
+
+    if (
+      component.class !== 'host-snapshot' ||
+      component.version !== 1 ||
+      component.sessionId !== sourceId
+    )
+      throw new Error('Invalid host snapshot component.');
+
+    const collision = (
+      await execSql({
+        ...opts.pair.connGl,
+        sql: `SELECT 1 FROM cursorDiskKV
+              WHERE key IN (
+                ${sqlText(`composerData:${sourceId}`)},
+                ${sqlText(`composerDraft:${sourceId}`)},
+                ${sqlText(`composerConversationState:${sourceId}`)},
+                ${sqlText(`agentKv:checkpoint:${sourceId}`)}
+              )
+                 OR (key >= ${sqlText(`bubbleId:${sourceId}:`)}
+                     AND key < ${sqlText(`bubbleId:${sourceId};`)})
+                 OR (key >= ${sqlText(`checkpointId:${sourceId}:`)}
+                     AND key < ${sqlText(`checkpointId:${sourceId};`)})
+                 OR (key >= ${sqlText(`codeBlockDiff:${sourceId}:`)}
+                     AND key < ${sqlText(`codeBlockDiff:${sourceId};`)})
+                 OR (key >= ${sqlText(`ofsContent:${sourceId}:`)}
+                     AND key < ${sqlText(`ofsContent:${sourceId};`)})
+                 OR (key >= ${sqlText(`agentKv:artifact:${sourceId}:`)}
+                     AND key < ${sqlText(`agentKv:artifact:${sourceId};`)})
+                 OR (key >= ${sqlText(`agentKv:bubbleCheckpoint:${sourceId}:`)}
+                     AND key < ${sqlText(`agentKv:bubbleCheckpoint:${sourceId};`)})
+              LIMIT 1;`,
+        readOnly: true,
+      })
+    ).trim();
+
+    if (
+      !collision &&
+      !(await hostSessionExists(
+        userDataDirFromGlobalDb(opts.workspace.globalDbPath),
+        sourceId,
+      ))
+    )
+      targetId = sourceId;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 
   hasher.source(sourceId);
   hasher.header(header);
@@ -690,6 +755,9 @@ export async function scanChat(
     sha256: string;
   }> = [];
 
+  const rendererKeys = new Set<string>();
+  const auxiliaryNeeded = new Set<string>();
+
   for (const file of await ndjsonFiles(path.join(dir, 'resources'))) {
     for await (const row of readMeasuredNdjson(
       file,
@@ -713,11 +781,48 @@ export async function scanChat(
         throw new Error('Attachment checksum does not match.');
       }
 
+      if (ref.class === 'kv') {
+        const registered = classifyChatKvKey(ref.id);
+
+        if (registered) {
+          rendererKeys.add(ref.id);
+          if (
+            registered.composerId !== undefined &&
+            registered.composerId !== sourceId
+          )
+            throw new Error('Renderer KV resource belongs to another chat.');
+          const bytes = await readFile(blob);
+
+          try {
+            const value: unknown = JSON.parse(bytes.toString('utf8'));
+
+            if (value && typeof value === 'object')
+              for (const pointer of auxiliaryKeysFromJson(value))
+                auxiliaryNeeded.add(pointer);
+            else if (registered.auxiliaryId) parseChatKvJson(bytes, ref.id);
+          } catch (error) {
+            if (registered.auxiliaryId) parseChatKvJson(bytes, ref.id);
+            if (error instanceof TransferError) throw error;
+          }
+        }
+      }
+
       await opts.work.exec(
         `INSERT INTO res(ordinal, class, id, sha256, byte_length, storage_class, filename, extension, aliases)
          VALUES (${ordinal}, ${sqlText(ref.class)}, ${sqlText(ref.id)}, ${sqlText(ref.sha256)}, ${Number(ref.byteLength) || 0}, ${sqlText(ref.storageClass || '')}, ${sqlText(ref.filename || '')}, ${sqlText(ref.extension || '')}, ${sqlText(JSON.stringify(ref.aliases || []))});`,
       );
     }
+  }
+
+  for (const key of auxiliaryNeeded)
+    if (!rendererKeys.has(key))
+      throw new Error(`Missing renderer KV auxiliary record ${key}.`);
+
+  for (const key of rendererKeys) {
+    const registered = classifyChatKvKey(key)!;
+
+    if (registered.auxiliaryId && !auxiliaryNeeded.has(key))
+      throw new Error(`Unreachable renderer KV auxiliary record ${key}.`);
   }
 
   await noteReachableBlobs(
@@ -854,7 +959,7 @@ export async function noteReachableBlobs(
 
       processed += digests.length;
 
-      if (performance.now() - last >= 250) {
+      if (performance.now() - last >= TRANSFER_PROGRESS_THROTTLE_MS) {
         last = performance.now();
         ctx.onPhase?.('collect', { processed, unit: 'resources' });
       }
@@ -906,12 +1011,25 @@ export function validateResourceRef(
     throw new Error('Invalid resource metadata.');
 
   if (ref.class === 'kv') {
+    const registered = classifyChatKvKey(ref.id);
+
     if (
-      !isBlobKey(ref.id) ||
+      (!isBlobKey(ref.id) && !registered) ||
       !['text', 'blob'].includes(String(ref.storageClass)) ||
       Number(ref.byteLength) > MAX_SQLITE_VALUE_BYTES
     )
       throw new Error('Invalid SQLite resource metadata.');
+    if (
+      registered &&
+      (ref.registryVersion !== CHAT_KV_REGISTRY_VERSION ||
+        ref.family !== registered.family)
+    )
+      throw new Error('Invalid renderer KV registry metadata.');
+    if (
+      !registered &&
+      (ref.registryVersion !== undefined || ref.family !== undefined)
+    )
+      throw new Error('Unexpected renderer KV registry metadata.');
   } else {
     const filename =
       ref.filename ??

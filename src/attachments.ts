@@ -1,14 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readArtifactSource } from './artifact-source';
 import {
   decodeCanonicalBase64,
   resourceError as fail,
   MAX_RESOURCE_BYTES,
   sha256Hex,
 } from './resource-bytes';
+import {
+  ARTIFACT_REFERENCE_TEXT_CHARS,
+  ARTIFACT_SNAPSHOT_DEPTH,
+} from './artifact-support';
 import { pathInside, staysInRoot, writeFileNoClobber } from './resource-files';
 import type { AttachmentResource, BubbleRecord, WorkspaceEntry } from './types';
+
+/** Largest attachment cache basename accepted from untrusted state. */
+export const MAX_ATTACHMENT_BASENAME_CHARS = 300;
 
 /** Canonical UUID form used in bubble `images[].uuid`. */
 export const IMAGE_UUID =
@@ -284,7 +292,7 @@ function basenameFromReference(
   /** Path or file URL. */
   value: string,
 ): string | null {
-  if (!value || value.length > 4096) return null;
+  if (!value || value.length > ARTIFACT_REFERENCE_TEXT_CHARS) return null;
   let filePath = value;
 
   if (/^file:/i.test(value)) {
@@ -297,7 +305,13 @@ function basenameFromReference(
 
   const base = path.basename(filePath.replace(/\\/g, '/'));
 
-  if (!base || base === '.' || base === '..' || base.length > 300) return null;
+  if (
+    !base ||
+    base === '.' ||
+    base === '..' ||
+    base.length > MAX_ATTACHMENT_BASENAME_CHARS
+  )
+    return null;
 
   return base;
 }
@@ -330,7 +344,7 @@ export function imageBasenamesFromBubbles(
     /** Current walk depth. */
     depth: number,
   ) => {
-    if (depth > 128) return;
+    if (depth > ARTIFACT_SNAPSHOT_DEPTH) return;
 
     if (typeof value === 'string') {
       add(value);
@@ -434,7 +448,8 @@ export async function collectAttachmentVariants(
 
   const present = new Set(files.map((file) => file.name));
 
-  const missingReferenced = referenced.some((name) => !present.has(name));
+  let missingReferenced = referenced.some((name) => !present.has(name));
+  const want = new Set(referenced);
 
   if (!files.length) return { resources: [], missing: true };
 
@@ -452,8 +467,20 @@ export async function collectAttachmentVariants(
   >();
 
   for (const file of files) {
-    const bytes = await fs.promises.readFile(file.filePath);
-    const digest = sha256Hex(bytes);
+    const source = await readArtifactSource({
+      root: dir,
+      filename: file.name,
+      isBasename: (name) => attachmentNameRank(name, uuid) !== null,
+      kind: 'Attachment',
+    });
+
+    if (!source) {
+      if (want.has(file.name)) missingReferenced = true;
+      continue;
+    }
+
+    const bytes = source.bytes;
+    const digest = source.sha256;
     const group = groups.get(digest) || [];
 
     group.push({
@@ -466,7 +493,6 @@ export async function collectAttachmentVariants(
     groups.set(digest, group);
   }
 
-  const want = new Set(referenced);
   const resources: AttachmentResource[] = [];
 
   for (const group of groups.values()) {
@@ -508,7 +534,8 @@ export function rewriteImageReferences(
   /** Remaining recursion depth. */
   depth = 0,
 ): unknown {
-  if (depth > 128) fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
+  if (depth > ARTIFACT_SNAPSHOT_DEPTH)
+    fail('UNSUPPORTED_BODY', 'Snapshot nesting limit');
 
   if (typeof value === 'string') {
     const base = basenameFromReference(value);

@@ -6,8 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { BundleWriter } from '../src/bundle-writer';
 import { openBundle } from '../src/bundle-reader';
-import { packZip, extractZip } from '../src/bundle-zip';
+import { packZip, extractZip, visitZip } from '../src/bundle-zip';
 import { MAX_MANIFEST_BYTES } from '../src/bundle-limits';
+import { visitBundleIndex } from '../src/bundle-index';
+import { createHash } from 'node:crypto';
 
 /** Temp directory removed when the test ends. */
 async function fixture(t: { after: (run: () => Promise<void>) => void }) {
@@ -18,7 +20,7 @@ async function fixture(t: { after: (run: () => Promise<void>) => void }) {
   return root;
 }
 
-test('v4 round trip has bounded chat parts and verifies their inventory', async (t) => {
+test('v5 round trip has an immutable index and bounded chat parts', async (t) => {
   const root = await fixture(t);
   const file = path.join(root, 'chat.zip');
   const writer = await BundleWriter.open(file);
@@ -31,8 +33,20 @@ test('v4 round trip has bounded chat parts and verifies their inventory', async 
   const bundle = await openBundle(file);
 
   try {
-    assert.equal(bundle.manifest.formatVersion, 4);
+    assert.equal(bundle.manifest.formatVersion, 5);
     assert.equal(bundle.manifest.counts.chats, 1);
+    assert.equal(bundle.manifest.index?.path, 'index.sqlite');
+
+    const catalog: string[] = [];
+
+    await visitBundleIndex(path.join(bundle.root, 'index.sqlite'), {
+      inventory: () => undefined,
+      catalog: (row) => {
+        catalog.push(row.sourceComposerId);
+      },
+    });
+
+    assert.deepEqual(catalog, ['chat']);
 
     const members = await fs.readdir(
       path.join(bundle.root, 'chats', '000001', 'bubbles'),
@@ -51,6 +65,117 @@ test('v4 round trip has bounded chat parts and verifies their inventory', async 
   } finally {
     await bundle.close();
   }
+});
+
+test('ZIP APIs accept async sources and await sequential visitors', async (t) => {
+  const root = await fixture(t);
+  const source = path.join(root, 'source');
+  const archive = path.join(root, 'async.zip');
+
+  await fs.writeFile(source, 'payload');
+
+  async function* entries() {
+    yield { diskPath: source, name: 'one.bin' };
+    yield { diskPath: source, name: 'two.bin' };
+  }
+
+  await packZip(archive, entries());
+  const destination = path.join(root, 'visitor');
+
+  await fs.mkdir(destination);
+  const visited: string[] = [];
+  let active = false;
+
+  await visitZip(archive, destination, async (entry) => {
+    assert.equal(active, false);
+    active = true;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    visited.push(entry.name);
+    active = false;
+  });
+
+  assert.deepEqual(visited, ['one.bin', 'two.bin']);
+});
+
+test('v5 rejects unknown required capabilities', async (t) => {
+  const root = await fixture(t);
+  const original = path.join(root, 'original.zip');
+  const writer = await BundleWriter.open(original);
+
+  await writer.finish();
+  const extracted = path.join(root, 'extracted');
+
+  await fs.mkdir(extracted);
+  const entries = await extractZip(original, extracted);
+  const manifestPath = path.join(extracted, 'manifest.json');
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+
+  manifest.capabilities.required.push('future-required-v99');
+  await fs.writeFile(manifestPath, JSON.stringify(manifest));
+
+  const changed = path.join(root, 'changed.zip');
+
+  await packZip(
+    changed,
+    entries.map((entry) => ({
+      diskPath: entry.name === 'manifest.json' ? manifestPath : entry.filePath,
+      name: entry.name,
+    })),
+  );
+
+  await assert.rejects(
+    () => openBundle(changed),
+    /Unsupported required bundle capability/,
+  );
+});
+
+test('reader retains v4 inventory compatibility', async (t) => {
+  const root = await fixture(t);
+  const payload = path.join(root, 'payload');
+  const inventory = path.join(root, 'inventory.ndjson');
+  const manifest = path.join(root, 'manifest.json');
+  const body = Buffer.from('legacy');
+  const digest = createHash('sha256').update(body).digest('hex');
+
+  await fs.writeFile(payload, body);
+
+  const inventoryBody = Buffer.from(
+    `${JSON.stringify({
+      path: 'payload.bin',
+      bytes: body.length,
+      sha256: digest,
+      kind: 'blob',
+    })}\n`,
+  );
+
+  await fs.writeFile(inventory, inventoryBody);
+
+  await fs.writeFile(
+    manifest,
+    JSON.stringify({
+      format: 'cursor-chat-transit',
+      formatVersion: 4,
+      inventory: {
+        path: 'inventory.ndjson',
+        bytes: inventoryBody.length,
+        sha256: createHash('sha256').update(inventoryBody).digest('hex'),
+      },
+      counts: { chats: 0, files: 1, contentBytes: body.length },
+    }),
+  );
+
+  const archive = path.join(root, 'v4.zip');
+
+  await packZip(archive, [
+    { diskPath: manifest, name: 'manifest.json' },
+    { diskPath: inventory, name: 'inventory.ndjson' },
+    { diskPath: payload, name: 'payload.bin' },
+  ]);
+
+  const bundle = await openBundle(archive);
+
+  assert.equal(bundle.manifest.formatVersion, 4);
+  await bundle.close();
 });
 
 test('cancelled packaging keeps the previous destination and removes partial files', async (t) => {
@@ -138,7 +263,7 @@ test('ZIP progress measures input bytes and ends at the real total', async (t) =
   );
 
   assert.equal(ticks[0].processed, 0);
-  assert.equal(ticks[0].total, 1024 * 1024);
+  assert.equal(ticks[0].total, undefined);
   assert.equal(ticks.at(-1)?.processed, 1024 * 1024);
   assert.equal(ticks.at(-1)?.total, 1024 * 1024);
 });

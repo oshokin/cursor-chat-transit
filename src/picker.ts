@@ -1,4 +1,5 @@
 import { chatActivityLabel, recentChats } from './activity';
+import { DISPLAY_NAME_CHARS } from './log-format';
 import type {
   ComposerHeader,
   WorkspaceEntry,
@@ -159,7 +160,10 @@ export function chatPickItems(
       description: chatActivityLabel(composer),
       detail:
         typeof composer.subtitle === 'string'
-          ? composer.subtitle.replace(/\s+/g, ' ').trim().slice(0, 120)
+          ? composer.subtitle
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, DISPLAY_NAME_CHARS)
           : '',
       id: composer.composerId,
       picked: true,

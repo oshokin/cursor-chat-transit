@@ -1,5 +1,6 @@
 import { execSql, parseListRows } from './sqlite';
 import { bubbleRange, sqlText } from './core';
+import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import type { Layout, SchemaInfo, SqliteConn } from './types';
 
 /** ItemTable columns this adapter requires to read or write. */
@@ -193,6 +194,6 @@ export function bubbleKeySql(composerId: string): {
   return {
     lower,
     upper,
-    sql: `SELECT CAST(key AS BLOB), CAST(typeof(value) AS BLOB), CASE WHEN length(CAST(value AS BLOB)) <= 33554432 THEN CAST(value AS BLOB) ELSE NULL END, CAST(length(CAST(value AS BLOB)) AS BLOB) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)} ORDER BY key;`,
+    sql: `SELECT CAST(key AS BLOB), CAST(typeof(value) AS BLOB), CASE WHEN length(CAST(value AS BLOB)) <= ${MAX_SQLITE_VALUE_BYTES} THEN CAST(value AS BLOB) ELSE NULL END, CAST(length(CAST(value AS BLOB)) AS BLOB) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)} ORDER BY key;`,
   };
 }

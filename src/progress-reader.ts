@@ -1,6 +1,7 @@
 import { stat } from 'node:fs/promises';
 import { readNdjson, type NdjsonRecord } from './ndjson-io';
 import type { TransferContext } from './types';
+import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
 
 /** Measure a bounded NDJSON part while its consumer validates records. */
 export async function* readMeasuredNdjson(
@@ -32,7 +33,7 @@ export async function* readMeasuredNdjson(
     label,
     ctx.signal,
     (processed) => {
-      if (performance.now() - last >= 250) {
+      if (performance.now() - last >= TRANSFER_PROGRESS_THROTTLE_MS) {
         last = performance.now();
         report(processed);
       }

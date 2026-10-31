@@ -25,6 +25,7 @@ import {
   assertKvCompatible,
   copyResources,
   insertKv,
+  planResourceEffects,
   rememberResources,
   resourceMaps,
   verifyStoredResources,
@@ -55,6 +56,13 @@ import { connOf, inspectPair } from './transfer-context';
 import { traceIO, transferEvent } from './transfer-events';
 import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
 import { TransferError } from './types';
+
+/** Bubble rows between preparation progress updates. */
+export const IMPORT_MESSAGE_PROGRESS_ROWS = 100;
+/** Source ids resolved in one generated SQL query. */
+export const UNRESOLVED_REFERENCE_BATCH_ROWS = 200;
+/** Recent composer ids retained in Cursor's focus history. */
+export const LAST_FOCUSED_COMPOSER_IDS = 10;
 
 /** Import one accepted chat and record its journal receipt. */
 export async function writeOne(opts: {
@@ -92,6 +100,7 @@ export async function writeOne(opts: {
   );
 
   try {
+    await planResourceEffects(opts);
     await copyResources(opts);
     const composerPath = path.join(staging, 'composer.json');
 
@@ -251,7 +260,7 @@ export async function writeOne(opts: {
           );
 
           bubbleCount += 1;
-          if (bubbleCount % 100 === 0)
+          if (bubbleCount % IMPORT_MESSAGE_PROGRESS_ROWS === 0)
             opts.ctx.onPhase?.('prepare', {
               processed: bubbleCount,
               total: bubbleTotal,
@@ -277,6 +286,21 @@ export async function writeOne(opts: {
     }
 
     opts.ctx.onPhase?.('write', { chats: 1 });
+    const composerEffectId = `db:composer:${opts.row.targetId}`;
+
+    await opts.journal.planEffect({
+      operationId: opts.operationId,
+      effectId: composerEffectId,
+      kind: 'db',
+      target: `composerData:${opts.row.targetId}`,
+      desiredHash: composerHash,
+    });
+
+    await opts.journal.setEffectState(
+      opts.operationId,
+      composerEffectId,
+      'prepared',
+    );
 
     await writePreparedBatches({
       conn: opts.pair.connGl,
@@ -285,6 +309,12 @@ export async function writeOne(opts: {
       ctx: opts.ctx,
       onDurable: opts.onDurable,
     });
+
+    await opts.journal.setEffectState(
+      opts.operationId,
+      composerEffectId,
+      'applied',
+    );
 
     let committed = false;
     let lastError: unknown;
@@ -387,6 +417,13 @@ WHERE s.key=${sqlText(`composerData:${opts.row.targetId}`)} AND NOT EXISTS(SELEC
         'Import verification failed for the composer body.',
       );
     }
+
+    await opts.journal.setEffectState(
+      opts.operationId,
+      composerEffectId,
+      'verified',
+      sha256Text(stored),
+    );
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
@@ -848,8 +885,15 @@ export async function remapValue(
 
   const unresolved = [...references].filter((id) => !ids.has(id));
 
-  for (let offset = 0; offset < unresolved.length; offset += 200) {
-    const batch = unresolved.slice(offset, offset + 200);
+  for (
+    let offset = 0;
+    offset < unresolved.length;
+    offset += UNRESOLVED_REFERENCE_BATCH_ROWS
+  ) {
+    const batch = unresolved.slice(
+      offset,
+      offset + UNRESOLVED_REFERENCE_BATCH_ROWS,
+    );
 
     await opts.work.queryLines(
       `SELECT json_array(source_id, target_id) FROM bubble WHERE ordinal = ${opts.ordinal} AND source_id IN (${batch.map(sqlText).join(',')});`,
@@ -960,7 +1004,7 @@ export async function writeWorkspace(
           itemCasReplaceSql('composer.composerData', raw, {
             ...current,
             selectedComposerIds: selected,
-            lastFocusedComposerIds: focused.slice(0, 10),
+            lastFocusedComposerIds: focused.slice(0, LAST_FOCUSED_COMPOSER_IDS),
             allComposers: mergeComposerList(current.allComposers, [bound]),
           }),
           'COMMIT;',

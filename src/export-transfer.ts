@@ -15,6 +15,7 @@ import type {
   TransferContext,
   WorkspaceEntry,
 } from './types';
+import { SQLITE_PARAMETER_BATCH_ROWS } from './sqlite-protocol';
 
 /** List composer headers for a workspace without loading bubble bodies. */
 export async function listWorkspaceChats(
@@ -95,8 +96,12 @@ async function mergeBodyFamily(
   >();
 
   try {
-    for (let start = 0; start < headers.length; start += 64) {
-      const batch = headers.slice(start, start + 64);
+    for (
+      let start = 0;
+      start < headers.length;
+      start += SQLITE_PARAMETER_BATCH_ROWS
+    ) {
+      const batch = headers.slice(start, start + SQLITE_PARAMETER_BATCH_ROWS);
 
       const rows = (
         await execSql({

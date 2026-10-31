@@ -15,6 +15,10 @@ import type { StatisticsJob, StatisticsUpdate } from '../src/statistics';
 import { workspaceStatisticsKey } from '../src/statistics';
 import { orderWorkspaceEntries } from '../src/workspace-opening';
 
+/** Polling policy for observing the deliberately suspended catalogue scan. */
+const heldScanDeadlineMs = 2_000;
+const heldScanPollMs = 5;
+
 /** Drop snapshot-only opening facts before comparing a row with its fixture. */
 function withoutOpening(entry: WorkspaceEntry): WorkspaceEntry {
   const copy = { ...entry };
@@ -539,10 +543,10 @@ test('refresh aborts an old root scan and never applies its partial filter', asy
 
   try {
     const old = manager.getChildren();
-    const deadline = Date.now() + 2000;
+    const deadline = Date.now() + heldScanDeadlineMs;
 
     while (!release && Date.now() < deadline)
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise((resolve) => setTimeout(resolve, heldScanPollMs));
 
     assert.equal(typeof release, 'function');
     manager.refresh();
@@ -1680,8 +1684,8 @@ test('manifest exposes one row trash action per checkbox state and keeps toolbar
 
   assert.deepEqual(
     menus['view/title']
-      .filter((item: { command: string }) =>
-        item.command.includes('manageDelete'),
+      .filter((item: { command?: string }) =>
+        item.command?.includes('manageDelete'),
       )
       .map((item: { command: string }) => item.command),
     ['cursorChatTransit.manageDelete'],
@@ -2041,10 +2045,15 @@ test('name order prefers a newer workspace and a local workspace', () => {
   assert.equal(located[0].identity?.uri.scheme, 'file');
 });
 
-test('sort picker keeps the current mode until accept and does not rescan', async () => {
+test('native sort state tracks both modes without rescanning or losing selection', async () => {
   const manager = new Manager(context, log);
 
   try {
+    assert.equal(
+      nativeContexts.get('cursorChatTransit.manageWorkspaceSort'),
+      'name',
+    );
+
     const roots = await manager.getChildren();
 
     await manager.select(roots[1], true);
@@ -2054,37 +2063,53 @@ test('sort picker keeps the current mode until accept and does not rescan', asyn
       .values()
       .map((node) => node.workspace.workspaceDbPath);
 
-    const dismissed = manager.chooseWorkspaceSort();
+    manager.sortWorkspaces('recent');
+    assert.equal(savedSort, 'recent');
 
-    await new Promise((resolve) => setImmediate(resolve));
-    const picker = searchPickers.at(-1);
-
-    assert.ok(picker);
-    assert.equal(picker.ignoreFocusOut, true);
-    assert.equal(picker.items[0]?.description, 'A–Z · Current');
-    assert.equal(picker.items[1]?.description, 'Most recent first');
-    picker.hide();
-    await dismissed;
-    assert.equal(savedSort, undefined);
-
-    assert.deepEqual(
-      manager.selection.values().map((node) => node.workspace.workspaceDbPath),
-      checked,
+    assert.equal(
+      nativeContexts.get('cursorChatTransit.manageWorkspaceSort'),
+      'recent',
     );
 
-    const applied = manager.chooseWorkspaceSort();
-
-    await new Promise((resolve) => setImmediate(resolve));
-    searchPickers.at(-1)?.accept(1);
-    await applied;
-    assert.equal(savedSort, 'recent');
     assert.equal(jobs.length, jobsBefore);
     assert.equal(lockStatuses.length, 0);
+    assert.equal(searchPickers.length, 0);
 
     assert.deepEqual(
       manager.selection.values().map((node) => node.workspace.workspaceDbPath),
       checked,
     );
+
+    manager.sortWorkspaces('name');
+    assert.equal(savedSort, 'name');
+
+    assert.equal(
+      nativeContexts.get('cursorChatTransit.manageWorkspaceSort'),
+      'name',
+    );
+
+    assert.equal(jobs.length, jobsBefore);
+
+    assert.deepEqual(
+      manager.selection.values().map((node) => node.workspace.workspaceDbPath),
+      checked,
+    );
+  } finally {
+    manager.dispose();
+  }
+});
+
+test('native sort state restores the persisted recent mode', () => {
+  savedSort = 'recent';
+  const manager = new Manager(context, log);
+
+  try {
+    assert.equal(
+      nativeContexts.get('cursorChatTransit.manageWorkspaceSort'),
+      'recent',
+    );
+
+    assert.equal(searchPickers.length, 0);
   } finally {
     manager.dispose();
   }

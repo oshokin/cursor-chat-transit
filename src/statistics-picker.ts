@@ -1,6 +1,9 @@
 import type * as vscode from 'vscode';
 import type { StatisticsUpdate } from './statistics';
 
+/** Debounce for local picker analysis repainting. */
+export const PICKER_ANALYSIS_REPAINT_MS = 100;
+
 /** Show a native picker whose optional scan never disables selection or filtering. */
 export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
   /** Native quick pick this scan updates. */
@@ -221,7 +224,7 @@ export function showStatisticsPicker<T extends vscode.QuickPickItem>(options: {
                 ? `${options.title} — Preparing workspace list… ${completed}/${total}`
                 : `${options.title} — Analyzing ${completed}/${total}`;
 
-              timer ??= setTimeout(render, 100);
+              timer ??= setTimeout(render, PICKER_ANALYSIS_REPAINT_MS);
             },
             deepCheck,
           ),

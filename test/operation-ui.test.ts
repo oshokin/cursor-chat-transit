@@ -9,6 +9,10 @@ import {
 } from '../src/operation-ui';
 import type { ImportResult, WorkspaceEntry } from '../src/types';
 
+/** Timing policy for the intentionally unawaited notification callback. */
+const notificationResolutionDelayMs = 20;
+const notificationObservationDelayMs = 30;
+
 /** Import result with test defaults, overridden per assertion. */
 const result = (overrides: Partial<ImportResult>): ImportResult => ({
   imported: 0,
@@ -45,6 +49,53 @@ test('repaired imported models request one Cursor restart', () => {
   assert.equal(notice.title, 'Repaired 1 imported chat model');
   assert.equal(notice.restart, true);
   assert.match(notice.detail, /Quit Cursor and reopen/);
+});
+
+test('mixed imports disclose compatible model fallback', () => {
+  const singular = formatImportNotice(
+    result({
+      imported: 2,
+      complete: 2,
+      alreadyImported: 1,
+      modelConfigsRepaired: 1,
+    }),
+  );
+
+  assert.match(
+    singular.detail,
+    /1 existing imported chat now uses an available model/,
+  );
+
+  assert.match(singular.toast, /available model/);
+  assert.equal(singular.restart, true);
+
+  const plural = formatImportNotice(
+    result({
+      imported: 1,
+      complete: 1,
+      modelConfigsRepaired: 2,
+    }),
+  );
+
+  assert.match(
+    plural.detail,
+    /2 existing imported chats now use an available model/,
+  );
+});
+
+test('incomplete mixed imports retain model fallback disclosure', () => {
+  const notice = formatImportNotice(
+    result({
+      imported: 1,
+      historyOnly: 1,
+      modelConfigsRepaired: 1,
+    }),
+  );
+
+  assert.equal(notice.status, 'incomplete');
+  assert.match(notice.detail, /missing data/);
+  assert.match(notice.detail, /available model/);
+  assert.match(notice.detail, /Quit and reopen Cursor/);
 });
 
 test('history-only updated copy remains incomplete', () => {
@@ -140,7 +191,7 @@ test('completion notification does not have to be awaited', async () => {
     () =>
       new Promise((resolve) => {
         started = true;
-        setTimeout(() => resolve('Open log'), 20);
+        setTimeout(() => resolve('Open log'), notificationResolutionDelayMs);
       }),
     (choice) => {
       seen = choice;
@@ -152,7 +203,11 @@ test('completion notification does not have to be awaited', async () => {
 
   assert.equal(started, true);
   assert.equal(seen, undefined);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, notificationObservationDelayMs),
+  );
+
   assert.equal(seen, 'Open log');
 });
 

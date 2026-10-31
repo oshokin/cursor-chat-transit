@@ -36,6 +36,7 @@ export async function reconcile(
   if (!chats.length) return () => journal.clearPending();
 
   const verified: typeof chats = [];
+  const unpublishedTargets = new Set<string>();
 
   for (const chat of chats) {
     const body = await db.readKvText(
@@ -44,6 +45,8 @@ export async function reconcile(
     );
 
     if (!body) {
+      unpublishedTargets.add(chat.targetComposerId);
+
       cleanup.push({
         journal,
         operationId: pending.operationId,
@@ -153,6 +156,78 @@ export async function reconcile(
     }
 
     verified.push(chat);
+  }
+
+  const effectTransitions: Array<{
+    effectId: string;
+    state: 'verified' | 'cleanup-pending';
+    observedHash?: string;
+  }> = [];
+
+  await journal.forEachEffect(pending.operationId, async (effect) => {
+    ctx.signal?.throwIfAborted();
+
+    if (
+      effect.state === 'verified' ||
+      effect.state === 'committed' ||
+      effect.state === 'cleanup-pending'
+    )
+      return;
+
+    if (effect.kind === 'db' && effect.target.startsWith('composerData:')) {
+      const value = await db.readKvText(pair.connGl, effect.target);
+      const observedHash = value ? sha256Text(value) : undefined;
+
+      if (
+        !observedHash &&
+        unpublishedTargets.has(effect.target.slice('composerData:'.length))
+      ) {
+        effectTransitions.push({
+          effectId: effect.effectId,
+          state: 'cleanup-pending',
+        });
+
+        return;
+      }
+
+      if (!observedHash || observedHash !== effect.desiredHash) {
+        throw pendingProblem(
+          effect.target.slice('composerData:'.length),
+          effect.target,
+        );
+      }
+
+      effectTransitions.push({
+        effectId: effect.effectId,
+        state: 'verified',
+        observedHash,
+      });
+
+      return;
+    }
+
+    if (effect.observedHash === effect.desiredHash) {
+      effectTransitions.push({
+        effectId: effect.effectId,
+        state: 'verified',
+        observedHash: effect.observedHash,
+      });
+
+      return;
+    }
+
+    throw new Error(
+      `Pending import effect ${effect.effectId} requires deterministic recovery.`,
+    );
+  });
+
+  for (const transition of effectTransitions) {
+    await journal.setEffectState(
+      pending.operationId,
+      transition.effectId,
+      transition.state,
+      transition.observedHash,
+    );
   }
 
   // Preserve verified completed chats while allowing an interrupted later chat to retry.

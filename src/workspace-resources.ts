@@ -11,6 +11,9 @@ const IMAGE_ID_BATCH = 32;
 const UUID_IN_NAME =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
+/** Untrusted resource identifier preview included in refusal messages. */
+const RESOURCE_IDENTIFIER_PREVIEW_CHARS = 80;
+
 /**
  * Refuse workspace removal when another chat's messages reference an image in this directory.
  * Orphan bubbles are included. An unknown id or a read error is a refusal, not proof of absence.
@@ -41,7 +44,7 @@ export async function foreignImageRefusal(
   const unnamed = names.find((name) => !UUID_IN_NAME.test(name));
 
   if (unnamed)
-    return `Cannot confirm image ownership because ${JSON.stringify(unnamed.slice(0, 80))} is not a supported image name. Nothing was deleted.`;
+    return `Cannot confirm image ownership because ${JSON.stringify(unnamed.slice(0, RESOURCE_IDENTIFIER_PREVIEW_CHARS))} is not a supported image name. Nothing was deleted.`;
 
   const uuids = [
     ...new Set(
@@ -72,7 +75,7 @@ export async function foreignImageRefusal(
       known.push({ id, lower: range.lower, upper: range.upper });
     } catch (error) {
       if (error instanceof TypeError)
-        return `Cannot confirm image ownership because composer id ${JSON.stringify(id.slice(0, 80))} is not a supported format. Nothing was deleted.`;
+        return `Cannot confirm image ownership because composer id ${JSON.stringify(id.slice(0, RESOURCE_IDENTIFIER_PREVIEW_CHARS))} is not a supported format. Nothing was deleted.`;
 
       throw error;
     }

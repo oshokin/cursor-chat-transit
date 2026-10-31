@@ -11,6 +11,10 @@ import { bubbleRange } from '../src/core';
 const executable = findSqliteExecutable();
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable ? false : 'sqlite3 CLI is required for these tests';
+/** CLI harness process and lock-release timing policy. */
+const cliOperationTimeoutMs = 15_000;
+const childReadyTimeoutMs = 8_000;
+const lockReleaseDelayMs = 150;
 
 /** Create a throwaway sqlite3 database for one test. */
 async function dbFixture(t: { after: (fn: () => Promise<void>) => void }) {
@@ -23,7 +27,7 @@ async function dbFixture(t: { after: (fn: () => Promise<void>) => void }) {
   const conn = {
     database,
     readOnly: false,
-    timeoutMs: 15000,
+    timeoutMs: cliOperationTimeoutMs,
   };
 
   return { dir, initFile, conn };
@@ -159,7 +163,7 @@ test(
       const timer = setTimeout(() => {
         child.kill();
         finish(() => reject(new Error('sqlite child did not become ready')));
-      }, 8_000);
+      }, childReadyTimeoutMs);
 
       const onError = (error: Error) => finish(() => reject(error));
 
@@ -193,7 +197,10 @@ test(
       sql: 'INSERT INTO writes VALUES (2);',
     });
 
-    const timer = setTimeout(() => child.stdin.end('COMMIT;\n'), 150);
+    const timer = setTimeout(
+      () => child.stdin.end('COMMIT;\n'),
+      lockReleaseDelayMs,
+    );
 
     try {
       await waiting;

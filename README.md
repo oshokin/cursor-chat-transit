@@ -8,6 +8,11 @@ Cursor does not provide a way to move chats between workspaces. This extension d
 
 This is free software. You use it at your own risk. The author is not responsible for what you do with it, or for lost chats, damaged databases, or a Cursor update that stops an archive from importing. Backups are your responsibility. The extension does not make them for you.
 
+Exports can contain prompts, responses, source fragments, tool output, paths, images,
+plans, canvases, and credentials or personal data that appeared in a conversation.
+Treat every archive as sensitive. Review where it is saved and do not attach an
+unredacted archive or Cursor database to a public issue.
+
 ## Features
 
 - Find local, SSH, WSL, and container workspaces stored in your local Cursor profile.
@@ -51,6 +56,17 @@ The filename includes the workspace or selected chat name and a timestamp. If an
 **Quit Cursor** closes the application through Cursor's own quit action. Cursor still handles confirmation and unsaved-work prompts. The extension does not start Cursor again. If the button is unavailable, quit from the application menu.
 
 Imports create new local chat and message IDs and leave existing conversations in place. An import that changes nothing does not need a restart.
+
+Cursor 3.27 has two observed chat-storage authorities: renderer-owned records in the
+local profile and, for chats Cursor has committed there, a per-session agent-host
+store. Transit restores a supported native store only as an exact, validated
+snapshot under its original free session ID; otherwise it creates a remapped
+renderer-owned copy. It never synthesizes or merges Cursor's private protobuf/CAS
+state. A successful import, round trip, or source-data check proves preserved local
+bytes, not that Cursor's backend can resume the Agent. The defensible continuation
+check is to reopen the copy in the exact Cursor build and account you intend to use
+and successfully send a disposable new message. See [Usage](docs/usage.md) for the
+acceptance procedure and its limits.
 
 ## Manage chats
 

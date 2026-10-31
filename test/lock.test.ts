@@ -8,6 +8,11 @@ import { pathToFileURL } from 'node:url';
 import { acquireLock, clearStaleLock } from '../src/lock';
 import { TransferError } from '../src/types';
 
+/** Cross-process lock harness deadlines. */
+const processRaceTimeoutMs = 15_000;
+const childHoldTimeoutMs = 5_000;
+const childExitTimeoutMs = 8_000;
+
 /** A PID that is not running on this host. */
 function deadPid(): number {
   const pid = 2147483647;
@@ -224,7 +229,7 @@ test('a lock create failure is not reported as LOCKED', async () => {
 
 test(
   'two OS processes: exactly one acquires a free lock',
-  { timeout: 15_000 },
+  { timeout: processRaceTimeoutMs },
   async () => {
     await withLockDir(async (dir) => {
       const holderSrc = `
@@ -233,7 +238,7 @@ const dir = process.argv[1];
 const handle = await acquireLock(dir, 'transfer');
 process.stdout.write('ACQUIRED\\n');
 await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error('hold timeout')), 5000);
+  const timer = setTimeout(() => reject(new Error('hold timeout')), ${childHoldTimeoutMs});
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk) => {
     if (String(chunk).includes('GO')) {
@@ -328,7 +333,7 @@ try {
           exit: new Promise<number | null>((resolve, reject) => {
             const timer = setTimeout(() => {
               reject(new Error(`lock child timed out: ${out}\n${err}`));
-            }, 8_000);
+            }, childExitTimeoutMs);
 
             child.once('error', (error) => {
               clearTimeout(timer);
@@ -347,7 +352,7 @@ try {
       const held = attach(a);
 
       try {
-        await held.waitFor('ACQUIRED', 8_000);
+        await held.waitFor('ACQUIRED', childExitTimeoutMs);
         assert.equal(a.exitCode, null);
         const b = spawnSrc(challengerSrc, 'ignore');
         const blocked = attach(b);

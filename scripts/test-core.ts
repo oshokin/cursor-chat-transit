@@ -113,7 +113,11 @@ if (!watch) {
  * Past the CPU count, more workers only pay off while tests await I/O.
  */
 const cpuCount = os.availableParallelism();
-const workers = String(parallelSqlite ? Math.max(cpuCount, 8) : cpuCount);
+const minimumParallelWorkers = 8;
+
+const workers = String(
+  parallelSqlite ? Math.max(cpuCount, minimumParallelWorkers) : cpuCount,
+);
 
 /** node:test process; its exit status is this script's exit status. */
 try {

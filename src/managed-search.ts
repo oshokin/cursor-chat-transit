@@ -5,6 +5,9 @@ import { workspacePresentation } from './workspace-presentation';
 import { workspaceStatisticsKey } from './statistics';
 import type { ComposerHeader, WorkspaceEntry } from './types';
 
+/** Coalesce streamed managed-search results before repainting the picker. */
+const MANAGED_SEARCH_REPAINT_DEBOUNCE_MS = 100;
+
 /** Native search results carry metadata and a reveal target only. */
 export interface ManagedSearchItem extends vscode.QuickPickItem {
   /** Physical identity, stable across incremental list updates. */
@@ -110,7 +113,7 @@ export function showManagedSearch(options: {
           if (closed || abort.signal.aborted) return;
           for (const row of batch) rows.push(row);
           if (!picker.items.length) render();
-          else timer ??= setTimeout(render, 100);
+          else timer ??= setTimeout(render, MANAGED_SEARCH_REPAINT_DEBOUNCE_MS);
         }),
       )
       .then(

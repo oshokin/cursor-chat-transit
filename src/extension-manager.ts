@@ -31,6 +31,10 @@ import {
   type FamilyGraph,
 } from './chat-family';
 import { workspacePresentation } from './workspace-presentation';
+
+/** Debounce for managed-tree result repainting. */
+export const MANAGED_TREE_REPAINT_MS = 200;
+
 import {
   orderWorkspaceEntries,
   storageExplanation,
@@ -606,6 +610,8 @@ export class ChatManager
       context.globalState?.get('manageWorkspaceSort') === 'recent'
         ? 'recent'
         : 'name';
+
+    this.publishWorkspaceSort();
   }
 
   /** Stop loads and release the tree event. */
@@ -689,61 +695,19 @@ export class ChatManager
     this.changed.fire(undefined);
   }
 
-  /**
-   * Ask which workspace order to use.
-   * Escape and focus loss leave the current mode. This does not scan chats.
-   */
-  async chooseWorkspaceSort(): Promise<void> {
-    const pick = vscode.window.createQuickPick();
-
-    pick.title = 'Sort workspaces';
-    pick.ignoreFocusOut = true;
-    pick.matchOnDetail = true;
-
-    const name = {
-      label: 'Name',
-      description: this.workspaceSort === 'name' ? 'A–Z · Current' : 'A–Z',
-      detail: 'Sort by name, then location.',
-    };
-
-    const recent = {
-      label: 'Recent activity',
-      description:
-        this.workspaceSort === 'recent'
-          ? 'Most recent first · Current'
-          : 'Most recent first',
-      detail:
-        'Based on database activity, not the last time a workspace was opened.',
-    };
-
-    pick.items = [name, recent];
-    pick.activeItems = [this.workspaceSort === 'name' ? name : recent];
-
-    await new Promise<void>((resolve) => {
-      let accepted = false;
-
-      pick.onDidAccept(() => {
-        accepted = true;
-        const label = pick.selectedItems[0]?.label;
-
-        pick.hide();
-        if (label === name.label) this.sortWorkspaces('name');
-        else if (label === recent.label) this.sortWorkspaces('recent');
-        resolve();
-      });
-
-      pick.onDidHide(() => {
-        pick.dispose();
-        if (!accepted) resolve();
-      });
-
-      pick.show();
-    });
+  /** Publish the mutually exclusive native sort-menu state. */
+  private publishWorkspaceSort(): void {
+    void vscode.commands.executeCommand(
+      'setContext',
+      'cursorChatTransit.manageWorkspaceSort',
+      this.workspaceSort,
+    );
   }
 
   /** Remember the workspace order without rereading Cursor. */
   sortWorkspaces(mode: 'name' | 'recent'): void {
     this.workspaceSort = mode;
+    this.publishWorkspaceSort();
     this.invalidateVisibleOrder();
     void this.context.globalState.update('manageWorkspaceSort', mode);
     this.changed.fire(undefined);
@@ -1761,7 +1725,7 @@ export class ChatManager
         this.repaint ??= setTimeout(() => {
           this.repaint = undefined;
           this.changed.fire(undefined);
-        }, 200);
+        }, MANAGED_TREE_REPAINT_MS);
       },
     );
   }
@@ -1880,9 +1844,10 @@ export function registerManager(
           view.reveal(node, { select: true, focus: true, expand: true }),
         ),
       manageRefresh: () => manager.refresh(),
-      manageSortWorkspaces: () => manager.chooseWorkspaceSort(),
       manageSortName: () => manager.sortWorkspaces('name'),
+      manageSortNameCurrent: () => manager.sortWorkspaces('name'),
       manageSortRecent: () => manager.sortWorkspaces('recent'),
+      manageSortRecentCurrent: () => manager.sortWorkspaces('recent'),
       manageCheck: (node) => manager.check(node || view.selection[0]),
       manageSelectAll: () => manager.selectAll(),
       manageSelectIssues: async () => {

@@ -53,9 +53,35 @@ An archive contains a manifest, per-chat metadata, bounded NDJSON parts, and sup
 - Referenced local conversation blobs.
 - Chat images, Cursor plan files, and canvases when available and supported.
 
-The supported archive format is version 4. Monolithic JSON files and other archive versions are not accepted. The archive as a whole can exceed 1 GiB; an individual JSON record or SQLite value is limited to 32 MiB. See the [storage and archive contract](architecture.md) for details.
+This build writes archive format version 5 and reads versions 5 and 4. Version 5
+uses a hashed SQLite inventory and content-addressed payloads; version 4 remains
+readable through its bounded NDJSON inventory. Monolithic JSON files and other
+archive versions are not accepted. The archive as a whole can exceed 1 GiB; an
+individual JSON record or SQLite value is limited to 32 MiB. See the
+[storage and archive contract](architecture.md) for details.
 
 An export is a chat archive, not a complete Cursor profile or project backup. It does not copy your source tree or intentionally collect account credentials and extension settings. Messages and attachments may themselves contain sensitive information.
+
+Assume the ZIP contains private data: prompts, replies, tool output, source
+fragments, local and remote paths, images, plans, canvases, and any secrets pasted
+into the chat. Store and transmit it like a credential-bearing backup. Do not post
+an unredacted ZIP or `state.vscdb` publicly.
+
+### Read result classes correctly
+
+- **Complete** means all records and supported resources required by Transit's
+  renderer-side contract were present and validated.
+- **History-only** means readable text can be published, but missing or recovered
+  data prevents a continuation claim.
+- **Unavailable** means the supported reader cannot safely publish that chat.
+- **Already imported** means the same semantic snapshot is recorded at this
+  destination; it does not re-test rendering or continuation.
+
+These classes do not inspect Cursor's server state. A supported committed
+host-owned session is exported as a separately validated SQLite snapshot; it is
+restored only when its original session ID is free. Unsupported layouts, collisions,
+and renderer-only exports cannot prove that the renderer mirror contains every
+host-authoritative write.
 
 ## Repeat imports and recovery
 
@@ -136,6 +162,40 @@ Workspace and chat Quick Picks stay open across focus changes. Escape, accepting
 The selected workspace identifies which chats to transfer, not where the ZIP file must live. Cursor Chat Transit uses the local Cursor profile's global and workspace databases, including entries for remote projects. Different SSH authorities remain distinct even when project paths match.
 
 File dialogs start locally. A remote ZIP selected for import is read through the editor's file provider. Export destinations must be local; copy the archive elsewhere using your usual tools.
+
+The extension runs on the local UI side. It transfers local profile records that
+refer to SSH, WSL, or container workspaces; it does not log into the remote host,
+copy its project tree, recreate a container, restore remote files, or recreate
+account/backend state. A successful remote-workspace import therefore proves only
+that the local catalogue copy was installed. Verify the remote authority is
+reachable and open the imported chat there before making any continuation claim.
+
+## Real-Cursor acceptance
+
+Synthetic and SQLite tests cannot certify Cursor's private renderer or Agent
+runtime. For each release candidate and supported Cursor build:
+
+1. Run `scripts/acceptance-cursor.sh --output <directory>`. It records the Cursor
+   executable SHA-256, version output, extension commit, platform, and a checklist.
+   It does not open databases, export chats, import chats, or send messages.
+2. Use a disposable local profile and non-sensitive fixture chat. Export it, import
+   it under a fresh workspace, quit and reopen Cursor, and record whether text,
+   images, plans, canvases, and subagents that are present in the fixture render.
+3. Record the result class shown by Transit. Do not convert a history-only or
+   unavailable result into “complete” in the acceptance notes.
+4. To test continuation, explicitly opt in to a mutation and send one disposable
+   message in the imported copy. Record the exact Cursor build hash, account,
+   workspace kind, time, and whether a response completed.
+5. Repeat in an actual SSH/WSL/container workspace only when that environment is
+   available. Record “not tested”; never infer remote recreation from a local pass.
+6. Keep the generated report private if paths, usernames, authorities, or fixture
+   details are sensitive.
+
+The only defensible guarantee is evidence about that exact run: “this imported copy
+accepted a new message in build `<hash>` under the recorded environment.” It is not
+a guarantee for another chat, future Cursor build, account, machine, or remote
+backend. The script's `--allow-mutation` flag only records consent in the checklist;
+it does not automate Cursor or send a message.
 
 Typical Cursor user-data directories:
 

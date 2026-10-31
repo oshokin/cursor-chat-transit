@@ -8,6 +8,10 @@ import { readSessionKv } from '../src/kv-session';
 import { execSql } from '../src/sqlite';
 import { findSqliteExecutable } from './support/sqlite-cli';
 
+/** Fixture cleanup policy for delayed sqlite file-handle release. */
+const cleanupMaxRetries = 5;
+const cleanupRetryDelayMs = 200;
+
 /** Close the sqlite process before deleting its files. A failed first after-hook does not run the rest. */
 async function removeFixture(
   session: SqliteSession | undefined,
@@ -19,8 +23,8 @@ async function removeFixture(
     await fs.rm(root, {
       recursive: true,
       force: true,
-      maxRetries: 5,
-      retryDelay: 200,
+      maxRetries: cleanupMaxRetries,
+      retryDelay: cleanupRetryDelayMs,
     });
   }
 }
@@ -49,8 +53,8 @@ async function openReadSession(
     await fs.rm(root, {
       recursive: true,
       force: true,
-      maxRetries: 5,
-      retryDelay: 200,
+      maxRetries: cleanupMaxRetries,
+      retryDelay: cleanupRetryDelayMs,
     });
 
     throw error;

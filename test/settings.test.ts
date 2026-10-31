@@ -151,9 +151,37 @@ test('all contributed settings use Transit prefix and retain appropriate scopes'
 
   assert.equal(properties['cursorChatTransit.import.allowPartial'], undefined);
 
-  assert.equal(
-    properties['cursorChatTransit.sqlite.operationTimeoutSeconds'].default,
-    600,
+  assert.deepEqual(
+    {
+      default:
+        properties['cursorChatTransit.sqlite.operationTimeoutSeconds'].default,
+      minimum:
+        properties['cursorChatTransit.sqlite.operationTimeoutSeconds'].minimum,
+      maximum:
+        properties['cursorChatTransit.sqlite.operationTimeoutSeconds'].maximum,
+    },
+    settings.OPERATION_TIMEOUT_SECONDS,
+  );
+
+  assert.deepEqual(
+    {
+      default:
+        properties['cursorChatTransit.sqlite.busyTimeoutSeconds'].default,
+      minimum:
+        properties['cursorChatTransit.sqlite.busyTimeoutSeconds'].minimum,
+      maximum:
+        properties['cursorChatTransit.sqlite.busyTimeoutSeconds'].maximum,
+    },
+    settings.BUSY_TIMEOUT_SECONDS,
+  );
+
+  assert.deepEqual(
+    {
+      default: properties['cursorChatTransit.limits.maxJsonProperties'].default,
+      minimum: properties['cursorChatTransit.limits.maxJsonProperties'].minimum,
+      maximum: properties['cursorChatTransit.limits.maxJsonProperties'].maximum,
+    },
+    settings.MAX_JSON_PROPERTIES_SETTING,
   );
 
   assert.equal(properties['cursorChatTransit.logLevel'].default, 'info');

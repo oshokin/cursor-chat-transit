@@ -4,6 +4,18 @@ import path from 'node:path';
 import { releaseNotes } from './changelog-section';
 import { stableVersion } from './stable-version';
 
+/** GitHub HTTP, paging, diagnostics, and transport policy. */
+const httpOk = 200;
+const httpCreated = 201;
+const httpNoContent = 204;
+const httpForbidden = 403;
+const httpNotFound = 404;
+const httpTooManyRequests = 429;
+const httpServerErrorFloor = 500;
+const releasesPerPage = 100;
+const apiErrorExcerptLength = 300;
+const githubRequestTimeoutMs = 30_000;
+
 /** One HTTP exchange with the GitHub API. */
 export interface GitHubResponse {
   /** HTTP status code. */
@@ -102,12 +114,12 @@ async function send(
   const response = await client.request(method, url, body, headers);
 
   if (
-    response.status === 403 ||
-    response.status === 429 ||
-    response.status >= 500
+    response.status === httpForbidden ||
+    response.status === httpTooManyRequests ||
+    response.status >= httpServerErrorFloor
   ) {
     throw new Error(
-      `GitHub API ${response.status} for ${method} ${url}. Not treating this as a missing release. ${response.body.toString('utf8').trim().slice(0, 300)}`,
+      `GitHub API ${response.status} for ${method} ${url}. Not treating this as a missing release. ${response.body.toString('utf8').trim().slice(0, apiErrorExcerptLength)}`,
     );
   }
 
@@ -131,9 +143,9 @@ async function tagCommit(
     `${api(repository)}/git/ref/tags/${encodeURIComponent(tag)}`,
   );
 
-  if (response.status === 404) return null;
+  if (response.status === httpNotFound) return null;
 
-  if (response.status !== 200) {
+  if (response.status !== httpOk) {
     throw new Error(
       `Unexpected GitHub status ${response.status} while reading ${tag}.`,
     );
@@ -164,7 +176,7 @@ async function tagCommit(
     `${api(repository)}/git/tags/${object.sha}`,
   );
 
-  if (annotated.status !== 200) {
+  if (annotated.status !== httpOk) {
     throw new Error(
       `Unexpected GitHub status ${annotated.status} while reading annotated tag ${tag}.`,
     );
@@ -194,9 +206,10 @@ async function releaseByTag(
     `${api(repository)}/releases/tags/${encodeURIComponent(tag)}`,
   );
 
-  if (response.status === 404) return findDraft(client, repository, tag);
+  if (response.status === httpNotFound)
+    return findDraft(client, repository, tag);
 
-  if (response.status !== 200) {
+  if (response.status !== httpOk) {
     throw new Error(
       `Unexpected GitHub status ${response.status} while reading release ${tag}.`,
     );
@@ -215,10 +228,10 @@ async function findDraft(
     const response = await send(
       client,
       'GET',
-      `${api(repository)}/releases?per_page=100&page=${page}`,
+      `${api(repository)}/releases?per_page=${releasesPerPage}&page=${page}`,
     );
 
-    if (response.status !== 200) {
+    if (response.status !== httpOk) {
       throw new Error(
         `Cannot list releases: GitHub returned ${response.status}.`,
       );
@@ -251,7 +264,7 @@ async function downloadAsset(
     { accept: 'application/octet-stream' },
   );
 
-  if (response.status !== 200) {
+  if (response.status !== httpOk) {
     throw new Error(
       `Unexpected GitHub status ${response.status} while downloading ${asset.name}.`,
     );
@@ -288,7 +301,7 @@ async function ensureTag(
       { 'content-type': 'application/json' },
     );
 
-    if (created.status !== 201) {
+    if (created.status !== httpCreated) {
       writeError = new Error(`Creating tag ${tag} returned ${created.status}.`);
     }
   } catch (error) {
@@ -350,7 +363,7 @@ async function moveUnpublishedTag(
     { 'content-type': 'application/json' },
   );
 
-  if (moved.status !== 200) {
+  if (moved.status !== httpOk) {
     throw new Error(
       `Moving tag ${tag} returned ${moved.status}. ${apiError(moved)}`,
     );
@@ -377,7 +390,7 @@ async function deleteRelease(
     `${api(repository)}/releases/${id}`,
   );
 
-  if (response.status !== 204 && response.status !== 404) {
+  if (response.status !== httpNoContent && response.status !== httpNotFound) {
     throw new Error(
       `Deleting draft release ${id} returned ${response.status}. ${apiError(response)}`,
     );
@@ -411,7 +424,7 @@ async function ensureDraft(
       { 'content-type': 'application/json' },
     );
 
-    if (created.status !== 201) {
+    if (created.status !== httpCreated) {
       writeError = new Error(
         `Creating release ${tag} returned ${created.status}. ${apiError(created)}`,
       );
@@ -460,7 +473,7 @@ async function readRelease(
     `${api(repository)}/releases/${id}`,
   );
 
-  if (response.status !== 200) {
+  if (response.status !== httpOk) {
     throw new Error(
       `Reading release ${id} returned ${response.status}. ${apiError(response)}`,
     );
@@ -477,7 +490,7 @@ async function readRelease(
 
 /** GitHub's explanation, bounded so a failure stays readable. */
 function apiError(response: GitHubResponse): string {
-  return response.body.toString('utf8').trim().slice(0, 300);
+  return response.body.toString('utf8').trim().slice(0, apiErrorExcerptLength);
 }
 
 /** Upload one missing asset, then download it and compare bytes. */
@@ -498,7 +511,7 @@ async function uploadAsset(
       { 'content-type': 'application/octet-stream' },
     );
 
-    if (uploaded.status !== 201) {
+    if (uploaded.status !== httpCreated) {
       writeError = new Error(
         `Uploading ${file.name} returned ${uploaded.status}.`,
       );
@@ -609,7 +622,7 @@ async function publishDraft(
       { 'content-type': 'application/json' },
     );
 
-    if (updated.status !== 200) {
+    if (updated.status !== httpOk) {
       writeError = new Error(
         `Publishing release ${release.tag_name} returned ${updated.status}.`,
       );
@@ -745,7 +758,7 @@ export function githubClient(token: string): GitHubClient {
           ...headers,
         },
         redirect: 'follow',
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(githubRequestTimeoutMs),
       });
 
       return {

@@ -771,19 +771,80 @@ test('sorting a large list does not search the list inside each comparison', () 
   assert.deepEqual(firstGroup, again);
 });
 
-test('the Manage chats menu has one Sort workspaces command', () => {
+test('the Manage chats menu has a native mutually exclusive sort submenu', () => {
   const manifest = JSON.parse(
     readFileSync(path.join(__dirname, '../package.json'), 'utf8'),
   );
 
-  const titles = manifest.contributes.menus['view/title'].map(
-    (item: { command: string }) => item.command,
+  assert.deepEqual(manifest.contributes.submenus, [
+    {
+      id: 'cursorChatTransit.manageSortWorkspaces',
+      label: 'Sort workspaces',
+    },
+  ]);
+
+  const titleSort = manifest.contributes.menus['view/title'].filter(
+    (item: { submenu?: string }) =>
+      item.submenu === 'cursorChatTransit.manageSortWorkspaces',
+  );
+
+  assert.deepEqual(titleSort, [
+    {
+      submenu: 'cursorChatTransit.manageSortWorkspaces',
+      when: 'view == cursorChatTransit.manage',
+      group: '1_overflow@2',
+    },
+  ]);
+
+  assert.deepEqual(
+    manifest.contributes.menus['cursorChatTransit.manageSortWorkspaces'],
+    [
+      {
+        command: 'cursorChatTransit.manageSortNameCurrent',
+        when: 'cursorChatTransit.manageWorkspaceSort == name',
+        group: '1_sort@1',
+      },
+      {
+        command: 'cursorChatTransit.manageSortName',
+        when: 'cursorChatTransit.manageWorkspaceSort != name',
+        group: '1_sort@1',
+      },
+      {
+        command: 'cursorChatTransit.manageSortRecentCurrent',
+        when: 'cursorChatTransit.manageWorkspaceSort == recent',
+        group: '1_sort@2',
+      },
+      {
+        command: 'cursorChatTransit.manageSortRecent',
+        when: 'cursorChatTransit.manageWorkspaceSort != recent',
+        group: '1_sort@2',
+      },
+    ],
+  );
+
+  const commands = new Map(
+    manifest.contributes.commands.map(
+      (command: { command: string; title: string }) => [
+        command.command,
+        command.title,
+      ],
+    ),
+  );
+
+  assert.equal(commands.get('cursorChatTransit.manageSortName'), 'Name (A–Z)');
+
+  assert.equal(
+    commands.get('cursorChatTransit.manageSortNameCurrent'),
+    '✓ Name (A–Z)',
   );
 
   assert.equal(
-    titles.filter((command: string) => command.includes('manageSort')).length,
-    1,
+    commands.get('cursorChatTransit.manageSortRecent'),
+    'Recent activity',
   );
 
-  assert.ok(titles.includes('cursorChatTransit.manageSortWorkspaces'));
+  assert.equal(
+    commands.get('cursorChatTransit.manageSortRecentCurrent'),
+    '✓ Recent activity',
+  );
 });

@@ -174,18 +174,23 @@
         "icon": "$(refresh)"
       },
       {
-        "command": "cursorChatTransit.manageSortWorkspaces",
-        "title": "Sort workspaces\u2026",
-        "category": "Cursor Chat Transit"
-      },
-      {
         "command": "cursorChatTransit.manageSortName",
         "title": "Name (A\u2013Z)",
         "category": "Cursor Chat Transit"
       },
       {
+        "command": "cursorChatTransit.manageSortNameCurrent",
+        "title": "\u2713 Name (A\u2013Z)",
+        "category": "Cursor Chat Transit"
+      },
+      {
         "command": "cursorChatTransit.manageSortRecent",
-        "title": "Recently active",
+        "title": "Recent activity",
+        "category": "Cursor Chat Transit"
+      },
+      {
+        "command": "cursorChatTransit.manageSortRecentCurrent",
+        "title": "\u2713 Recent activity",
         "category": "Cursor Chat Transit"
       },
       {
@@ -261,6 +266,12 @@
         "icon": "$(trash)"
       }
     ],
+    "submenus": [
+      {
+        "id": "cursorChatTransit.manageSortWorkspaces",
+        "label": "Sort workspaces"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -274,7 +285,7 @@
           "group": "1_overflow@1"
         },
         {
-          "command": "cursorChatTransit.manageSortWorkspaces",
+          "submenu": "cursorChatTransit.manageSortWorkspaces",
           "when": "view == cursorChatTransit.manage",
           "group": "1_overflow@2"
         },
@@ -319,6 +330,28 @@
           "group": "navigation@6"
         }
       ],
+      "cursorChatTransit.manageSortWorkspaces": [
+        {
+          "command": "cursorChatTransit.manageSortNameCurrent",
+          "when": "cursorChatTransit.manageWorkspaceSort == name",
+          "group": "1_sort@1"
+        },
+        {
+          "command": "cursorChatTransit.manageSortName",
+          "when": "cursorChatTransit.manageWorkspaceSort != name",
+          "group": "1_sort@1"
+        },
+        {
+          "command": "cursorChatTransit.manageSortRecentCurrent",
+          "when": "cursorChatTransit.manageWorkspaceSort == recent",
+          "group": "1_sort@2"
+        },
+        {
+          "command": "cursorChatTransit.manageSortRecent",
+          "when": "cursorChatTransit.manageWorkspaceSort != recent",
+          "group": "1_sort@2"
+        }
+      ],
       "view/item/context": [
         {
           "command": "cursorChatTransit.manageCheck",
@@ -349,6 +382,22 @@
       "commandPalette": [
         {
           "command": "cursorChatTransit.manageRefresh",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSortName",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSortNameCurrent",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSortRecent",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageSortRecentCurrent",
           "when": "false"
         },
         {

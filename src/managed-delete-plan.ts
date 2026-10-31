@@ -6,6 +6,9 @@ import type {
 import type { ManagedNode } from './managed-node';
 import { groupManagedNodes } from './managed-selection';
 
+/** Maximum workspace or chat rows shown in a destructive-action preview. */
+export const DELETE_PREVIEW_ROWS = 20;
+
 /**
  * Keep workspace scope distinct from chat scope.
  * Checking every child does not become workspace deletion.
@@ -121,7 +124,7 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
     );
 
     const lines = workspaces
-      .slice(0, 20)
+      .slice(0, DELETE_PREVIEW_ROWS)
       .map(
         (target) =>
           `• ${target.name} — ${target.location} — storage ${storageLabel(target.workspace.storageId, ids)}`,
@@ -129,7 +132,9 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
       .join('\n');
 
     const more =
-      workspaces.length > 20 ? `\nAnd ${workspaces.length - 20} more.` : '';
+      workspaces.length > DELETE_PREVIEW_ROWS
+        ? `\nAnd ${workspaces.length - DELETE_PREVIEW_ROWS} more.`
+        : '';
 
     const shellLine = shells
       ? `\n\n${shells} empty chat record${shells === 1 ? '' : 's'} will also be removed.`
@@ -170,7 +175,7 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
 
   if (!workspaces.length) {
     const lines = chats
-      .slice(0, 20)
+      .slice(0, DELETE_PREVIEW_ROWS)
       .map(
         (target) =>
           `• ${target.name} — ${target.ids.length} chat${target.ids.length === 1 ? '' : 's'}; workspace data is kept`,
@@ -180,16 +185,16 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
     return {
       title: `Delete ${total} selected chat${total === 1 ? '' : 's'}?`,
       confirm: 'Delete chats',
-      detail: `Workspace data is kept. Project files are kept.${kept}\n\n${lines}${chats.length > 20 ? `\nAnd ${chats.length - 20} more.` : ''}\n\nClose all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
+      detail: `Workspace data is kept. Project files are kept.${kept}\n\n${lines}${chats.length > DELETE_PREVIEW_ROWS ? `\nAnd ${chats.length - DELETE_PREVIEW_ROWS} more.` : ''}\n\nClose all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
     };
   }
 
   const individual = chats.reduce((sum, target) => sum + target.ids.length, 0);
-  const hidden = workspaceLines.length + chatLines.length - 20;
+  const hidden = workspaceLines.length + chatLines.length - DELETE_PREVIEW_ROWS;
   const more = hidden > 0 ? `\nAnd ${hidden} more.` : '';
 
   const chatSection = individual
-    ? `\n\nIndividual chats:\n${chatLines.slice(0, Math.max(0, 20 - workspaceLines.length)).join('\n')}`
+    ? `\n\nIndividual chats:\n${chatLines.slice(0, Math.max(0, DELETE_PREVIEW_ROWS - workspaceLines.length)).join('\n')}`
     : '';
 
   return {
@@ -197,7 +202,7 @@ export function confirmationCopy(plan: ManagedDeletePlan): {
       ? `Delete data for ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} and ${individual} individual chat${individual === 1 ? '' : 's'}?`
       : `Delete data for ${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'}?`,
     confirm: 'Delete selected data',
-    detail: `Saved Cursor state, local resources and extension data will be deleted for the ${workspaces.length} selected workspace${workspaces.length === 1 ? '' : 's'}.${kept}\n\nWorkspace data:\n${workspaceLines.slice(0, 20).join('\n')}${chatSection}${more}\n\nProject files are kept. Close all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
+    detail: `Saved Cursor state, local resources and extension data will be deleted for the ${workspaces.length} selected workspace${workspaces.length === 1 ? '' : 's'}.${kept}\n\nWorkspace data:\n${workspaceLines.slice(0, DELETE_PREVIEW_ROWS).join('\n')}${chatSection}${more}\n\nProject files are kept. Close all other Cursor windows and stop Agent tasks. Do not use chats during deletion. Quit and reopen Cursor afterward.\n\nThis cannot be undone. Make your own backup first if you need this data.`,
   };
 }
 

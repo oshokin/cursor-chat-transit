@@ -1,8 +1,14 @@
 import { readFile } from './trace-fs';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
 import path from 'node:path';
 import { attachmentDirectory, resolveAttachmentPath } from './attachments';
 import { canvasFilePath, readCanvasFile } from './canvases';
+import {
+  classifyChatKvKey,
+  remapChatKvJson,
+  remapChatKvKey,
+} from './chat-kv-registry';
 import * as db from './db';
 import { hashFile } from './hash-file';
 import { ChatRow, json } from './import-bundle-common';
@@ -118,6 +124,10 @@ export async function copyResources(opts: {
   plansDir: string;
   /** Destination canvases directory, or null when this workspace has none. */
   canvasesDir: string | null;
+  /** Receipt store that owns these prepared file effects. */
+  journal: JournalStore;
+  /** Pending operation that owns these prepared file effects. */
+  operationId: string;
 }): Promise<void> {
   const rows: Array<{
     /** Resource class recorded in the work index. */
@@ -158,6 +168,9 @@ export async function copyResources(opts: {
           : path.join(path.dirname(opts.workspace.workspaceDbPath), 'images');
 
     if (!root) continue;
+    const effectId = `file:${row.class}:${filename}`;
+
+    await opts.journal.setEffectState(opts.operationId, effectId, 'prepared');
 
     await installBlobFile(
       root,
@@ -165,7 +178,52 @@ export async function copyResources(opts: {
       blob,
       opts.ctx.signal,
     );
+
+    const observed = await hashFile(path.join(root, path.basename(filename)));
+
+    await opts.journal.setEffectState(
+      opts.operationId,
+      effectId,
+      observed.sha256 === row.sha256 ? 'verified' : 'applied',
+      observed.sha256,
+    );
   }
+}
+
+/** Persist every file intent before resource installation can touch the workspace. */
+export async function planResourceEffects(opts: {
+  ordinal: number;
+  work: SqliteSession;
+  journal: JournalStore;
+  operationId: string;
+}): Promise<void> {
+  await opts.work.queryLines(
+    `SELECT json_object('class',class,'id',id,'sha256',sha256,'filename',filename,'extension',extension)
+     FROM res WHERE ordinal=${opts.ordinal} AND class <> 'kv';`,
+    async (line) => {
+      const row = json<{
+        class: string;
+        id: string;
+        sha256: string;
+        filename: string;
+        extension: string;
+      }>(line);
+
+      const filename =
+        row.filename ||
+        (row.class === 'image'
+          ? `${row.id}.${row.extension || 'bin'}`
+          : row.id);
+
+      await opts.journal.planEffect({
+        operationId: opts.operationId,
+        effectId: `file:${row.class}:${filename}`,
+        kind: 'file',
+        target: `${row.class}:${filename}`,
+        desiredHash: row.sha256,
+      });
+    },
+  );
 }
 
 /** Insert cursorDiskKV blob rows that are not already present. */
@@ -180,6 +238,8 @@ export async function insertKv(
     root: string;
     /** Transfer hooks and cancellation. */
     ctx: TransferContext;
+    /** Source and destination composer ids used for renderer remapping. */
+    row: ChatRow;
   },
 ): Promise<void> {
   const rows: Array<{
@@ -218,22 +278,61 @@ export async function insertKv(
       `${row.sha256}.bin`,
     );
 
-    const bytes = await readFile(blob);
+    const sourceBytes = await readFile(blob);
+
+    const transformed = transformRendererKv(
+      row.id,
+      sourceBytes,
+      opts.row.sourceId,
+      opts.row.targetId,
+    );
+
+    const bytes = transformed.bytes;
 
     if (bytes.length > MAX_SQLITE_VALUE_BYTES)
       throw new Error('Resource exceeds SQLite value limit.');
 
     await global.exec(
       `INSERT INTO cursorDiskKV(key,value) SELECT ?, ${row.storage_class === 'blob' ? '?' : 'CAST(? AS TEXT)'} WHERE NOT EXISTS(SELECT 1 FROM cursorDiskKV WHERE key=?);`,
-      [row.id, bytes, row.id],
+      [transformed.key, bytes, transformed.key],
     );
 
     processed++;
 
-    if (processed === rows.length || performance.now() - last >= 250) {
+    if (
+      processed === rows.length ||
+      performance.now() - last >= TRANSFER_PROGRESS_THROTTLE_MS
+    ) {
       last = performance.now();
       report();
     }
+  }
+}
+
+/** Remap a renderer key and schema-known JSON references, preserving all else. */
+export function transformRendererKv(
+  key: string,
+  bytes: Buffer,
+  sourceComposerId: string,
+  targetComposerId: string,
+): { key: string; bytes: Buffer } {
+  const classified = classifyChatKvKey(key);
+
+  if (!classified) return { key, bytes };
+  const ids = new Map([[sourceComposerId, targetComposerId]]);
+  const mappedKey = remapChatKvKey(key, ids);
+
+  try {
+    const value: unknown = JSON.parse(bytes.toString('utf8'));
+
+    if (!value || typeof value !== 'object') return { key: mappedKey, bytes };
+
+    return {
+      key: mappedKey,
+      bytes: Buffer.from(JSON.stringify(remapChatKvJson(value, ids))),
+    };
+  } catch {
+    return { key: mappedKey, bytes };
   }
 }
 
@@ -307,6 +406,8 @@ export async function assertKvCompatible(opts: {
   pair: Awaited<ReturnType<typeof inspectPair>>;
   /** Extracted bundle root. */
   root: string;
+  /** Source and destination composer ids. */
+  row: ChatRow;
 }): Promise<void> {
   const rows: Array<{
     /** cursorDiskKV key. */
@@ -361,29 +462,49 @@ export async function assertKvCompatible(opts: {
     for (const row of rows) {
       opts.ctx.signal?.throwIfAborted();
 
+      const blob = path.join(
+        opts.root,
+        'blobs',
+        row.sha256.slice(0, 2),
+        `${row.sha256}.bin`,
+      );
+
+      const transformed = transformRendererKv(
+        row.id,
+        await readFile(blob),
+        opts.row.sourceId,
+        opts.row.targetId,
+      );
+
+      const incomingSha = sha256Hex(transformed.bytes);
+
       await traceIO(
         'Check existing chat resource',
-        { path: opts.pair.connGl.database, key: row.id },
+        { path: opts.pair.connGl.database, key: transformed.key },
         async () => {
-          const existing = await readSessionKv(session, row.id);
+          const existing = await readSessionKv(session, transformed.key);
 
           if (!existing) return;
 
           const incoming = {
             storageClass: row.storage_class || 'blob',
-            sha256: row.sha256,
-            byteLength: Number(row.byte_length) || 0,
+            sha256: incomingSha,
+            byteLength: transformed.bytes.length,
           };
 
           const facts = classifyKvConflict(existing, incoming);
 
           if (!facts) return;
 
-          const decoded = hexTextOfAddressedBlob(existing, incoming, row.id);
+          const decoded = hexTextOfAddressedBlob(
+            existing,
+            incoming,
+            transformed.key,
+          );
 
           if (decoded) {
             repairs.push({
-              key: row.id,
+              key: transformed.key,
               previousSha256: facts.existingSha256,
               incoming,
             });
@@ -396,7 +517,7 @@ export async function assertKvCompatible(opts: {
           );
 
           err.code = 'RESOURCE_CONFLICT';
-          err.detail = kvConflictDetail(facts, row.id, 'preflight');
+          err.detail = kvConflictDetail(facts, transformed.key, 'preflight');
 
           throw err;
         },
@@ -404,7 +525,10 @@ export async function assertKvCompatible(opts: {
 
       processed++;
 
-      if (processed === rows.length || performance.now() - last >= 250) {
+      if (
+        processed === rows.length ||
+        performance.now() - last >= TRANSFER_PROGRESS_THROTTLE_MS
+      ) {
         last = performance.now();
         report();
       }
@@ -531,6 +655,10 @@ export async function verifyStoredResources(opts: {
   work: SqliteSession;
   /** Open destination databases and their layouts. */
   pair: Awaited<ReturnType<typeof inspectPair>>;
+  /** Extracted bundle root. */
+  root: string;
+  /** Source and destination composer ids used for renderer remapping. */
+  row: ChatRow;
 }): Promise<void> {
   const rows: Array<{
     /** cursorDiskKV key. */
@@ -569,17 +697,31 @@ export async function verifyStoredResources(opts: {
     for (const row of rows) {
       opts.ctx.signal?.throwIfAborted();
 
+      const blob = path.join(
+        opts.root,
+        'blobs',
+        row.sha256.slice(0, 2),
+        `${row.sha256}.bin`,
+      );
+
+      const transformed = transformRendererKv(
+        row.id,
+        await readFile(blob),
+        opts.row.sourceId,
+        opts.row.targetId,
+      );
+
       await traceIO(
         'Verify stored chat resource',
-        { path: opts.pair.connGl.database, key: row.id },
+        { path: opts.pair.connGl.database, key: transformed.key },
         async () => {
-          const stored = await readSessionKv(session, row.id);
+          const stored = await readSessionKv(session, transformed.key);
 
           const facts = stored
             ? classifyKvConflict(stored, {
                 storageClass: row.storage_class || 'blob',
-                sha256: row.sha256,
-                byteLength: Number(row.byte_length) || 0,
+                sha256: sha256Hex(transformed.bytes),
+                byteLength: transformed.bytes.length,
               })
             : null;
 
@@ -589,7 +731,8 @@ export async function verifyStoredResources(opts: {
             );
 
             err.code = 'PARTIAL';
-            if (facts) err.detail = kvConflictDetail(facts, row.id, 'verify');
+            if (facts)
+              err.detail = kvConflictDetail(facts, transformed.key, 'verify');
 
             throw err;
           }
@@ -598,7 +741,10 @@ export async function verifyStoredResources(opts: {
 
       processed++;
 
-      if (processed === rows.length || performance.now() - last >= 250) {
+      if (
+        processed === rows.length ||
+        performance.now() - last >= TRANSFER_PROGRESS_THROTTLE_MS
+      ) {
         last = performance.now();
         report();
       }
@@ -620,31 +766,52 @@ export async function rememberResources(opts: {
   operationId: string;
   /** Scanned source and target ids for this chat. */
   row: ChatRow;
+  /** Extracted bundle root. */
+  root: string;
 }): Promise<void> {
   const rows: Array<{
-    /** Resource class recorded in the work index. */
     class: string;
-    /** Resource id recorded in the work index. */
     id: string;
     sha256: string;
-    /** Bundle filename, when the resource is a file. */
     filename: string;
   }> = [];
 
   await opts.work.queryLines(
     `SELECT json_object('class', class, 'id', id, 'sha256', sha256, 'filename', filename) FROM res WHERE ordinal = ${opts.ordinal};`,
-    (line) => rows.push(json(line)),
+    (line) => {
+      rows.push(json(line));
+    },
   );
 
   for (const row of rows) {
-    const id = row.class === 'kv' ? row.id : row.filename || row.id;
+    let id = row.class === 'kv' ? row.id : row.filename || row.id;
+    let sha256 = row.sha256;
+
+    if (row.class === 'kv' && classifyChatKvKey(row.id)) {
+      const blob = path.join(
+        opts.root,
+        'blobs',
+        row.sha256.slice(0, 2),
+        `${row.sha256}.bin`,
+      );
+
+      const transformed = transformRendererKv(
+        row.id,
+        await readFile(blob),
+        opts.row.sourceId,
+        opts.row.targetId,
+      );
+
+      id = transformed.key;
+      sha256 = sha256Hex(transformed.bytes);
+    }
 
     await opts.journal.addPendingResource(
       opts.operationId,
       opts.row.targetId,
       row.class,
       id,
-      row.sha256,
+      sha256,
     );
   }
 }

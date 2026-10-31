@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { bubbleRange, sqlText } from './core';
 import { execSql, execSqlByteRows } from './sqlite';
+import { SQLITE_PARAMETER_BATCH_ROWS } from './sqlite-protocol';
 import type { SqliteSession } from './sqlite-session';
 import type { TransferContext } from './types';
 
@@ -42,20 +43,30 @@ export async function chatSelectionFingerprint(
     ).trim();
 
     if (hasTable === '1') {
-      await execSqlByteRows({
-        ...conn,
-        sql: `SELECT CAST(composerId AS BLOB), CAST(COALESCE(CAST(value AS BLOB), X'') AS BLOB) FROM composerHeaders WHERE composerId IN (${sorted.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
-        onRow: (fields) => {
-          hash.update(fields[0]);
-          hash.update(fields[1]);
-        },
-      });
+      for (
+        let start = 0;
+        start < sorted.length;
+        start += SQLITE_PARAMETER_BATCH_ROWS
+      ) {
+        const batch = sorted.slice(start, start + SQLITE_PARAMETER_BATCH_ROWS);
+
+        await execSqlByteRows({
+          ...conn,
+          sql: `SELECT CAST(composerId AS BLOB), CAST(COALESCE(CAST(value AS BLOB), X'') AS BLOB) FROM composerHeaders WHERE composerId IN (${batch.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
+          onRow: (fields) => {
+            hash.update(fields[0]);
+            hash.update(fields[1]);
+          },
+        });
+      }
     }
 
-    const batchSize = 64;
-
-    for (let start = 0; start < sorted.length; start += batchSize) {
-      const batch = sorted.slice(start, start + batchSize);
+    for (
+      let start = 0;
+      start < sorted.length;
+      start += SQLITE_PARAMETER_BATCH_ROWS
+    ) {
+      const batch = sorted.slice(start, start + SQLITE_PARAMETER_BATCH_ROWS);
 
       const where = batch
         .map((id) => {

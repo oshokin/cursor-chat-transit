@@ -1,6 +1,9 @@
 import type { WorkspaceEntry } from './types';
 import { fileUriMetadata } from './file-uri';
 
+/** Maximum untrusted remote authority inspected for a workspace label. */
+const WORKSPACE_AUTHORITY_TEXT_CHARS = 4_096;
+
 /** How the workspace URI is reached: local disk, SSH, container, WSL, or other. */
 export type WorkspaceLocation =
   'local' | 'ssh' | 'container' | 'wsl' | 'remote' | 'unknown';
@@ -39,7 +42,7 @@ export function workspaceLocation(entry: WorkspaceEntry): WorkspaceLocation {
 
 /** Labels only: decoded SSH names must never replace workspace identity. */
 export function sshDisplayHost(authority: string): string | undefined {
-  if (authority.length > 4096) return undefined;
+  if (authority.length > WORKSPACE_AUTHORITY_TEXT_CHARS) return undefined;
   let decoded: string;
 
   try {

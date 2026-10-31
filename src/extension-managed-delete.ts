@@ -8,6 +8,7 @@ import type {
 import { humanDuration } from './duration';
 import { isAbort } from './extension-errors';
 import { transferSettings } from './extension-settings';
+import { PROGRESS_UI_REFRESH_INTERVAL_MS } from './progress-model';
 import {
   finishPhaseProgress,
   linkedSignal,
@@ -167,7 +168,7 @@ export async function deleteManagedChats(
       runtime.progressTimer = setInterval(
         () =>
           setUi({ timingLabel: `Elapsed ${humanDuration(log.elapsedMs())}` }),
-        1000,
+        PROGRESS_UI_REFRESH_INTERVAL_MS,
       );
 
       setUi({

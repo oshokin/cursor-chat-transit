@@ -13,6 +13,8 @@ import { TransferError, type SqliteConn, type TransferContext } from './types';
 
 /** Bound each write transaction by bytes and row count. One legal row may exceed this budget. */
 export const IMPORT_BATCH_BYTES = 8 * 1024 * 1024;
+/** Maximum staged rows inspected for one import write transaction. */
+export const IMPORT_BATCH_ROWS = 128;
 
 /** Copy immutable dependencies and hidden bubbles; publish the composer in a later transaction. */
 export async function writePreparedBatches(opts: {
@@ -51,7 +53,7 @@ CREATE TEMP TABLE cct_batch_guard(ok INTEGER CONSTRAINT cct_resource_conflict CH
       const rows: Array<[number, number]> = [];
 
       await session.queryLines(
-        `SELECT json_array(rowid,length(CAST(value AS BLOB))) FROM staged.cursorDiskKV WHERE rowid>${after} AND key != ${sqlText(opts.composerKey)} ORDER BY rowid LIMIT 128;`,
+        `SELECT json_array(rowid,length(CAST(value AS BLOB))) FROM staged.cursorDiskKV WHERE rowid>${after} AND key != ${sqlText(opts.composerKey)} ORDER BY rowid LIMIT ${IMPORT_BATCH_ROWS};`,
         (line) => {
           rows.push(JSON.parse(line) as [number, number]);
         },

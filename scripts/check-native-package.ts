@@ -7,6 +7,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import yauzl from 'yauzl';
 
+/** Deadline for the isolated packaged-native smoke process. */
+const nativePackageSmokeTimeoutMs = 20_000;
+
 /** Validate the shipped native runtime in an isolated installation with no CLI or node_modules. */
 async function main(): Promise<void> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-packaged-native-'));
@@ -76,7 +79,7 @@ console.log(JSON.stringify({sqlite:nativeSqliteVersion(),napi:process.versions.n
       {
         cwd: root,
         env: { ...process.env, PATH: '', NODE_PATH: '' },
-        timeout: 20000,
+        timeout: nativePackageSmokeTimeoutMs,
       },
     );
 

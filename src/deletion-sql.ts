@@ -7,6 +7,7 @@ import { verifyGlobalSelection } from './deletion-ownership';
 import { openReadTransaction } from './read-transaction';
 import type { SqliteSession } from './sqlite-session';
 import { connOf } from './transfer-context';
+import { SQLITE_PARAMETER_BATCH_ROWS } from './sqlite-protocol';
 import type {
   ComposerHeader,
   Layout,
@@ -421,11 +422,13 @@ export async function deleteMessageRows(
   ids: string[],
   signal?: AbortSignal,
 ): Promise<void> {
-  const batchSize = 64;
-
-  for (let start = 0; start < ids.length; start += batchSize) {
+  for (
+    let start = 0;
+    start < ids.length;
+    start += SQLITE_PARAMETER_BATCH_ROWS
+  ) {
     signal?.throwIfAborted();
-    const batch = ids.slice(start, start + batchSize);
+    const batch = ids.slice(start, start + SQLITE_PARAMETER_BATCH_ROWS);
 
     const predicates = batch.map((id) => {
       const range = bubbleRange(id);

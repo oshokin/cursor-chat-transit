@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { TransferError } from './types';
 
+/** Largest transfer lock file accepted while checking ownership. */
+export const MAX_LOCK_FILE_BYTES = 4_096;
+
 /** Exclusive lock file plus a release that deletes it only while we still own it. */
 export interface LockHandle {
   /** Absolute path of this process's lock file. */
@@ -240,7 +243,11 @@ export async function clearStaleLock(expected: StaleLock): Promise<void> {
   try {
     const stat = await fs.promises.lstat(expected.lockPath);
 
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4096)
+    if (
+      !stat.isFile() ||
+      stat.isSymbolicLink() ||
+      stat.size > MAX_LOCK_FILE_BYTES
+    )
       throw new Error('Transfer lock is not a regular lock file.');
 
     const current = JSON.parse(

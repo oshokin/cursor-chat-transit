@@ -13,6 +13,9 @@ import { resolveSelectedWorkspace } from './operation-ui';
 import * as paths from './paths';
 import { sqliteVersion } from './sqlite';
 
+/** Deadline for each diagnostic SQLite request. */
+export const DIAGNOSTIC_REQUEST_TIMEOUT_MS = 8_000;
+
 /** Human host label; never show the numeric ExtensionKind. */
 export function hostKindLabel(kind: vscode.ExtensionKind): string {
   return kind === vscode.ExtensionKind.UI ? 'Local UI host' : 'Workspace host';
@@ -51,7 +54,7 @@ export async function timedCheck(
   label: string,
   run: (signal: AbortSignal) => Promise<DiagnosticCheck>,
   /** Deadline for one SQLite request, in milliseconds. */
-  timeoutMs = 8000,
+  timeoutMs = DIAGNOSTIC_REQUEST_TIMEOUT_MS,
 ): Promise<DiagnosticCheck> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -147,14 +150,14 @@ export async function collectDiagnosticReport(
             database: entry.workspaceDbPath,
             readOnly: true,
             signal,
-            timeoutMs: 8000,
+            timeoutMs: DIAGNOSTIC_REQUEST_TIMEOUT_MS,
           });
 
           const gl = await inspectDatabase({
             database: entry.globalDbPath,
             readOnly: true,
             signal,
-            timeoutMs: 8000,
+            timeoutMs: DIAGNOSTIC_REQUEST_TIMEOUT_MS,
           });
 
           if (!gl.layout.canWriteGlobal || !ws.layout.canWriteWorkspace) {

@@ -6,6 +6,7 @@ import { sqlText } from './core';
 import * as db from './db';
 import { imageUuidsFromBubbles } from './dependencies';
 import { writeResources } from './export-resources';
+import { snapshotHostSession, userDataDirFromGlobalDb } from './host-snapshots';
 import { splitConversation } from './import-policy';
 import { planFilenamesFromChat } from './plans';
 import { parseBoundedJson } from './record-json';
@@ -21,6 +22,11 @@ import type {
   WorkspaceEntry,
 } from './types';
 import { TransferError } from './types';
+
+/** Largest declared message chunk accepted from Cursor state. */
+export const MAX_EXPORT_MESSAGE_CHUNK_BYTES = 1_000_000;
+/** Largest declared number of chunks accepted for one message. */
+export const MAX_EXPORT_MESSAGE_CHUNKS = 65_536;
 
 /** Export one composer: body, bubbles, and the blob closure. */
 export async function readChatForExport(opts: {
@@ -236,6 +242,26 @@ export async function readChatForExport(opts: {
   }
 
   await writeResources({ ...opts, body, refs });
+
+  if (opts.tmp) {
+    const snapshot = await snapshotHostSession({
+      userDataDir: userDataDirFromGlobalDb(opts.workspace.globalDbPath),
+      sessionId: id,
+      stagingDir: opts.tmp,
+      signal: opts.ctx.signal,
+      timeoutMs: opts.ctx.timeoutMs,
+      busyTimeoutMs: opts.ctx.busyTimeoutMs,
+    });
+
+    if (snapshot) {
+      await opts.writer.writeHostSnapshot(
+        snapshot.sessionId,
+        snapshot.database,
+        snapshot.meta,
+      );
+    }
+  }
+
   await opts.writer.endChat();
 
   if (recovery) {
@@ -275,10 +301,10 @@ async function hydrateChunkedHeaders(
   if (
     !Number.isInteger(chunkSize) ||
     Number(chunkSize) < 1 ||
-    Number(chunkSize) > 1_000_000 ||
+    Number(chunkSize) > MAX_EXPORT_MESSAGE_CHUNK_BYTES ||
     !Number.isInteger(chunkCount) ||
     Number(chunkCount) < 0 ||
-    Number(chunkCount) > 65_536 ||
+    Number(chunkCount) > MAX_EXPORT_MESSAGE_CHUNKS ||
     !Number.isInteger(count) ||
     Number(count) < 0 ||
     Number(count) > Number(chunkSize) * Number(chunkCount)

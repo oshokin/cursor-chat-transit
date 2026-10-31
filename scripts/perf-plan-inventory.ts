@@ -11,6 +11,13 @@ import {
 } from '../src/import-family-plan';
 import { listWorkspaceEntries, listWorkspaceEntriesAsync } from '../src/paths';
 
+/** Inventory and family-plan benchmark scenarios and sampling policy. */
+const inventoryStorageCounts = [100, 1_000, 5_000] as const;
+const familyPlanRowCount = 4_000;
+const benchmarkWarmups = 2;
+const benchmarkSamples = 7;
+const eventLoopResolutionMs = 20;
+
 /**
  * Same-process comparison of the previous family-plan filters and the sync
  * inventory with the indexed plan and the async inventory. Temporary files only.
@@ -38,7 +45,7 @@ async function measureInventory(): Promise<void> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-inventory-bench-'));
 
   try {
-    for (const count of [100, 1000, 5000]) {
+    for (const count of inventoryStorageCounts) {
       const userDir = path.join(root, String(count));
       const storage = path.join(userDir, 'User', 'workspaceStorage');
 
@@ -66,11 +73,11 @@ async function measureInventory(): Promise<void> {
 
       assert.deepEqual(asyncIds, syncIds);
 
-      const sync = await samples(7, () => {
+      const sync = await samples(benchmarkSamples, () => {
         listWorkspaceEntries(userDir);
       });
 
-      const asyncSamples = await samples(7, async () => {
+      const asyncSamples = await samples(benchmarkSamples, async () => {
         await listWorkspaceEntriesAsync(userDir);
       });
 
@@ -92,7 +99,7 @@ async function measureInventory(): Promise<void> {
 
 /** Indexed family adjustment versus the previous per-row find and filter. */
 function measureFamilyPlan(): void {
-  const rows = familyRows(4000);
+  const rows = familyRows(familyPlanRowCount);
   const original = seedPlan(rows);
   let sequence = 0;
 
@@ -258,8 +265,8 @@ async function samples(
   wall: { medianMs: number; minMs: number; maxMs: number; rangeMs: number };
   delayMaxMs: number;
 }> {
-  for (let index = 0; index < 2; index++) await run();
-  const delay = monitorEventLoopDelay({ resolution: 20 });
+  for (let index = 0; index < benchmarkWarmups; index++) await run();
+  const delay = monitorEventLoopDelay({ resolution: eventLoopResolutionMs });
   const walls: number[] = [];
 
   delay.enable();
@@ -285,10 +292,10 @@ function syncSamples(run: () => void): {
   maxMs: number;
   rangeMs: number;
 } {
-  for (let index = 0; index < 2; index++) run();
+  for (let index = 0; index < benchmarkWarmups; index++) run();
   const walls: number[] = [];
 
-  for (let index = 0; index < 7; index++) {
+  for (let index = 0; index < benchmarkSamples; index++) {
     const started = performance.now();
 
     run();

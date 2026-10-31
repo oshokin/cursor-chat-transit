@@ -252,3 +252,69 @@ test(
     await session.close();
   },
 );
+
+test(
+  'large values use bounded spill IPC in both directions',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const session = await SqliteSession.open(options);
+    const bytes = Buffer.alloc(33 * 1024 * 1024, 0x5a);
+
+    try {
+      await session.rows(
+        'INSERT INTO t VALUES(?) RETURNING x;',
+        [bytes],
+        (row) => {
+          assert.ok(Buffer.isBuffer(row[0]));
+          assert.equal((row[0] as Buffer).length, bytes.length);
+          assert.equal((row[0] as Buffer).subarray(-1)[0], 0x5a);
+        },
+      );
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test(
+  'row packets stay backpressured before producing the next batch',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const session = await SqliteSession.open(options);
+    let release!: () => void;
+
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    let entered!: () => void;
+
+    const enteredPromise = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+
+    let consumed = 0;
+
+    const query = session.rows(
+      'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<130) SELECT x FROM n;',
+      [],
+      async () => {
+        consumed += 1;
+
+        if (consumed === 1) {
+          entered();
+          await gate;
+        }
+      },
+    );
+
+    await enteredPromise;
+    assert.equal(consumed, 1);
+    release();
+    await query;
+    assert.equal(consumed, 130);
+    await session.close();
+  },
+);

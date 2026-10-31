@@ -1,4 +1,6 @@
 /** This tiny process has no database handles and stays responsive during native SQL. */
+const ORPHAN_PARENT_POLL_INTERVAL_MS = 250;
+
 const owner = Number(process.argv[2]);
 const worker = Number(process.argv[3]);
 
@@ -31,7 +33,7 @@ const timer = setInterval(() => {
     clearInterval(timer);
     process.exit(0);
   }
-}, 250);
+}, ORPHAN_PARENT_POLL_INTERVAL_MS);
 
 process.once('disconnect', () => {
   clearInterval(timer);

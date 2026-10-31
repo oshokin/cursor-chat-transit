@@ -7,7 +7,15 @@ import {
   decodeAttachment,
 } from './attachments';
 import type { ExportChatWriter } from './bundle-writer';
+import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
 import { decodeCanvas, readCanvasFile } from './canvases';
+import {
+  CHAT_KV_REGISTRY_VERSION,
+  auxiliaryKeysFromJson,
+  chatKvOwnedPatterns,
+  classifyChatKvKey,
+  parseChatKvJson,
+} from './chat-kv-registry';
 import { blobKeysFromComposerBody, readBlobGraph } from './dependencies';
 import { readSessionKvBatch } from './kv-session';
 import { decodePlan, readPlanFile } from './plans';
@@ -121,7 +129,7 @@ export async function writeResources(opts: {
         if (sha.file) await rm(sha.file, { force: true });
         written.add(key);
 
-        if (performance.now() - lastProgress >= 250) {
+        if (performance.now() - lastProgress >= TRANSFER_PROGRESS_THROTTLE_MS) {
           lastProgress = performance.now();
 
           opts.ctx.onPhase?.('collect', {
@@ -148,6 +156,8 @@ export async function writeResources(opts: {
   }
 
   const missingBlobs = closed.missing.length;
+
+  await writeRendererKv(opts, written);
 
   let missingImages = 0;
 
@@ -266,6 +276,92 @@ export async function writeResources(opts: {
     opts.ctx.onNote?.(
       `Incomplete chat ${chatLogLabel(opts.header)} missingBlobs=${missingBlobs} missingImages=${missingImages} missingPlans=${missingPlans} missingCanvases=${missingCanvases}`,
     );
+  }
+}
+
+/** Export the closed graph of renderer records owned by this composer. */
+async function writeRendererKv(
+  opts: Parameters<typeof writeResources>[0],
+  written: Set<string>,
+): Promise<void> {
+  const owned = chatKvOwnedPatterns(opts.header.composerId);
+  const keys: string[] = [];
+
+  const clauses = [
+    ...owned.exact.map(() => 'key=?'),
+    ...owned.prefixes.map(() => '(key>=? AND key<?)'),
+  ];
+
+  const params: string[] = [...owned.exact];
+
+  for (const prefix of owned.prefixes) params.push(prefix, `${prefix}\uffff`);
+
+  await opts.conn.session!.rows(
+    `SELECT key FROM cursorDiskKV WHERE ${clauses.join(' OR ')} ORDER BY key;`,
+    params,
+    ([key]) => {
+      keys.push(String(key));
+    },
+  );
+
+  const pending = [...keys];
+  const queued = new Set(pending);
+
+  while (pending.length) {
+    opts.ctx.signal?.throwIfAborted();
+    const key = pending.shift()!;
+
+    const row = await readSessionKvBatch(opts.conn.session!, [key]).then(
+      (rows) => rows.get(key),
+    );
+
+    if (!row) {
+      const error = new TransferError(`Missing renderer KV record ${key}.`);
+
+      error.code = 'INVALID_RESOURCE';
+
+      throw error;
+    }
+
+    const classified = classifyChatKvKey(key);
+
+    if (!classified) throw new Error(`Unregistered renderer KV record ${key}.`);
+
+    // Only structured records can introduce graph edges. Opaque leaf bytes are
+    // preserved exactly and are never searched for id-looking substrings.
+    try {
+      const value = JSON.parse(row.bytes.toString('utf8')) as unknown;
+
+      if (value && typeof value === 'object') {
+        for (const auxiliary of auxiliaryKeysFromJson(value)) {
+          if (queued.has(auxiliary)) continue;
+          queued.add(auxiliary);
+          pending.push(auxiliary);
+        }
+      } else if (classified.auxiliaryId) {
+        parseChatKvJson(row.bytes, key);
+      }
+    } catch (error) {
+      if (classified.auxiliaryId) parseChatKvJson(row.bytes, key);
+      if (error instanceof TransferError) throw error;
+    }
+
+    const sha = await writeTempBytes(opts.tmp, row.bytes);
+
+    if (sha.file) await opts.writer.addBlob(sha.sha256, sha.file);
+
+    await opts.writer.writeResource({
+      class: 'kv',
+      id: key,
+      sha256: sha.sha256,
+      byteLength: row.bytes.length,
+      storageClass: row.storageClass,
+      registryVersion: CHAT_KV_REGISTRY_VERSION,
+      family: classified.family,
+    });
+
+    if (sha.file) await rm(sha.file, { force: true });
+    written.add(key);
   }
 }
 

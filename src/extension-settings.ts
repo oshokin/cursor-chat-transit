@@ -10,6 +10,27 @@ export const LAST_EXPORT_DIR = 'lastExportDir';
 /** GlobalState key for the last successful local import folder. */
 export const LAST_IMPORT_DIR = 'lastImportDir';
 
+/** Milliseconds in one settings second. */
+export const MILLISECONDS_PER_SECOND = 1_000;
+/** Default and accepted range for the operation timeout setting. */
+export const OPERATION_TIMEOUT_SECONDS = {
+  default: 600,
+  minimum: 30,
+  maximum: 3_600,
+} as const;
+/** Default and accepted range for the SQLite busy timeout setting. */
+export const BUSY_TIMEOUT_SECONDS = {
+  default: 5,
+  minimum: 0,
+  maximum: 30,
+} as const;
+/** Default and accepted range for the JSON property budget setting. */
+export const MAX_JSON_PROPERTIES_SETTING = {
+  default: 1_000_000,
+  minimum: 100_000,
+  maximum: 5_000_000,
+} as const;
+
 /** Only explicit user values: a repository cannot redirect paths or enable recovery. */
 function userValue(key: string): unknown {
   return vscode.workspace.getConfiguration('cursorChatTransit').inspect(key)
@@ -86,14 +107,26 @@ export function transferSettings(): {
   temporaryDirectory?: string;
 } {
   return {
-    timeoutMs: seconds('sqlite.operationTimeoutSeconds', 600, 30, 3600) * 1000,
-    busyTimeoutMs: seconds('sqlite.busyTimeoutSeconds', 5, 0, 30) * 1000,
+    timeoutMs:
+      seconds(
+        'sqlite.operationTimeoutSeconds',
+        OPERATION_TIMEOUT_SECONDS.default,
+        OPERATION_TIMEOUT_SECONDS.minimum,
+        OPERATION_TIMEOUT_SECONDS.maximum,
+      ) * MILLISECONDS_PER_SECOND,
+    busyTimeoutMs:
+      seconds(
+        'sqlite.busyTimeoutSeconds',
+        BUSY_TIMEOUT_SECONDS.default,
+        BUSY_TIMEOUT_SECONDS.minimum,
+        BUSY_TIMEOUT_SECONDS.maximum,
+      ) * MILLISECONDS_PER_SECOND,
     plansDir: localPath('plansDirectory') || undefined,
     maxJsonProperties: seconds(
       'limits.maxJsonProperties',
-      1_000_000,
-      100_000,
-      5_000_000,
+      MAX_JSON_PROPERTIES_SETTING.default,
+      MAX_JSON_PROPERTIES_SETTING.minimum,
+      MAX_JSON_PROPERTIES_SETTING.maximum,
     ),
     temporaryDirectory: configuredTempDir(),
   };

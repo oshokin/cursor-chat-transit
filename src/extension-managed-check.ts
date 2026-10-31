@@ -13,6 +13,7 @@ import type { ManagedNode } from './managed-node';
 import { groupManagedNodes } from './managed-selection';
 import { notifyCompletion } from './notifications';
 import { startOperationLog } from './operation-log';
+import { PROGRESS_UI_REFRESH_INTERVAL_MS } from './progress-model';
 import type { TransitLog } from './output-ui';
 import { workspaceStatisticsKey, type StatisticsUpdate } from './statistics';
 import { runTransfer } from './transfer-process';
@@ -55,7 +56,7 @@ export async function checkManagedNodes(
 
     runtime.progressTimer = setInterval(
       () => setUi({ timingLabel: `Elapsed ${humanDuration(log.elapsedMs())}` }),
-      1000,
+      PROGRESS_UI_REFRESH_INTERVAL_MS,
     );
 
     setUi({

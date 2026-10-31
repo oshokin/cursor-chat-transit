@@ -4,27 +4,31 @@ import { indexGlobalHeaders } from '../src/header-index';
 import { matchesWorkspaceStorage, type HeaderSource } from '../src/db-headers';
 import type { WorkspaceEntry } from '../src/types';
 
+/** Synthetic benchmark scenario size and repetitions. */
+const benchmarkWorkspaceCount = 1_000;
+const benchmarkHeaderCount = 10_000;
+const benchmarkIterations = 3;
+
 /** Compare repeated global scans with operation-local indexing; synthetic metadata only. */
 function main(): void {
-  const workspaceCount = 1000;
-  const headerCount = 10000;
-
   const sources: HeaderSource[] = [
     {
       source: 'blob',
-      records: Array.from({ length: headerCount }, (_, i) => ({
+      records: Array.from({ length: benchmarkHeaderCount }, (_, i) => ({
         composerId: `chat-${i}`,
-        workspaceIdentifier: { id: `workspace-${i % workspaceCount}` },
+        workspaceIdentifier: {
+          id: `workspace-${i % benchmarkWorkspaceCount}`,
+        },
       })),
     },
   ];
 
   const workspaces = Array.from(
-    { length: workspaceCount },
+    { length: benchmarkWorkspaceCount },
     (_, i) => ({ storageId: `workspace-${i}` }) as WorkspaceEntry,
   );
 
-  for (let iteration = 1; iteration <= 3; iteration++) {
+  for (let iteration = 1; iteration <= benchmarkIterations; iteration++) {
     let started = performance.now();
 
     const before = workspaces.map((workspace) =>
@@ -51,8 +55,8 @@ function main(): void {
     console.log(
       JSON.stringify({
         iteration,
-        workspaces: workspaceCount,
-        headers: headerCount,
+        workspaces: benchmarkWorkspaceCount,
+        headers: benchmarkHeaderCount,
         scanMs: Math.round(scanMs * 100) / 100,
         indexedMs: Math.round(indexedMs * 100) / 100,
         includesIndexConstruction: true,

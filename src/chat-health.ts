@@ -106,6 +106,10 @@ export async function inspectChatHealth(
         async addBlob() {
           throw new Error('Inspection must not write files.');
         },
+        /** Native host snapshots are validated by export, not health inspection. */
+        async writeHostSnapshot() {
+          throw new Error('Inspection must not write files.');
+        },
         /** Ignore chat end during a metadata check. */
         async endChat() {},
       },

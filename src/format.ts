@@ -1,6 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { EXPORT_FORMAT_VERSION as BUNDLE_VERSION } from './bundle-limits';
+import {
+  EXPORT_FORMAT_VERSION as BUNDLE_VERSION,
+  MIN_BUNDLE_FORMAT_VERSION,
+} from './bundle-limits';
 import { readBundleObject } from './bundle-object';
 import type { FileHandle } from 'node:fs/promises';
 import type {
@@ -28,6 +31,7 @@ export function assertExportShape(obj: unknown): ExportObject {
     rec.formatVersion !== undefined &&
     rec.formatVersion !== EXPORT_FORMAT_VERSION &&
     rec.formatVersion !== LEGACY_EXPORT_FORMAT_VERSION &&
+    rec.formatVersion !== MIN_BUNDLE_FORMAT_VERSION &&
     rec.formatVersion !== BUNDLE_VERSION
   ) {
     throw new Error(`Unsupported export formatVersion: ${rec.formatVersion}`);

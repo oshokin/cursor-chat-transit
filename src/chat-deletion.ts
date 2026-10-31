@@ -1,5 +1,6 @@
 import { lstat } from 'node:fs/promises';
-import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
+import { MAX_SQLITE_ROW_LINE_BYTES } from './bundle-limits';
+import { SQLITE_PARAMETER_BATCH_ROWS } from './sqlite-protocol';
 import { narrowDeletion } from './chat-family';
 import { chatSelectionFingerprint } from './chat-fingerprint';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
@@ -92,7 +93,7 @@ export async function deleteSelectedChats(
           async () => {
             const session = await SqliteSession.open({
               ...connOf(ctx, workspace.globalDbPath, false),
-              maxLineBytes: 2 * MAX_SQLITE_VALUE_BYTES + 65536,
+              maxLineBytes: MAX_SQLITE_ROW_LINE_BYTES,
             });
 
             let completed: string[];
@@ -102,10 +103,14 @@ export async function deleteSelectedChats(
                 `ATTACH DATABASE ${sqlText(workspace.workspaceDbPath)} AS workspace; CREATE TEMP TABLE selected(id TEXT PRIMARY KEY);`,
               );
 
-              for (let start = 0; start < ids.length; start += 64)
+              for (
+                let start = 0;
+                start < ids.length;
+                start += SQLITE_PARAMETER_BATCH_ROWS
+              )
                 await session.exec(
                   `INSERT INTO selected VALUES ${ids
-                    .slice(start, start + 64)
+                    .slice(start, start + SQLITE_PARAMETER_BATCH_ROWS)
                     .map((id) => `(${sqlText(id)})`)
                     .join(',')};`,
                 );

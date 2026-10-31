@@ -4,6 +4,8 @@ import type { SqliteSession } from './sqlite-session';
 
 /** Payload budget for a dependency frontier; one legal larger value is read alone. */
 export const KV_BATCH_BYTES = 4 * 1024 * 1024;
+/** Maximum distinct keys accepted by one dependency-frontier read. */
+export const KV_SESSION_MAX_KEYS = 32;
 
 /** Read one value atomically, rejecting oversize payloads before materializing their bytes. */
 export async function readSessionKv(
@@ -38,8 +40,14 @@ export async function readSessionKvBatch(
   session: SqliteSession,
   keys: string[],
 ): Promise<Map<string, KvBytes | null>> {
-  if (!keys.length || keys.length > 32 || new Set(keys).size !== keys.length)
-    throw new Error('KV batch requires 1 to 32 distinct keys.');
+  if (
+    !keys.length ||
+    keys.length > KV_SESSION_MAX_KEYS ||
+    new Set(keys).size !== keys.length
+  )
+    throw new Error(
+      `KV batch requires 1 to ${KV_SESSION_MAX_KEYS} distinct keys.`,
+    );
   const result = new Map<string, KvBytes | null>();
   const sizes = new Map<string, number>();
 

@@ -5,6 +5,14 @@ import path from 'node:path';
 import type { WorkspaceEntry } from '../src/types';
 import type { StatisticsUpdate } from '../src/statistics';
 
+/** Synthetic statistics benchmark scenario and operation policy. */
+const defaultBlobCount = 2_048;
+const maximumBlobCount = 10_000;
+const defaultChatCount = 4;
+const maximumChatCount = 100;
+const benchmarkOperationTimeoutMs = 120_000;
+const benchmarkRepetitions = 3;
+
 /** Opt-in synthetic benchmark. Only temporary databases are created or opened. */
 async function main(): Promise<void> {
   const project =
@@ -22,16 +30,16 @@ async function main(): Promise<void> {
     path.join(project, 'out/sqlite.js'),
   ) as typeof import('../src/sqlite');
 
-  const count = Number(process.env.CCT_BENCH_BLOBS || 2048);
-  const chatCount = Number(process.env.CCT_BENCH_CHATS || 4);
+  const count = Number(process.env.CCT_BENCH_BLOBS || defaultBlobCount);
+  const chatCount = Number(process.env.CCT_BENCH_CHATS || defaultChatCount);
 
   if (
     !Number.isSafeInteger(count) ||
     count < 1 ||
-    count > 10000 ||
+    count > maximumBlobCount ||
     !Number.isSafeInteger(chatCount) ||
     chatCount < 1 ||
-    chatCount > 100
+    chatCount > maximumChatCount
   )
     throw new Error('Use 1–10000 blobs and 1–100 chats.');
 
@@ -44,7 +52,7 @@ async function main(): Promise<void> {
   ) as typeof import('../src/core');
 
   const ctx = {
-    timeoutMs: 120000,
+    timeoutMs: benchmarkOperationTimeoutMs,
   };
 
   const workspace: WorkspaceEntry = {
@@ -89,7 +97,11 @@ async function main(): Promise<void> {
     });
 
     for (const kind of ['workspace-statistics', 'chat-statistics'] as const) {
-      for (let repetition = 0; repetition < 3; repetition++) {
+      for (
+        let repetition = 0;
+        repetition < benchmarkRepetitions;
+        repetition++
+      ) {
         let events = 0,
           dependencyEvents = 0;
 

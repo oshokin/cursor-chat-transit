@@ -4,6 +4,10 @@ import { SqliteSession } from './sqlite-session';
 import { transferEvent } from './transfer-events';
 import type { ImportResult } from './types';
 import { TransferError } from './types';
+import { DISPLAY_NAME_CHARS, LOG_MESSAGE_CHARS } from './log-format';
+
+/** Maximum skipped-chat details retained in an import failure summary. */
+export const IMPORT_FAILURE_SUMMARY_ROWS = 5;
 
 /** Source and destination identity for one scanned chat. */
 export interface ChatRow {
@@ -236,10 +240,10 @@ export async function recoveryPreview(
     alreadyImported: plan.already.length,
     missingResources: missing,
     details: plan.skipped
-      .slice(0, 5)
+      .slice(0, IMPORT_FAILURE_SUMMARY_ROWS)
       .map(
         (chat) =>
-          `${(chat.name || chat.composerId).slice(0, 120)}: ${chat.reason.slice(0, 300)}`,
+          `${(chat.name || chat.composerId).slice(0, DISPLAY_NAME_CHARS)}: ${chat.reason.slice(0, LOG_MESSAGE_CHARS)}`,
       ),
   };
 }

@@ -17,6 +17,10 @@ import type { Layout, WorkspaceEntry, TransferContext } from '../src/types';
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 /** Integration tests require the same CLI used by production. */
 const skip = executable ? false : 'sqlite3 required';
+/** Fixture cleanup retry policy for transient Windows filesystem locks. */
+const cleanupDeadlineMs = 2_000;
+const cleanupInitialDelayMs = 50;
+const cleanupMaximumDelayMs = 200;
 
 /**
  * Remove a fixture directory.
@@ -24,8 +28,8 @@ const skip = executable ? false : 'sqlite3 required';
  * locked file costs about 20s and still fails. Retry the whole tree ourselves.
  */
 async function removeTemp(target: string): Promise<void> {
-  const deadline = Date.now() + 2000;
-  let delay = 50;
+  const deadline = Date.now() + cleanupDeadlineMs;
+  let delay = cleanupInitialDelayMs;
 
   for (;;) {
     try {
@@ -46,7 +50,7 @@ async function removeTemp(target: string): Promise<void> {
       }
 
       await new Promise((resolve) => setTimeout(resolve, delay));
-      delay = Math.min(delay * 2, 200);
+      delay = Math.min(delay * 2, cleanupMaximumDelayMs);
     }
   }
 }

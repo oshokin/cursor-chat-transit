@@ -7,6 +7,9 @@ import path from 'node:path';
 
 /** Repository root used to locate the wrapper scripts. */
 const root = path.resolve(__dirname, '..');
+/** Process deadlines shared by this wrapper harness. */
+const commandTimeoutMs = 20_000;
+const handshakeTimeoutMs = 10_000;
 
 /** Absolute PowerShell 5.1 host used on Windows; POSIX uses `sh`. */
 const powershellExe = path.join(
@@ -49,7 +52,7 @@ function run(
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`dev-node timed out: ${args.join(' ')}`));
-    }, opts.timeoutMs ?? 20_000);
+    }, opts.timeoutMs ?? commandTimeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString();
@@ -131,7 +134,7 @@ test('dev-node streams watch-like output before the process exits', async () => 
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       reject(new Error(`watch handshake timed out: ${out}\n${err}`));
-    }, 10_000);
+    }, handshakeTimeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString();
@@ -166,7 +169,7 @@ test('dev-node streams watch-like output before the process exits', async () => 
       finishTimer = setTimeout(() => {
         child.kill('SIGKILL');
         reject(new Error(`watch finish timed out: ${out}\n${err}`));
-      }, 10_000);
+      }, handshakeTimeoutMs);
     }),
   ]).finally(() => {
     if (finishTimer) clearTimeout(finishTimer);
@@ -239,7 +242,7 @@ test('dev-node without a toolchain exits 1 and does not download', async () => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL');
         reject(new Error('missing-toolchain probe timed out'));
-      }, 10_000);
+      }, handshakeTimeoutMs);
 
       child.stdout.on('data', (chunk: Buffer) => {
         out += chunk.toString();

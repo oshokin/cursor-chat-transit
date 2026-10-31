@@ -17,6 +17,12 @@ import {
 import { reconcile } from './import-bundle-reconcile';
 import { isPreflightKvConflict } from './import-bundle-resources';
 import { scanAll } from './import-bundle-scan';
+import { hashFile } from './hash-file';
+import {
+  publishHostSnapshot,
+  userDataDirFromGlobalDb,
+  validateHostSnapshot,
+} from './host-snapshots';
 import { assertStoredListsReadable } from './import-reconcile';
 import { targetKeyFor } from './journal';
 import { JournalStore } from './journal-db';
@@ -279,6 +285,45 @@ CREATE TABLE dep (
 
         const row = await oneChat(work, ordinal);
 
+        const hostRoot = path.join(
+          bundle.root,
+          'chats',
+          ordinalName(ordinal),
+          'host-snapshot',
+        );
+
+        let hostSnapshot:
+          { sessionId: string; database: string; meta: string } | undefined;
+
+        try {
+          const component = asObject(
+            parseBoundedJson(
+              await readFile(path.join(hostRoot, 'component.json')),
+              'host snapshot component',
+            ),
+            'host snapshot component',
+          );
+
+          if (
+            component.class !== 'host-snapshot' ||
+            component.version !== 1 ||
+            component.sessionId !== row.sourceId
+          )
+            throw new Error('Invalid host snapshot component.');
+
+          hostSnapshot = {
+            sessionId: row.sourceId,
+            database: path.join(hostRoot, 'session.sqlite'),
+            meta: path.join(hostRoot, 'meta.json'),
+          };
+
+          await validateHostSnapshot(hostSnapshot);
+          // Native stores cannot be remapped. Renderer fallback still imports normally.
+          if (row.targetId !== row.sourceId) hostSnapshot = undefined;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+
         const header = asObject(
           parseBoundedJson(
             await readFile(
@@ -347,6 +392,39 @@ CREATE TABLE dep (
         }
 
         written.push(row.targetId);
+
+        if (hostSnapshot) {
+          const sessionEffectId = `session:${row.sourceId}`;
+          const sessionHash = await hashFile(hostSnapshot.database);
+
+          await journal.planEffect({
+            operationId,
+            effectId: sessionEffectId,
+            kind: 'session',
+            target: row.sourceId,
+            desiredHash: sessionHash.sha256,
+          });
+
+          await journal.setEffectState(
+            operationId,
+            sessionEffectId,
+            'prepared',
+          );
+
+          await publishHostSnapshot({
+            userDataDir: userDataDirFromGlobalDb(workspace.globalDbPath),
+            snapshot: hostSnapshot,
+            rendererCollision: row.targetId !== row.sourceId,
+          });
+
+          await journal.setEffectState(
+            operationId,
+            sessionEffectId,
+            'verified',
+            sessionHash.sha256,
+          );
+        }
+
         if (row.quality === 'history-only') historyOnlyIds.push(row.targetId);
 
         await journal.addReceipt({

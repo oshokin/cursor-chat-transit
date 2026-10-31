@@ -1,11 +1,11 @@
-import { mapInBatches } from './bounded-io';
 import { transferEvent, transferProgress, traceIO } from './transfer-events';
 import { writeFile } from './trace-fs';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { createWriteStream } from 'node:fs';
+import { FileBlobStore } from './blob-store';
+import { BundleIndexWriter } from './bundle-index';
 import {
   BUNDLE_FORMAT,
   EXPORT_FORMAT_VERSION,
@@ -15,7 +15,7 @@ import {
 import { ordinalName } from './bundle-names';
 import { packZip } from './bundle-zip';
 import { hashFile } from './hash-file';
-import { NdjsonPartWriter, writeNdjsonLine } from './ndjson-io';
+import { NdjsonPartWriter } from './ndjson-io';
 import { parseBoundedJson, type JsonEnvelope } from './record-json';
 
 /** How the conversation array was stored beside the composer fields. */
@@ -23,7 +23,7 @@ export type ConversationLayout = 'absent' | 'empty' | 'ndjson';
 
 /** One resource pointer stored beside a chat. Bytes live under `blobs/`. */
 export interface BundleResourceRef {
-  class: 'kv' | 'image' | 'plan' | 'canvas';
+  class: 'kv' | 'image' | 'plan' | 'canvas' | 'host-snapshot';
   /** KV key, image id, or file basename. */
   id: string;
   /** SHA-256 of the blob bytes. */
@@ -31,6 +31,10 @@ export interface BundleResourceRef {
   byteLength: number;
   /** SQLite storage class for kv values. */
   storageClass?: 'text' | 'blob';
+  /** Registry contract for renderer-owned KV records. */
+  registryVersion?: 1;
+  /** Registry family for renderer-owned KV records. */
+  family?: import('./chat-kv-registry').ChatKvFamily;
   /** Image or plan basename written on import. */
   filename?: string;
   extension?: string;
@@ -44,6 +48,9 @@ export class BundleWriter {
   private readonly root: string;
   /** NDJSON catalog of chats written into this archive. */
   private readonly catalog: NdjsonPartWriter;
+  /** Disk-backed authoritative v5 inventory and catalog. */
+  private readonly index: BundleIndexWriter;
+  private readonly blobs: FileBlobStore;
   /** Number of chats begun so far. */
   private ordinal = 0;
   /** Directory of the chat currently being written. */
@@ -65,6 +72,7 @@ export class BundleWriter {
     private readonly destPath: string,
     /** Directory that contains the extracted or staged archive. */
     root: string,
+    index: BundleIndexWriter,
     /** Cancellation for packing. */
     private readonly signal: AbortSignal | undefined,
     /** Provenance stored on the manifest when present. */
@@ -73,6 +81,8 @@ export class BundleWriter {
     private readonly maxJsonProperties?: number,
   ) {
     this.root = root;
+    this.index = index;
+    this.blobs = new FileBlobStore(path.join(root, 'blobs'));
 
     this.catalog = new NdjsonPartWriter(
       path.join(root, 'catalog'),
@@ -105,9 +115,15 @@ export class BundleWriter {
     await mkdir(path.join(root, 'catalog'), { recursive: true });
     await mkdir(path.join(root, 'blobs'), { recursive: true });
 
+    const index = await BundleIndexWriter.create(
+      path.join(root, 'index.sqlite'),
+      opts?.signal,
+    );
+
     return new BundleWriter(
       destPath,
       root,
+      index,
       opts?.signal,
       opts?.source,
       opts?.maxJsonProperties,
@@ -156,6 +172,12 @@ export class BundleWriter {
     );
 
     await this.catalog.write({
+      ordinal: this.ordinal,
+      sourceComposerId: id,
+      name: typeof header.name === 'string' ? header.name : undefined,
+    });
+
+    await this.index.addChat({
       ordinal: this.ordinal,
       sourceComposerId: id,
       name: typeof header.name === 'string' ? header.name : undefined,
@@ -211,25 +233,48 @@ export class BundleWriter {
 
   /** Copy blob bytes once. Later calls with the same hash reuse the file. */
   async addBlob(sha256: string, sourcePath: string): Promise<void> {
-    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('Invalid blob hash.');
-    const dest = blobPath(this.root, sha256);
+    await traceIO(
+      'Copy blob into archive',
+      { source: sourcePath, destination: this.blobs.path(sha256) },
+      () => this.blobs.putFile(sha256, sourcePath, this.signal),
+    );
+  }
 
-    try {
-      await mkdir(path.dirname(dest), { recursive: true });
+  /** Copy an opaque native host component into this chat directory. */
+  async writeHostSnapshot(
+    sessionId: string,
+    database: string,
+    meta: string,
+  ): Promise<void> {
+    if (sessionId !== path.basename(sessionId))
+      throw new Error('Invalid host session id.');
+    const root = path.join(this.chatDir, 'host-snapshot');
 
-      await traceIO(
-        'Copy blob into archive',
-        { source: sourcePath, destination: dest },
-        () =>
-          pipeline(
-            createReadStream(sourcePath),
-            createWriteStream(dest, { flags: 'wx', mode: 0o600 }),
-            { signal: this.signal },
-          ),
-      );
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
+    await mkdir(root, { recursive: false, mode: 0o700 });
+
+    await pipeline(
+      createReadStream(database),
+      createWriteStream(path.join(root, 'session.sqlite'), {
+        flags: 'wx',
+        mode: 0o600,
+      }),
+      { signal: this.signal },
+    );
+
+    await pipeline(
+      createReadStream(meta),
+      createWriteStream(path.join(root, 'meta.json'), {
+        flags: 'wx',
+        mode: 0o600,
+      }),
+      { signal: this.signal },
+    );
+
+    await writeJson(path.join(root, 'component.json'), {
+      class: 'host-snapshot',
+      version: 1,
+      sessionId,
+    });
   }
 
   /** Finish the open chat's part files. */
@@ -250,40 +295,30 @@ export class BundleWriter {
     if (this.closed) return;
     this.closed = true;
     await this.catalog.finish();
-    const files = await listFiles(this.root);
-    const inventoryPath = path.join(this.root, 'inventory.ndjson');
-    const { open, rm } = await import('node:fs/promises');
-    const inventory = await open(inventoryPath, 'wx');
+    const { rm } = await import('node:fs/promises');
     let contentBytes = 0;
+    let fileCount = 0;
 
-    try {
-      for await (const batch of mapInBatches(
-        files,
-        async (file) => ({
-          file,
-          hashed: await hashFile(file.diskPath, this.signal),
-        }),
-        this.signal,
-      )) {
-        for (const { file, hashed } of batch) {
-          contentBytes += hashed.bytes;
+    for await (const file of listFiles(this.root)) {
+      this.signal?.throwIfAborted();
+      const hashed = await hashFile(file.diskPath, this.signal);
 
-          await writeNdjsonLine(inventory, {
-            path: file.name,
-            bytes: hashed.bytes,
-            sha256: hashed.sha256,
-            kind: kindOf(file.name),
-          });
-        }
-      }
+      fileCount += 1;
+      contentBytes += hashed.bytes;
 
-      await inventory.sync();
-    } finally {
-      await inventory.close();
+      await this.index.addInventory({
+        path: file.name,
+        bytes: hashed.bytes,
+        sha256: hashed.sha256,
+        kind: kindOf(file.name),
+      });
     }
 
+    await this.index.finish();
+
     transferProgress('pack', { file: this.destPath });
-    const inventoryHash = await hashFile(inventoryPath, this.signal);
+    const indexPath = path.join(this.root, 'index.sqlite');
+    const indexHash = await hashFile(indexPath, this.signal);
 
     const manifest = {
       format: BUNDLE_FORMAT,
@@ -291,14 +326,18 @@ export class BundleWriter {
       producer: 'cursor-chat-transit',
       createdAt: new Date().toISOString(),
       source: this.source ?? undefined,
-      inventory: {
-        path: 'inventory.ndjson',
-        bytes: inventoryHash.bytes,
-        sha256: inventoryHash.sha256,
+      capabilities: {
+        required: ['sqlite-index-v1', 'content-addressed-blobs-v1'],
+        optional: [],
+      },
+      index: {
+        path: 'index.sqlite',
+        bytes: indexHash.bytes,
+        sha256: indexHash.sha256,
       },
       counts: {
         chats: this.ordinal,
-        files: files.length,
+        files: fileCount,
         contentBytes,
       },
       ...(summary === undefined ? {} : { summary }),
@@ -313,14 +352,16 @@ export class BundleWriter {
       throw new Error('Export manifest exceeds 1 MiB.');
     }
 
-    const packed = [
-      { diskPath: manifestPath, name: 'manifest.json' },
-      { diskPath: inventoryPath, name: 'inventory.ndjson' },
-      ...files,
-    ];
+    const packed = async function* (
+      root: string,
+    ): AsyncGenerator<{ diskPath: string; name: string }> {
+      yield { diskPath: manifestPath, name: 'manifest.json' };
+      yield { diskPath: indexPath, name: 'index.sqlite' };
+      yield* listFiles(root);
+    };
 
     try {
-      await packZip(this.destPath, packed, this.signal);
+      await packZip(this.destPath, packed(this.root), this.signal);
     } finally {
       await rm(this.root, { recursive: true, force: true });
     }
@@ -338,17 +379,10 @@ export class BundleWriter {
       this.resources?.finish(),
     ]);
 
+    await this.index.finish().catch(() => undefined);
+
     await rm(this.root, { recursive: true, force: true });
   }
-}
-
-/** Content-addressed path `blobs/xx/<sha256>.bin`. */
-function blobPath(
-  /** Directory that contains the extracted or staged archive. */
-  root: string,
-  sha256: string,
-): string {
-  return path.join(root, 'blobs', sha256.slice(0, 2), `${sha256}.bin`);
 }
 
 /** Write bounded JSON; only private staged composer metadata may be replaced. */
@@ -374,52 +408,37 @@ async function writeJson(
 }
 
 /** Relative paths of bundle files, except the manifest and inventory. */
-async function listFiles(
+async function* listFiles(
   /** Directory that contains the extracted or staged archive. */
   root: string,
-): Promise<
-  Array<{
-    /** Absolute path of the file. */
-    diskPath: string;
-    /** Path of that file inside the archive. */
-    name: string;
-  }>
-> {
+): AsyncGenerator<{
+  /** Absolute path of the file. */
+  diskPath: string;
+  /** Path of that file inside the archive. */
+  name: string;
+}> {
   const { readdir } = await import('node:fs/promises');
+  const directories = [root];
 
-  /** Absolute path of the file to pack. */
-  const out: Array<{
-    /** Absolute path of the file. */
-    diskPath: string;
-    /** Path of that file inside the archive. */
-    name: string;
-  }> = [];
-
-  /** Visit bundle files in sorted order. */
-  const walk = async (
-    /** Directory to list. */
-    dir: string,
-  ): Promise<void> => {
+  while (directories.length) {
+    const dir = directories.pop()!;
     const entries = await readdir(dir, { withFileTypes: true });
 
-    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? 1 : -1))) {
       const diskPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        await walk(diskPath);
+        directories.push(diskPath);
         continue;
       }
 
+      if (!entry.isFile()) continue;
       const name = path.relative(root, diskPath).split(path.sep).join('/');
 
-      if (name === 'manifest.json' || name === 'inventory.ndjson') continue;
-      out.push({ diskPath, name });
+      if (name === 'manifest.json' || name === 'index.sqlite') continue;
+      yield { diskPath, name };
     }
-  };
-
-  await walk(root);
-
-  return out;
+  }
 }
 
 /** Inventory kind for one bundle-relative path. */
@@ -444,5 +463,6 @@ export type ExportChatWriter = Pick<
   | 'writeBubble'
   | 'writeResource'
   | 'addBlob'
+  | 'writeHostSnapshot'
   | 'endChat'
 >;

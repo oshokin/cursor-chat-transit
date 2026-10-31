@@ -5,6 +5,34 @@ import type { ImportJournal, PendingImportChat } from './journal';
 import { journalPathFor } from './journal';
 import { TransferError } from './types';
 
+/** Current SQLite schema. Version zero is the pre-versioned receipt journal. */
+const JOURNAL_SCHEMA_VERSION = 2;
+
+/** External side-effect class recorded by the recovery ledger. */
+export type EffectKind = 'db' | 'file' | 'session';
+
+/** Durable lifecycle of an importer side effect. */
+export type EffectState =
+  | 'planned'
+  | 'prepared'
+  | 'applied'
+  | 'verified'
+  | 'committed'
+  | 'cleanup-pending';
+
+/** One durable intent and the latest observation of its destination. */
+export interface JournalEffect {
+  operationId: string;
+  effectId: string;
+  kind: EffectKind;
+  target: string;
+  desiredHash: string;
+  observedHash?: string;
+  state: EffectState;
+  detail?: string;
+  updatedAt: string;
+}
+
 /** Pending batch stored in the v4 journal database. */
 export interface PendingHead {
   operationId: string;
@@ -101,7 +129,20 @@ export class JournalStore {
     }
 
     try {
-      await session.exec(`
+      const rawVersion = (await session.exec('PRAGMA user_version;')).trim();
+      const version = Number(rawVersion || '0');
+
+      if (!Number.isSafeInteger(version) || version < 0) {
+        throw new Error('Import journal schema version is invalid.');
+      }
+
+      if (version > JOURNAL_SCHEMA_VERSION) {
+        throw new Error(
+          `Import journal schema ${version} is newer than supported schema ${JOURNAL_SCHEMA_VERSION}.`,
+        );
+      }
+
+      await session.exec(`BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS receipts (
   source_composer_id TEXT NOT NULL,
@@ -175,6 +216,30 @@ CREATE TABLE IF NOT EXISTS projection_events (
   outcome TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS effects (
+  operation_id TEXT NOT NULL,
+  effect_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('db','file','session')),
+  target TEXT NOT NULL,
+  desired_hash TEXT NOT NULL,
+  observed_hash TEXT,
+  state TEXT NOT NULL CHECK(state IN ('planned','prepared','applied','verified','committed','cleanup-pending')),
+  detail TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (operation_id, effect_id)
+);
+CREATE INDEX IF NOT EXISTS effects_operation_state
+  ON effects(operation_id, state);
+CREATE TABLE IF NOT EXISTS effect_events (
+  operation_id TEXT NOT NULL,
+  effect_id TEXT NOT NULL,
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  state TEXT NOT NULL,
+  observed_hash TEXT,
+  created_at TEXT NOT NULL
+);
+COMMIT;
 `);
 
       const pendingProjectionColumns = await session.exec(
@@ -182,10 +247,17 @@ CREATE TABLE IF NOT EXISTS projection_events (
       );
 
       if (pendingProjectionColumns.trim() === '0') {
-        await session.exec(
-          `ALTER TABLE pending_projection ADD COLUMN managed_hash TEXT NOT NULL DEFAULT '';`,
-        );
+        await session.exec(`BEGIN IMMEDIATE;
+ALTER TABLE pending_projection ADD COLUMN managed_hash TEXT NOT NULL DEFAULT '';
+COMMIT;`);
       }
+
+      // Zero and one are compatible receipt-journal layouts. Creating the
+      // ledger above and setting user_version is their complete v2 migration.
+      if (version < JOURNAL_SCHEMA_VERSION)
+        await session.exec(`BEGIN IMMEDIATE;
+PRAGMA user_version = ${JOURNAL_SCHEMA_VERSION};
+COMMIT;`);
 
       const existingHex = (
         await session.exec(
@@ -228,16 +300,27 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
   async receipts(): Promise<Receipt[]> {
     const rows: Receipt[] = [];
 
+    await this.forEachReceipt((row) => {
+      rows.push(row);
+    });
+
+    return rows;
+  }
+
+  /** Stream verified mappings without retaining the complete journal. */
+  async forEachReceipt(
+    onRow: (receipt: Receipt) => void | Promise<void>,
+  ): Promise<void> {
     await this.session.queryLines(
       `SELECT json_object('source_composer_id', source_composer_id, 'snapshot_hash', snapshot_hash, 'target_composer_id', target_composer_id) FROM receipts;`,
-      (line) => {
+      async (line) => {
         const row = JSON.parse(line) as {
           source_composer_id: string;
           snapshot_hash: string;
           target_composer_id: string;
         };
 
-        rows.push({
+        await onRow({
           targetKey: this.targetKey,
           sourceComposerId: row.source_composer_id,
           snapshotHash: row.snapshot_hash,
@@ -246,8 +329,6 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
         });
       },
     );
-
-    return rows;
   }
 
   /** The unfinished batch, if one exists. */
@@ -294,6 +375,18 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
   ): Promise<PendingChatRow[]> {
     const rows: PendingChatRow[] = [];
 
+    await this.forEachPendingChat(operationId, (row) => {
+      rows.push(row);
+    });
+
+    return rows;
+  }
+
+  /** Stream chat intents for one unfinished batch. */
+  async forEachPendingChat(
+    operationId: string,
+    onRow: (chat: PendingChatRow) => void | Promise<void>,
+  ): Promise<void> {
     await this.session.queryLines(
       `SELECT json_object(
          'source_composer_id', source_composer_id,
@@ -303,7 +396,7 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
          'bubble_count', bubble_count,
          'quality', quality
        ) FROM pending_chats WHERE operation_id = ${sqlText(operationId)};`,
-      (line) => {
+      async (line) => {
         const row = JSON.parse(line) as {
           source_composer_id: string;
           snapshot_hash: string;
@@ -314,7 +407,7 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
           quality: string;
         };
 
-        rows.push({
+        await onRow({
           sourceComposerId: row.source_composer_id,
           snapshotHash: row.snapshot_hash,
           targetComposerId: row.target_composer_id,
@@ -324,8 +417,6 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
         });
       },
     );
-
-    return rows;
   }
 
   /** Last durable destination projection for one source receipt. */
@@ -458,7 +549,9 @@ COMMIT;`);
 
   /** Replace any pending batch with a new head. */
   async beginPending(head: PendingHead): Promise<void> {
-    await this.session.exec(`
+    await this.session.exec(`BEGIN IMMEDIATE;
+DELETE FROM effects;
+DELETE FROM pending_resources;
 DELETE FROM pending_bubbles;
 DELETE FROM pending_chats;
 DELETE FROM pending;
@@ -466,7 +559,106 @@ INSERT INTO pending(operation_id, phase, backups_json) VALUES (
   ${sqlText(head.operationId)},
   ${sqlText(head.phase)},
   ${sqlText(head.backups ? JSON.stringify(head.backups) : '')}
-);`);
+);
+COMMIT;`);
+  }
+
+  /** Record an idempotent side-effect intent before the destination is touched. */
+  async planEffect(
+    effect: Omit<JournalEffect, 'state' | 'observedHash' | 'updatedAt'>,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    await this.session.exec(`BEGIN IMMEDIATE;
+INSERT INTO effects(
+  operation_id,effect_id,kind,target,desired_hash,state,detail,created_at,updated_at
+) VALUES (
+  ${sqlText(effect.operationId)},${sqlText(effect.effectId)},${sqlText(effect.kind)},
+  ${sqlText(effect.target)},${sqlText(effect.desiredHash)},'planned',
+  ${sqlText(effect.detail || '')},${sqlText(now)},${sqlText(now)}
+)
+ON CONFLICT(operation_id,effect_id) DO UPDATE SET
+  kind=excluded.kind,target=excluded.target,desired_hash=excluded.desired_hash,
+  detail=excluded.detail,updated_at=excluded.updated_at
+WHERE effects.kind=excluded.kind AND effects.target=excluded.target
+  AND effects.desired_hash=excluded.desired_hash;
+INSERT INTO effect_events(operation_id,effect_id,state,created_at)
+SELECT ${sqlText(effect.operationId)},${sqlText(effect.effectId)},'planned',${sqlText(now)}
+WHERE changes() > 0;
+COMMIT;`);
+
+    const matches = (
+      await this.session.exec(
+        `SELECT count(*) FROM effects WHERE operation_id=${sqlText(effect.operationId)}
+         AND effect_id=${sqlText(effect.effectId)} AND kind=${sqlText(effect.kind)}
+         AND target=${sqlText(effect.target)} AND desired_hash=${sqlText(effect.desiredHash)};`,
+      )
+    ).trim();
+
+    if (matches !== '1')
+      throw new Error(
+        'Effect id was reused for a different destination intent.',
+      );
+  }
+
+  /** Advance an effect and durably retain the hash observed at the destination. */
+  async setEffectState(
+    operationId: string,
+    effectId: string,
+    state: EffectState,
+    observedHash?: string,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    await this.session.exec(`BEGIN IMMEDIATE;
+INSERT INTO effect_events(operation_id,effect_id,state,observed_hash,created_at)
+SELECT operation_id,effect_id,${sqlText(state)},
+  ${observedHash === undefined ? 'NULL' : sqlText(observedHash)},${sqlText(now)}
+FROM effects
+WHERE operation_id=${sqlText(operationId)} AND effect_id=${sqlText(effectId)};
+UPDATE effects SET state=${sqlText(state)},
+  observed_hash=${observedHash === undefined ? 'observed_hash' : sqlText(observedHash)},
+  updated_at=${sqlText(now)}
+WHERE operation_id=${sqlText(operationId)} AND effect_id=${sqlText(effectId)};
+COMMIT;`);
+
+    const exists = (
+      await this.session.exec(
+        `SELECT count(*) FROM effects WHERE operation_id=${sqlText(operationId)}
+         AND effect_id=${sqlText(effectId)};`,
+      )
+    ).trim();
+
+    if (exists !== '1')
+      throw new Error('Cannot advance an unknown journal effect.');
+  }
+
+  /** Stream effects for reconciliation; callers decide from observed destination hashes. */
+  async forEachEffect(
+    operationId: string,
+    onRow: (effect: JournalEffect) => void | Promise<void>,
+  ): Promise<void> {
+    await this.session.queryLines(
+      `SELECT json_object(
+        'operationId',operation_id,'effectId',effect_id,'kind',kind,'target',target,
+        'desiredHash',desired_hash,'observedHash',observed_hash,'state',state,
+        'detail',detail,'updatedAt',updated_at
+      ) FROM effects WHERE operation_id=${sqlText(operationId)} ORDER BY effect_id;`,
+      async (line) => {
+        const effect = JSON.parse(line) as JournalEffect & {
+          observedHash: string | null;
+          detail: string | null;
+        };
+
+        await onRow({
+          ...effect,
+          ...(effect.observedHash === null
+            ? { observedHash: undefined }
+            : { observedHash: effect.observedHash }),
+          ...(effect.detail ? { detail: effect.detail } : {}),
+        });
+      },
+    );
   }
 
   /** Update the phase of the open batch. */
@@ -532,7 +724,8 @@ FROM pending_chats WHERE operation_id = ${sqlText(head.operationId)};
 DELETE FROM pending_resources;
 DELETE FROM pending_bubbles;
 DELETE FROM pending_chats;
-DELETE FROM pending;`);
+DELETE FROM pending;
+DELETE FROM effects;`);
   }
 
   /** Drop a pending batch that has no rows left in Cursor. */
@@ -541,7 +734,8 @@ DELETE FROM pending;`);
 DELETE FROM pending_resources;
 DELETE FROM pending_bubbles;
 DELETE FROM pending_chats;
-DELETE FROM pending;`);
+DELETE FROM pending;
+DELETE FROM effects;`);
   }
 
   /** Remember how many rewritten bubbles were recorded. */

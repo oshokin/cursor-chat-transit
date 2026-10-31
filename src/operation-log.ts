@@ -1,5 +1,10 @@
-import { logValue } from './log-format';
-import { formatLogLine } from './log-format';
+import {
+  formatLogLine,
+  LOG_FIELD_CHARS,
+  LOG_MESSAGE_CHARS,
+  logValue,
+  OPERATION_LOG_HEARTBEAT_MS,
+} from './log-format';
 import { durationField } from './duration';
 import type { TransferEvent } from './transfer-events';
 import { randomUUID } from 'node:crypto';
@@ -57,7 +62,7 @@ export function startOperationLog(
   function clip(
     message: string,
     /** Maximum length after whitespace is collapsed. */
-    max = 300,
+    max = LOG_MESSAGE_CHARS,
   ): string {
     return message.replace(/[\r\n\t]/g, ' ').slice(0, max);
   }
@@ -86,7 +91,7 @@ export function startOperationLog(
             : (key === 'elapsedMs' || key === 'timeoutMs') &&
                 typeof value === 'number'
               ? durationField(key, value)
-              : `${key}=${typeof value === 'string' ? logValue(clip(value, 4096)) : value}`,
+              : `${key}=${typeof value === 'string' ? logValue(clip(value, LOG_FIELD_CHARS)) : value}`,
         );
 
       line(
@@ -110,9 +115,11 @@ export function startOperationLog(
           ? `Chat ${metrics.chatIndex} of ${metrics.chatTotal}`
           : '',
         metrics.chatName
-          ? `chat=${logValue(clip(metrics.chatName, 4096))}`
+          ? `chat=${logValue(clip(metrics.chatName, LOG_FIELD_CHARS))}`
           : '',
-        metrics.file ? `file=${logValue(clip(metrics.file, 4096))}` : '',
+        metrics.file
+          ? `file=${logValue(clip(metrics.file, LOG_FIELD_CHARS))}`
+          : '',
         typeof processed === 'number' && typeof total === 'number'
           ? metrics.unit === 'bytes'
             ? `${processed} bytes (${humanBytes(processed)}) / ${total} bytes (${humanBytes(total)})`
@@ -137,7 +144,7 @@ export function startOperationLog(
       // Log transitions, completion and a heartbeat at most every five seconds.
       if (
         key === lastPhaseLog &&
-        now - lastPhaseTime < 5000 &&
+        now - lastPhaseTime < OPERATION_LOG_HEARTBEAT_MS &&
         processed !== total
       )
         return;
@@ -146,7 +153,7 @@ export function startOperationLog(
       if (
         key === lastPhaseLog &&
         processed === undefined &&
-        now - lastPhaseTime < 5000
+        now - lastPhaseTime < OPERATION_LOG_HEARTBEAT_MS
       )
         return;
       lastPhaseLog = key;
@@ -164,7 +171,7 @@ export function startOperationLog(
 
       line(
         'INFO',
-        `Selected archive file=${logValue(clip(name, 4096))}${size}`,
+        `Selected archive file=${logValue(clip(name, LOG_FIELD_CHARS))}${size}`,
       );
     },
     /** One informational fact, such as import counts. Not a warning. */

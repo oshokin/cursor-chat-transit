@@ -11,6 +11,9 @@ import { traceIO, transferEvent } from './transfer-events';
 import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
 
+/** Chats deep-checked within one stable database read view. */
+const STATISTICS_DEEP_CHECK_BATCH_ROWS = 32;
+
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
   TransferContext,
@@ -233,7 +236,11 @@ export async function runStatistics(
             if (job.deepCheck) {
               hide = true;
 
-              for (let start = 0; hide && start < headers.length; start += 32) {
+              for (
+                let start = 0;
+                hide && start < headers.length;
+                start += STATISTICS_DEEP_CHECK_BATCH_ROWS
+              ) {
                 signal.throwIfAborted();
 
                 const view = await openReadTransaction(
@@ -241,7 +248,10 @@ export async function runStatistics(
                 );
 
                 try {
-                  for (const header of headers.slice(start, start + 32)) {
+                  for (const header of headers.slice(
+                    start,
+                    start + STATISTICS_DEEP_CHECK_BATCH_ROWS,
+                  )) {
                     signal.throwIfAborted();
 
                     try {
