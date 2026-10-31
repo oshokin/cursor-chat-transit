@@ -1,6 +1,0 @@
-{
-  "npm.autoDetect": "off",
-  "js/ts.tsdk.path": "./node_modules/typescript/lib",
-  "js/ts.tsdk.promptToUseWorkspaceVersion": true,
-  "mirrord.promptUsingBinary": false
-}

@@ -80,7 +80,7 @@ The extension discovers the real local Cursor user-data directory unless you set
 
 Users install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=oshokin.cursor-chat-transit), the [Open VSX Registry](https://open-vsx.org/extension/oshokin/cursor-chat-transit), or a [GitHub Release](https://github.com/oshokin/cursor-chat-transit/releases) VSIX. The publisher id is `oshokin`.
 
-CI publishes the GitHub Release: a version tag, the VSIX, and a SHA-256 checksum. `scripts/publish-release.ts` does not publish to either extension registry. Updating those listings is a separate step.
+CI publishes the GitHub Release: a version tag, the VSIX, and a SHA-256 checksum. The same checked VSIX is then published to Open VSX with `HaaLeo/publish-vscode-extension` v2.1.0, which needs the repository secret `OPEN_VSX_TOKEN`, and to the Visual Studio Marketplace with `vsce publish --oidc` under the Trusted Publishing policy for `ci.yml`. A version already on a registry is left in place.
 
 This build writes archive format 5 and reads formats 5 and 4. `package.json` is `1.1.0`. The local tags are `v1.0.0` and `v1.0.1`. `scripts/acceptance-cursor.sh` records a real Cursor executable and a manual checklist. It does not open chat databases.
 

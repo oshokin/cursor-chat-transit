@@ -171,6 +171,7 @@ jobs:
     permissions:
       actions: read
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -194,6 +195,21 @@ jobs:
       - name: Verify package checksum
         working-directory: release-artifact
         run: sha256sum --check SHA256SUMS
+      - name: Select validated VSIX
+        id: vsix
+        run: |
+          file=$(find release-artifact -maxdepth 1 -name '*.vsix' -printf '%f\n')
+          test -n "$file"
+          echo "path=release-artifact/${file}" >> "$GITHUB_OUTPUT"
+      - name: Publish to Open VSX Registry
+        uses: HaaLeo/publish-vscode-extension@1b8df468b849f76a143b8c18bf0ffa2075398d12
+        with:
+          pat: ${{ secrets.OPEN_VSX_TOKEN }}
+          extensionFile: ${{ steps.vsix.outputs.path }}
+          dependencies: false
+          skipDuplicate: true
+      - name: Publish to Visual Studio Marketplace
+        run: npx @vscode/vsce publish --oidc --skip-duplicate --packagePath "${{ steps.vsix.outputs.path }}"
       - name: Publish the recorded version
         env:
           GH_TOKEN: ${{ github.token }}

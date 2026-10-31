@@ -245,7 +245,7 @@ File and record events identify the action, path, chat ID/title when available, 
 
 Settings are read from explicit user values. Repository settings cannot redirect local storage or enable partial recovery. Query deadlines and busy-handler waits are independent and are captured when an operation starts. There is no whole-transfer deadline. Diagnostic probes use their own short internal limits.
 
-Local release preparation updates version files and the changelog only when explicitly requested. GitHub validates the chosen commit, builds a VSIX, and publishes a GitHub Release with checksums after the release gates succeed. That workflow does not publish to the Visual Studio Marketplace or Open VSX. Those registries are separate install locations. See [Development](development.md).
+Local release preparation updates version files and the changelog only when explicitly requested. GitHub validates the chosen commit, builds a VSIX, and publishes a GitHub Release with checksums after the release gates succeed. The same VSIX is published to the Visual Studio Marketplace and Open VSX. See [Development](development.md).
 
 ## Scope and validation
 
