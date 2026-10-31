@@ -1180,6 +1180,51 @@ INSERT INTO workspace.ItemTable(key, value) VALUES ('composer.composerData', ran
 );
 
 test(
+  'multi-megabyte header metadata is updated without hex expansion',
+  { skip },
+  async (t) => {
+    const { session } = await writerFixture(t);
+    const padding = 'x'.repeat(3 * 1024 * 1024);
+
+    const value = {
+      padding,
+      allComposers: [
+        { composerId: A, name: 'Delete' },
+        { composerId: B, name: 'Keep' },
+      ],
+      selectedComposerIds: [A, B],
+    };
+
+    await session.exec(
+      `INSERT INTO ItemTable(key, value) VALUES ('composer.composerHeaders', ${sqlText(JSON.stringify(value))}); INSERT INTO selected VALUES (${sqlText(A)});`,
+    );
+
+    await deleteHeaderReferences(
+      session,
+      'main',
+      writerLayout(false),
+      new Set([A]),
+    );
+
+    let raw: Buffer | undefined;
+
+    await session.rows(
+      "SELECT CAST(value AS BLOB) FROM ItemTable WHERE key='composer.composerHeaders';",
+      [],
+      (row) => {
+        if (Buffer.isBuffer(row[0])) raw = row[0];
+      },
+    );
+
+    const stored = JSON.parse(raw!.toString('utf8')) as typeof value;
+
+    assert.equal(stored.padding.length, padding.length);
+    assert.deepEqual(stored.allComposers, [{ composerId: B, name: 'Keep' }]);
+    assert.deepEqual(stored.selectedComposerIds, [B]);
+  },
+);
+
+test(
   'message deletion removes only the exact composer row and its bubble range',
   { skip },
   async (t) => {

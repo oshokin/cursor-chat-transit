@@ -121,16 +121,13 @@ export async function deleteHeaderReferences(
   if (bytes > MAX_SQLITE_VALUE_BYTES)
     throw new Error('Header metadata exceeds the supported record limit.');
 
-  const hex = (
-    await session.exec(
-      `SELECT hex(value) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
-    )
-  ).trim();
+  const raw = await singleBlob(
+    session,
+    `SELECT CAST(value AS BLOB) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
+  );
 
-  if (hex) {
-    const value = JSON.parse(
-      Buffer.from(hex, 'hex').toString('utf8'),
-    ) as Record<string, unknown>;
+  if (raw) {
+    const value = JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
 
     if (!value || typeof value !== 'object' || Array.isArray(value))
       throw new Error('Unsupported header list; deletion rolled back.');
@@ -211,19 +208,17 @@ async function updateHeaderMembership(
   ids: ReadonlySet<string>,
 ): Promise<void> {
   for (const parent of parents) {
-    const hex = (
-      await session.exec(
-        `SELECT hex(value) FROM ${schema}.composerHeaders WHERE composerId=${sqlText(parent)};`,
-      )
-    ).trim();
+    const raw = await singleBlob(
+      session,
+      `SELECT CAST(value AS BLOB) FROM ${schema}.composerHeaders WHERE composerId=${sqlText(parent)};`,
+    );
 
-    if (!hex) continue;
-    const text = Buffer.from(hex, 'hex').toString('utf8');
+    if (!raw) continue;
 
-    if (Buffer.byteLength(text) > MAX_SQLITE_VALUE_BYTES)
+    if (raw.length > MAX_SQLITE_VALUE_BYTES)
       throw new Error('Header metadata exceeds the supported record limit.');
 
-    const value = JSON.parse(text) as Record<string, unknown>;
+    const value = JSON.parse(raw.toString('utf8')) as Record<string, unknown>;
 
     if (!value || typeof value !== 'object' || Array.isArray(value))
       throw new Error('Unsupported header list; deletion rolled back.');
@@ -257,13 +252,12 @@ async function itemText(
   if (bytes > MAX_SQLITE_VALUE_BYTES)
     throw new Error('Header metadata exceeds the supported record limit.');
 
-  const hex = (
-    await session.exec(
-      `SELECT hex(value) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
-    )
-  ).trim();
+  const raw = await singleBlob(
+    session,
+    `SELECT CAST(value AS BLOB) FROM ${schema}.ItemTable WHERE key=${sqlText(key)};`,
+  );
 
-  return hex ? Buffer.from(hex, 'hex').toString('utf8') : undefined;
+  return raw?.toString('utf8');
 }
 
 /** Parse a chat list. A non-object value rolls the deletion back. */
@@ -312,13 +306,35 @@ async function kvText(
   if (bytes > MAX_SQLITE_VALUE_BYTES)
     throw new Error('Header metadata exceeds the supported record limit.');
 
-  const hex = (
-    await session.exec(
-      `SELECT hex(value) FROM main.cursorDiskKV WHERE key=${sqlText(key)};`,
-    )
-  ).trim();
+  const raw = await singleBlob(
+    session,
+    `SELECT CAST(value AS BLOB) FROM main.cursorDiskKV WHERE key=${sqlText(key)};`,
+  );
 
-  return hex ? Buffer.from(hex, 'hex').toString('utf8') : undefined;
+  return raw?.toString('utf8');
+}
+
+/** Read one bounded SQLite value without hex expansion or result-set collection. */
+async function singleBlob(
+  session: SqliteSession,
+  sql: string,
+): Promise<Buffer | undefined> {
+  let found: Buffer | undefined;
+  let rows = 0;
+
+  await session.rows(sql, [], (row) => {
+    rows += 1;
+    if (rows > 1 || row.length !== 1)
+      throw new Error('Expected one SQLite metadata value.');
+    const value = row[0];
+
+    if (value === null) return;
+    found = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
+    if (found.length > MAX_SQLITE_VALUE_BYTES)
+      throw new Error('Header metadata exceeds the supported record limit.');
+  });
+
+  return found;
 }
 
 /**
