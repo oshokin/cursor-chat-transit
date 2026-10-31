@@ -373,7 +373,7 @@ INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + stored + ':kept')},${sql
 );
 
 test(
-  'deep checks reject stale state ids, orphan nested rows, and missing family composers',
+  'deep checks accept standalone nested rows and reject stale state and missing family composers',
   { skip },
   async (t) => {
     const { ctx, workspace } = await fixture(t);
@@ -432,7 +432,7 @@ ${bubble(family, familyRoot)}`,
         chats: [
           { composerId: healthy, name: 'Healthy v18' },
           { composerId: stale, name: 'Stale v18' },
-          { composerId: orphan, name: 'Orphan nested v18' },
+          { composerId: orphan, name: 'State-backed nested v18' },
           { composerId: family, name: 'Missing family v18' },
         ],
       },
@@ -446,18 +446,13 @@ ${bubble(family, familyRoot)}`,
 
     assert.deepEqual(
       rows.map((row) => row.health),
-      ['ready', 'incomplete', 'incomplete', 'incomplete'],
+      ['ready', 'incomplete', 'unknown', 'incomplete'],
     );
 
     assert.equal(
       notes.some((note) =>
         note.includes('does not reference its current composer'),
       ),
-      true,
-    );
-
-    assert.equal(
-      notes.some((note) => note.includes('has no stored root')),
       true,
     );
 

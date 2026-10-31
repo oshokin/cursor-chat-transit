@@ -224,17 +224,6 @@ async function inspectCurrentStructure(
   header: ComposerHeader,
   stateBacked: boolean,
 ): Promise<string | undefined> {
-  const roots = new Set(
-    [...available].filter((bubbleId) => !bubbleId.includes('/')),
-  );
-
-  for (const bubbleId of available) {
-    const slash = bubbleId.indexOf('/');
-
-    if (slash >= 0 && !roots.has(bubbleId.slice(0, slash)))
-      return `nested message ${bubbleId} has no stored root`;
-  }
-
   const requiredComposers = familyComposerIds(fields, header);
   const version = fields._v;
   const state = fields.conversationState;
@@ -256,9 +245,9 @@ async function inspectCurrentStructure(
     if (!stateIds.has(composerId))
       return 'conversation state does not reference its current composer';
 
-    for (const root of roots)
-      if (!stateIds.has(root))
-        return `conversation state does not reference stored root ${root}`;
+    for (const bubbleId of available)
+      if (!bubbleId.includes('/') && !stateIds.has(bubbleId))
+        return `conversation state does not reference stored root ${bubbleId}`;
   }
 
   requiredComposers.delete(composerId);
