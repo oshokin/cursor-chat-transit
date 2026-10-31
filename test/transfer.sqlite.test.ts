@@ -12,6 +12,8 @@ import type {
   WorkspaceEntry,
   WorkspaceIdentity,
 } from '../src/types';
+import { openBundle } from '../src/bundle-reader';
+import { sqlText } from '../src/core';
 
 /** Composer transferred in these schema tests. */
 const A = '11111111-1111-4111-8111-111111111111';
@@ -125,6 +127,119 @@ ${opts.globalExtra || ''}`,
 
   return { dir, ctx, workspace, gl, ws };
 }
+
+test(
+  'combined export writes selected chats from same-profile workspace scopes once',
+  { skip },
+  async (t) => {
+    const { dir, ctx, workspace, gl } = await fixture(t);
+
+    const second: WorkspaceEntry = {
+      ...workspace,
+      storageId: 'second',
+      key: 'second',
+      workspaceDbPath: path.join(dir, 'workspace-second.vscdb'),
+      identity: {
+        ...identity,
+        uri: { ...identity.uri, path: '/repo-two' },
+      },
+    };
+
+    const secondWs = { ...ctx, database: second.workspaceDbPath };
+    const B = '22222222-2222-4222-8222-222222222222';
+
+    const firstHeader = {
+      ...header,
+      workspaceIdentifier: { id: workspace.storageId, uri: identity.uri },
+    };
+
+    const secondHeader = {
+      composerId: B,
+      name: 'Second',
+      workspaceIdentifier: {
+        id: second.storageId,
+        uri: second.identity!.uri,
+      },
+    };
+
+    await sql.execSqlScript({
+      ...secondWs,
+      sql: 'PRAGMA journal_mode=WAL; CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+    });
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE ItemTable SET value=${sqlText(
+        JSON.stringify({ allComposers: [firstHeader, secondHeader] }),
+      )} WHERE key='composer.composerHeaders';
+INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${A}`)},${sqlText(
+        JSON.stringify({ composerId: A, conversation: [] }),
+      )});
+INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${B}`)},${sqlText(
+        JSON.stringify({ composerId: B, conversation: [] }),
+      )});`,
+    });
+
+    const file = path.join(dir, 'combined.cursor-chat.zip');
+
+    const summary = await transfer.exportManyToFile(
+      ctx,
+      [
+        { workspace, selectedIds: [A] },
+        { workspace: second, selectedIds: [B] },
+      ],
+      file,
+    );
+
+    assert.equal('skipped' in summary, false);
+    if ('skipped' in summary) return;
+    assert.equal(summary.selected, 2);
+    assert.equal(summary.exported, 2);
+
+    const bundle = await openBundle(file);
+
+    try {
+      assert.equal(bundle.manifest.formatVersion, 5);
+      assert.equal(bundle.manifest.counts.chats, 2);
+
+      assert.deepEqual(bundle.manifest.source, {
+        schema: 'multi-workspace',
+        workspaceCount: 2,
+      });
+    } finally {
+      await bundle.close();
+    }
+  },
+);
+
+test(
+  'combined export rejects mixed Cursor profiles before creating an archive',
+  { skip },
+  async (t) => {
+    const { dir, ctx, workspace } = await fixture(t);
+    const file = path.join(dir, 'mixed.cursor-chat.zip');
+
+    await assert.rejects(
+      transfer.exportManyToFile(
+        ctx,
+        [
+          { workspace },
+          {
+            workspace: {
+              ...workspace,
+              storageId: 'foreign',
+              globalDbPath: path.join(dir, 'foreign-global.vscdb'),
+            },
+          },
+        ],
+        file,
+      ),
+      /different Cursor profiles/,
+    );
+
+    await assert.rejects(fs.stat(file));
+  },
+);
 
 test(
   'unsupported workspace constraint is rejected before global writes',

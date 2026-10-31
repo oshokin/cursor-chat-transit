@@ -6,7 +6,10 @@ import { applyBodyFamily, exportFamilyIds } from './chat-family';
 import { selectChats, sqlText } from './core';
 import { execSql } from './sqlite';
 import * as db from './db';
+import { matchesWorkspaceStorage } from './db-headers';
 import { exportBundle } from './export-bundle';
+import { writeSelectedChats, type ExportAccumulator } from './export-bundle';
+import { BundleWriter } from './bundle-writer';
 import { connOf, inspectPair } from './transfer-context';
 import { openReadTransaction } from './read-transaction';
 import type {
@@ -16,6 +19,7 @@ import type {
   WorkspaceEntry,
 } from './types';
 import { SQLITE_PARAMETER_BATCH_ROWS } from './sqlite-protocol';
+import type { ExportSource } from './transfer-process';
 
 /** List composer headers for a workspace without loading bubble bodies. */
 export async function listWorkspaceChats(
@@ -79,7 +83,7 @@ export async function listWorkspaceChats(
 }
 
 /** Copy family links that live only on composer bodies. Header links win when both exist. */
-async function mergeBodyFamily(
+export async function mergeBodyFamily(
   conn: import('./types').SqliteConn,
   headers: ComposerHeader[],
 ): Promise<ComposerHeader[]> {
@@ -147,6 +151,233 @@ async function mergeBodyFamily(
   return headers.map((header) =>
     applyBodyFamily(header, links.get(header.composerId) || {}),
   );
+}
+
+/** Write one archive from checked scopes in a single Cursor profile. */
+export async function exportManyToFile(
+  ctx: TransferContext,
+  sources: readonly ExportSource[],
+  destPath: string,
+): Promise<
+  { skipped: true; reason: string } | NonNullable<ExportObject['summary']>
+> {
+  if (!sources.length) return { skipped: true, reason: 'empty-selection' };
+
+  const normalizeDatabase = (database: string) => {
+    const resolved = path.resolve(database);
+
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+
+  const globalPath = normalizeDatabase(sources[0].workspace.globalDbPath);
+
+  if (
+    sources.some(
+      (source) =>
+        normalizeDatabase(source.workspace.globalDbPath) !== globalPath,
+    )
+  ) {
+    throw new Error(
+      'Selected workspaces belong to different Cursor profiles and cannot share one export.',
+    );
+  }
+
+  const global = await openReadTransaction(
+    connOf(ctx, sources[0].workspace.globalDbPath, true),
+  );
+
+  const groups: Array<{
+    workspace: WorkspaceEntry;
+    selected: ComposerHeader[];
+  }> = [];
+
+  const claimed = new Map<
+    string,
+    { workspace: WorkspaceEntry; header: ComposerHeader; explicit: boolean }
+  >();
+
+  const requested = new Set<string>();
+  const unresolved = new Set<string>();
+
+  try {
+    for (const source of sources) {
+      ctx.signal?.throwIfAborted();
+
+      const local = await openReadTransaction(
+        connOf(ctx, source.workspace.workspaceDbPath, true),
+      );
+
+      try {
+        const listed = await listWorkspaceChats(ctx, source.workspace, {
+          connections: { connGl: global.conn, connWs: local.conn },
+        });
+
+        const family = exportFamilyIds(listed.allComposers, source.selectedIds);
+        const ids = new Set(family.ids);
+
+        const wanted =
+          source.selectedIds ??
+          listed.allComposers.map((header) => header.composerId);
+
+        for (const id of wanted) {
+          requested.add(id);
+          if (!ids.has(id)) unresolved.add(id);
+        }
+
+        for (const header of selectChats(listed.allComposers, family.ids)) {
+          const existing = claimed.get(header.composerId);
+          const explicitId = header.workspaceIdentifier?.id;
+          const explicit = explicitId === source.workspace.storageId;
+
+          if (
+            typeof explicitId === 'string' &&
+            explicitId.length > 0 &&
+            !explicit
+          ) {
+            throw new Error(
+              `Chat ${header.composerId} belongs to another workspace storage.`,
+            );
+          }
+
+          if (
+            header.workspaceIdentifier &&
+            !matchesWorkspaceStorage(
+              header,
+              source.workspace.storageId,
+              source.workspace.identity,
+            )
+          ) {
+            throw new Error(
+              `Chat ${header.composerId} has an ambiguous workspace binding.`,
+            );
+          }
+
+          if (!existing) {
+            claimed.set(header.composerId, {
+              workspace: source.workspace,
+              header,
+              explicit,
+            });
+          } else if (explicit && !existing.explicit) {
+            claimed.set(header.composerId, {
+              workspace: source.workspace,
+              header,
+              explicit,
+            });
+          } else if (
+            explicit &&
+            existing.explicit &&
+            existing.workspace.storageId !== source.workspace.storageId
+          ) {
+            throw new Error(
+              `Chat ${header.composerId} has conflicting explicit workspace bindings.`,
+            );
+          } else if (
+            !explicit &&
+            !existing.explicit &&
+            existing.workspace.storageId !== source.workspace.storageId
+          ) {
+            throw new Error(
+              `Chat ${header.composerId} has ambiguous workspace ownership.`,
+            );
+          }
+        }
+      } finally {
+        await local.close();
+      }
+    }
+
+    if (!claimed.size) {
+      await global.close();
+
+      return {
+        skipped: true,
+        reason: unresolved.size ? 'unresolved-family' : 'empty-selection',
+      };
+    }
+
+    for (const source of sources) {
+      const selected = [...claimed.values()]
+        .filter(
+          (entry) =>
+            entry.workspace.storageId === source.workspace.storageId &&
+            entry.workspace.storageRoot === source.workspace.storageRoot,
+        )
+        .map((entry) => entry.header);
+
+      if (selected.length)
+        groups.push({ workspace: source.workspace, selected });
+    }
+
+    const writer = await BundleWriter.open(destPath, {
+      signal: ctx.signal,
+      source: {
+        schema: 'multi-workspace',
+        workspaceCount: groups.length,
+      },
+      maxJsonProperties: ctx.maxJsonProperties,
+    });
+
+    const tmp = await operationTempDir('cct-export-', ctx.temporaryDirectory);
+
+    const accumulator: ExportAccumulator = {
+      issues: [],
+      incomplete: [...unresolved],
+      bubbles: 0,
+      exported: 0,
+      recoveryCandidates: 0,
+    };
+
+    const total = claimed.size;
+    let offset = 0;
+
+    try {
+      for (const group of groups) {
+        await writeSelectedChats({
+          ctx,
+          workspace: group.workspace,
+          conn: global.conn,
+          selected: group.selected,
+          writer,
+          tmp,
+          accumulator,
+          chatOffset: offset,
+          chatTotal: total,
+        });
+
+        offset += group.selected.length;
+      }
+
+      await global.close();
+
+      const summary: NonNullable<ExportObject['summary']> = {
+        complete:
+          accumulator.incomplete.length === 0 &&
+          accumulator.issues.length === 0,
+        incomplete: accumulator.incomplete,
+        selected: total,
+        exported: accumulator.exported,
+        issues: accumulator.issues,
+      };
+
+      ctx.onPhase?.('write', {
+        chats: accumulator.exported,
+        bubbles: accumulator.bubbles,
+      });
+
+      await writer.finish(summary);
+
+      return summary;
+    } catch (error) {
+      await writer.abort();
+
+      throw error;
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  } finally {
+    await global.close().catch(() => undefined);
+  }
 }
 
 /** Build an export object for a workspace; missing bodies are listed as incomplete. */

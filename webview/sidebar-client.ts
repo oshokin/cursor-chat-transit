@@ -127,7 +127,7 @@ window.addEventListener('message', (event: MessageEvent<unknown>) => {
     const action = button.dataset.action;
 
     button.disabled =
-      (busy && ['export', 'import', 'chooseWorkspace'].includes(action!)) ||
+      (busy && action === 'chooseWorkspace') ||
       (action === 'export' && s.sourceAvailable !== true);
 
     if (action === 'recoverLock') {

@@ -11,12 +11,20 @@ import type {
 } from './types';
 import type { CatalogueJob, CatalogueUpdate } from './workspace-catalogue';
 
+/** One workspace scope in a combined same-profile export. */
+export interface ExportSource {
+  /** Physical workspace whose catalogue/resources are used. */
+  workspace: WorkspaceEntry;
+  /** Selected chat ids. Omit to export every chat resolved for this workspace. */
+  selectedIds?: string[];
+}
+
 /** Export or import request sent to the transfer process. */
 export interface TransferJob {
   /** Preserve known preview fragments and labelled message gaps during export. */
   recoverText?: boolean;
   /** Which operation to run. */
-  kind: 'export' | 'import' | 'list-chats';
+  kind: 'export' | 'export-many' | 'import' | 'list-chats';
   /** Per-process sqlite timeout. */
   timeoutMs?: number;
   /** SQLite busy timeout. */
@@ -37,6 +45,8 @@ export interface TransferJob {
   filePath: string;
   /** Export selection. Omit to export every listed chat. */
   selectedIds?: string[];
+  /** Same-profile workspace scopes for one combined export archive. */
+  sources?: ExportSource[];
   /** Assess source viability while preparing a recovery archive. */
   assessRecovery?: boolean;
   /** Import recovery switch. */

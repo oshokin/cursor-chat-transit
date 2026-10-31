@@ -248,6 +248,33 @@
         "icon": "$(graph)"
       },
       {
+        "command": "cursorChatTransit.manageExportItem",
+        "title": "Export chats…",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/export-light.svg",
+          "dark": "resources/icons/export-dark.svg"
+        }
+      },
+      {
+        "command": "cursorChatTransit.manageExportSelected",
+        "title": "Export selected…",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/export-light.svg",
+          "dark": "resources/icons/export-dark.svg"
+        }
+      },
+      {
+        "command": "cursorChatTransit.manageImportWorkspace",
+        "title": "Import chats into this workspace…",
+        "category": "Cursor Chat Transit",
+        "icon": {
+          "light": "resources/icons/import-light.svg",
+          "dark": "resources/icons/import-dark.svg"
+        }
+      },
+      {
         "command": "cursorChatTransit.manageDelete",
         "title": "Delete selected\u2026",
         "category": "Cursor Chat Transit",
@@ -325,9 +352,14 @@
           "group": "navigation@5"
         },
         {
-          "command": "cursorChatTransit.manageDelete",
+          "command": "cursorChatTransit.manageExportSelected",
           "when": "view == cursorChatTransit.manage && cursorChatTransit.manageHasCheckedItems",
           "group": "navigation@6"
+        },
+        {
+          "command": "cursorChatTransit.manageDelete",
+          "when": "view == cursorChatTransit.manage && cursorChatTransit.manageHasCheckedItems",
+          "group": "navigation@7"
         }
       ],
       "cursorChatTransit.manageSortWorkspaces": [
@@ -362,6 +394,21 @@
           "command": "cursorChatTransit.manageCheckSelected",
           "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && cursorChatTransit.manageHasCheckedItems",
           "group": "inline@1"
+        },
+        {
+          "command": "cursorChatTransit.manageImportWorkspace",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|CurrentWorkspace)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "cursorChatTransit.manageExportItem",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && !cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@2"
+        },
+        {
+          "command": "cursorChatTransit.manageExportSelected",
+          "when": "view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && cursorChatTransit.manageHasCheckedItems",
+          "group": "inline@2"
         },
         {
           "command": "cursorChatTransit.manageDelete",
@@ -434,6 +481,18 @@
         },
         {
           "command": "cursorChatTransit.manageCheckSelected",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageExportItem",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageExportSelected",
+          "when": "false"
+        },
+        {
+          "command": "cursorChatTransit.manageImportWorkspace",
           "when": "false"
         },
         {

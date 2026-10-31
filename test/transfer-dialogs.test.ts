@@ -34,6 +34,10 @@ const host = {
   failureCode: '',
   /** Ordered dialog and transfer stages observed by the test. */
   events: [] as string[],
+  /** Number of host inventory scans performed by the command. */
+  hostScans: 0,
+  /** Number of inventory scans completed when the save dialog opened. */
+  hostScansAtSave: 0,
   /** Sidebar snapshots captured on each refresh. */
   states: [] as SidebarState[],
   /** How many times the stub export path ran. */
@@ -90,6 +94,7 @@ const fakeVscode = {
     },
     /** Return a temporary save path unless the test cancels the dialog. */
     async showSaveDialog() {
+      host.hostScansAtSave = host.hostScans;
       waiting('save', 'Choose where to save');
 
       return host.cancel === 'save'
@@ -150,6 +155,8 @@ const fakeVscode = {
 const workspaces = {
   /** Return the fixture workspace without scanning disk. */
   async hostState() {
+    host.hostScans++;
+
     return {
       sqlite: {},
       userDir: '/fixture',
@@ -180,7 +187,12 @@ const transfer = {
   /** Count an export and optionally throw the requested failure. */
   async exportToFile() {
     assert.equal(state.runtime.uiState.statusTitle, 'Exporting chats…');
-    assert.equal(state.runtime.uiState.statusDetail, 'Reading selected chats.');
+
+    assert.match(
+      state.runtime.uiState.statusDetail,
+      /^Reading selected (chats|workspaces)\.$/,
+    );
+
     host.exports += 1;
     failIfRequested();
 
@@ -294,7 +306,11 @@ loader._load = function (id, parent, isMain) {
         ) {
           if (job.kind === 'list-chats') return transfer.listWorkspaceChats();
 
-          if (job.kind === 'export' || job.kind === 'import') {
+          if (
+            job.kind === 'export' ||
+            job.kind === 'export-many' ||
+            job.kind === 'import'
+          ) {
             host.transferredId =
               (
                 job as {
@@ -304,7 +320,8 @@ loader._load = function (id, parent, isMain) {
               ).workspace?.storageId || '';
           }
 
-          if (job.kind === 'export') return transfer.exportToFile();
+          if (job.kind === 'export' || job.kind === 'export-many')
+            return transfer.exportToFile();
 
           if (host.noRecovery) {
             assert.equal(
@@ -364,6 +381,8 @@ beforeEach(() => {
     exportComplete: true,
     failureCode: '',
     events: [],
+    hostScans: 0,
+    hostScansAtSave: 0,
     states: [],
     exports: 0,
     imports: 0,
@@ -427,6 +446,27 @@ async function run(
     assert.equal(state.runtime.uiState.canCancel, false);
     assert.equal(state.runtime.uiState.progress, undefined);
     assert.deepEqual(await fs.readdir(dir), []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** Temporary extension context for a direct command invocation. */
+async function withContext(
+  runCommand: (context: vscode.ExtensionContext) => Promise<void>,
+): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'transit-dialogs-'));
+
+  const context = {
+    globalStorageUri: { fsPath: dir },
+    globalState: {
+      get() {},
+      async update() {},
+    },
+  } as unknown as vscode.ExtensionContext;
+
+  try {
+    await runCommand(context);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -661,12 +701,61 @@ test('import into the expected storage does not ask, and other storage asks once
   assert.equal(host.transferredId, 'newer');
 });
 
+test('explicit Manage destination bypasses the workspace picker and reaches the same import worker', async () => {
+  const { expected } = duplicatePair();
+
+  host.entries = [expected];
+  state.runtime.sourceWorkspace = undefined;
+
+  await withContext((context) =>
+    state.withLock(context, () =>
+      doImport({
+        context,
+        operations,
+        destination: expected as never,
+      }),
+    ),
+  );
+
+  assert.equal(host.events.includes('workspace'), false);
+  assert.equal(host.events.filter((event) => event === 'open').length, 1);
+  assert.equal(host.imports, 1);
+  assert.equal(host.transferredId, expected.storageId);
+});
+
 test('whole-workspace export opens Save directly without a mode or chat picker', async () => {
   await run('export', true);
   assert.equal(host.exports, 1);
   assert.equal(host.events.includes('mode'), false);
   assert.equal(host.events.includes('chats'), false);
   assert.equal(host.events.includes('save'), true);
+});
+
+test('Manage selection creates one save dialog and one combined export job', async () => {
+  host.entries = [workspace, { ...workspace, storageId: 'second' }];
+
+  await withContext((context) =>
+    state.withLock(context, () =>
+      doExport({
+        context,
+        operations,
+        sources: [
+          { workspace: workspace as never, selectedIds: ['one'] },
+          {
+            workspace: { ...workspace, storageId: 'second' } as never,
+            selectedIds: ['two'],
+          },
+        ],
+      }),
+    ),
+  );
+
+  assert.equal(host.events.filter((event) => event === 'save').length, 1);
+  assert.equal(host.hostScansAtSave, 0);
+  assert.equal(host.hostScans, 1);
+  assert.equal(host.events.includes('mode'), false);
+  assert.equal(host.events.includes('chats'), false);
+  assert.equal(host.exports, 1);
 });
 
 test(

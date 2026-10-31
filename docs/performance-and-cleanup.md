@@ -1,6 +1,8 @@
 # Performance review and cleanup design
 
-This review compares the supplied `cursor-chat-transit-20261002-120124.zip` with the accompanying changes. It does not claim that every extension operation is now maximally optimized.
+This page records a review of `cursor-chat-transit-20261002-120124.zip` and the cleanup that followed it. The measurements below are from that review. They are not a current benchmark of archive format 5.
+
+The current transfer path writes format 5, reads formats 5 and 4, and uses bundled better-sqlite3. A committed agent-host session is copied as a validated snapshot. There is still no persistent payload cache and no full-database copy. The live contract is in [Architecture](architecture.md). The notes below explain why the October 2026 cleanup removed work instead of adding concurrency. They do not claim that every operation is maximally optimized.
 
 ## Evidence from the supplied log
 
@@ -21,7 +23,7 @@ No OrderManager workspace URI appears in this fragment. The exact storage IDs in
 7. **Physical workspace binding.** Global headers with an explicit storage ID belong to that storage entry. A matching project URI cannot attach them to every older/newer storage directory at that path. URI-only headers remain a fallback, and explicit local lists remain visible. The separate import conflict rules are unchanged.
 8. **Unambiguous Current label.** Current window is the physical database this window has open. A matching project URI alone does not mark a row current, even when only one storage has that URI. Never merge databases or mark several generations as current based only on their path.
 
-The original cleanup introduced no new settings or archive format. The subsequent native SQLite transition adds the pinned better-sqlite3 dependency, bundled for offline use; it preserves journal mode, archive format and the absence of a persistent payload cache or full-database copy.
+That October cleanup introduced no new settings and did not change the archive format then in use. Later work replaced the system SQLite dependency with bundled better-sqlite3 and moved new archives to format 5. Journal mode is still left unchanged. There is still no persistent payload cache and no full-database copy.
 
 ## Validation
 
@@ -29,7 +31,7 @@ The complete package gate passed: compilation, type checks, ESLint, Prettier, an
 
 ## Measurements
 
-Node.js 24.21.0 and the same local SQLite executable were used for both versions. The statistics fixture has four chats with 2,048 shared, roughly 2 KiB dependencies each. Each chat has one indexed message. Both versions produce the same visibility/eligibility decisions.
+Node.js 24.21.0 and the same local `sqlite3` CLI were used for both versions in that review. The statistics fixture has four chats with 2,048 shared, roughly 2 KiB dependencies each. Each chat has one indexed message. Both versions produce the same visibility/eligibility decisions.
 
 | Operation              | Baseline median | Updated median | Observations                                           |
 | ---------------------- | --------------: | -------------: | ------------------------------------------------------ |

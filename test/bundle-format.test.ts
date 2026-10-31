@@ -67,6 +67,35 @@ test('v5 round trip has an immutable index and bounded chat parts', async (t) =>
   }
 });
 
+test('v5 records bounded aggregate provenance for a combined workspace export', async (t) => {
+  const root = await fixture(t);
+  const file = path.join(root, 'combined.zip');
+
+  const writer = await BundleWriter.open(file, {
+    source: { schema: 'multi-workspace', workspaceCount: 2 },
+  });
+
+  await writer.beginChat({ composerId: 'combined-chat', name: 'Fixture' });
+  await writer.writeComposer({ composerId: 'combined-chat' }, 'empty');
+  await writer.endChat();
+  await writer.finish();
+
+  const bundle = await openBundle(file);
+
+  try {
+    assert.equal(bundle.manifest.formatVersion, 5);
+
+    assert.deepEqual(bundle.manifest.source, {
+      schema: 'multi-workspace',
+      workspaceCount: 2,
+    });
+
+    assert.equal(JSON.stringify(bundle.manifest.source).includes(root), false);
+  } finally {
+    await bundle.close();
+  }
+});
+
 test('ZIP APIs accept async sources and await sequential visitors', async (t) => {
   const root = await fixture(t);
   const source = path.join(root, 'source');

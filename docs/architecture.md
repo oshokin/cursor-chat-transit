@@ -6,20 +6,23 @@ For setup, validation, packaging, and releases, see [Development](development.md
 
 ## Components
 
-| Area             | Modules                                                                           | Responsibility                                                                 |
-| ---------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Host integration | `extension*.ts`, `quit-cursor.ts`                                                 | Commands, native dialogs, settings, and application actions                    |
-| Sidebar          | `sidebar-provider.ts`, `webview/`                                                 | Themed transfer status and a restricted action interface                       |
-| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                           | Stable ordering, labels, identity, and disambiguation                          |
-| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`                | Read-only analysis, native picker lifecycle, and operation logging             |
-| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                       | Isolated work, incremental IPC events, and cancellation                        |
-| Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts` | Header resolution, consistent database reads, and archive creation             |
-| Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                     | Validation, preparation, bounded writes, and interrupted-import reconciliation |
-| Archive          | `bundle-*.ts`, `ndjson-io.ts`                                                     | Format validation, bounded records, indexes, and ZIP I/O                       |
-| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                        | Bundled native SQLite, supervised queries, read views and schema checks        |
-| Resources        | `dependencies.ts`, `resource-*.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`   | Reference discovery and byte-preserving resource transfer                      |
-| Receipts         | `journal*.ts`, `import-policy.ts`, `import-reconcile.ts`                          | Snapshot identity, pending work, and repeat-import decisions                   |
-| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`    | Structured facts, readable logs, and measured progress                         |
+| Area             | Modules                                                                                            | Responsibility                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Host integration | `extension*.ts`, `quit-cursor.ts`                                                                  | Commands, native dialogs, settings, and application actions                          |
+| Sidebar          | `sidebar-provider.ts`, `webview/`, `resources/sidebar.html`                                        | Themed transfer status and a restricted action interface                             |
+| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                                            | Stable ordering, labels, identity, and disambiguation                                |
+| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`                                 | Read-only analysis, native picker lifecycle, and operation logging                   |
+| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                                        | Isolated work, incremental IPC events, and cancellation                              |
+| Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts`                  | Header resolution, consistent database reads, and archive creation                   |
+| Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                                      | Validation, preparation, bounded writes, and interrupted-import reconciliation       |
+| Archive          | `bundle-*.ts`, `blob-store.ts`, `ndjson-io.ts`                                                     | Format 5 index and content-addressed payloads; format 4 NDJSON remains readable      |
+| Host sessions    | `host-snapshots.ts`                                                                                | WAL snapshot and exact restore of a committed agent-host session                     |
+| Renderer keys    | `chat-kv-registry.ts`                                                                              | Classify and remap portable per-chat KV families                                     |
+| Artifacts        | `artifact-source.ts`, `artifact-support.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`           | Stable file reads and the supported, degraded, and unsupported artifact boundary     |
+| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                                         | Bundled native SQLite, supervised queries, read views, and schema checks             |
+| Resources        | `dependencies.ts`, `resource-*.ts`, `blob-graph.ts`                                                | Reference discovery and byte-preserving resource transfer                            |
+| Receipts         | `journal.ts`, `journal-db.ts`, `import-policy.ts`, `import-reconcile.ts`                           | Snapshot identity (`cct-snapshot-v2`), side effects, and repeat-import decisions     |
+| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`, `diagnostics-*.ts` | Structured facts, readable logs, measured progress, and a copyable diagnostic report |
 
 Sources compile from `src/` to `out/`. The sidebar client compiles from `webview/` to `resources/sidebar-client.js`. Small object-based helpers support fixtures; they do not provide an alternative monolithic JSON file-import path.
 
@@ -27,16 +30,18 @@ Sources compile from `src/` to `out/`. The sidebar client compiles from `webview
 
 A storage entry pairs one workspace database with the global database from the same local Cursor profile:
 
-| Object                            | Location or representation                                  |
-| --------------------------------- | ----------------------------------------------------------- |
-| Global database                   | `User/globalStorage/state.vscdb`                            |
-| Workspace database                | `User/workspaceStorage/<storageId>/state.vscdb`             |
-| Workspace identity                | `User/workspaceStorage/<storageId>/workspace.json`          |
-| Chat images                       | Workspace storage's `images/` directory                     |
-| Plans                             | Configured plans directory, defaulting to `~/.cursor/plans` |
-| Canvases                          | Workspace-associated Cursor project storage                 |
-| Transfer archive                  | User-selected `*.cursor-chat.zip`                           |
-| Receipts and pending import state | Extension-owned local storage                               |
+| Object                            | Location or representation                                                                                                             |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Global database                   | `User/globalStorage/state.vscdb`                                                                                                       |
+| Workspace database                | `User/workspaceStorage/<storageId>/state.vscdb`                                                                                        |
+| Workspace identity                | `User/workspaceStorage/<storageId>/workspace.json`                                                                                     |
+| Chat images                       | Workspace storage's `images/` directory                                                                                                |
+| Plans                             | Configured plans directory, defaulting to `~/.cursor/plans`                                                                            |
+| Canvases                          | Workspace-associated Cursor project storage                                                                                            |
+| Transfer archive                  | User-selected `*.cursor-chat.zip`                                                                                                      |
+| Committed agent-host session      | `User/globalStorage/anysphere.cursor-agent-host/sessions/<sessionId>/`                                                                 |
+| Profile-global agent-host store   | `User/globalStorage/anysphere.cursor-agent-host/data.sqlite`; never copied or merged                                                   |
+| Receipts and pending import state | `<user-data>/cursor-chat-transit/import-v4-<hash>.sqlite`. The filename prefix is historical. The schema inside the file is version 2. |
 
 The local storage root, project URI, and archive location are separate concepts. An SSH project URI does not imply a remote chat database. `extensionKind: ["ui"]` keeps the extension on the local side of the editor.
 
@@ -116,15 +121,17 @@ Global header enumeration gives an explicit storage ID priority over the URI: a 
 
 ### Composer and message records
 
-| Record or field                             | Handling                                                                                                        |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `composerData:<composerId>`                 | Read a bounded composer JSON value; remap known identity fields for a new copy                                  |
-| `composerRootWriterDiagnostic:<composerId>` | Delete this exact key with the composer. A longer suffix is left in place                                       |
-| `fullConversationHeadersOnly`               | Preserve conversation order and references to stored messages                                                   |
-| `bubbleId:<composerId>:<bubbleId>`          | Read by an indexed key range; preserve payload text and remap known IDs                                         |
-| `conversationState`                         | Inspect supported `~`-prefixed protobuf state to discover blob dependencies                                     |
-| `agentKv:blob:<sha256>`                     | Preserve bytes and SQLite storage class; verify content and references                                          |
-| `isNAL`                                     | Read as an explicit storage-format hint for statistics; never change it to bypass Cursor's compatibility checks |
+| Record or field                             | Handling                                                                                                                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `composerData:<composerId>`                 | Read a bounded composer JSON value; remap known identity fields for a new copy                                                                                                                   |
+| `composerRootWriterDiagnostic:<composerId>` | Delete this exact key with the composer. A longer suffix is left in place                                                                                                                        |
+| `fullConversationHeadersOnly`               | Preserve conversation order and references to stored messages                                                                                                                                    |
+| `bubbleId:<composerId>:<bubbleId>`          | Read by an indexed key range; preserve payload text and remap known IDs                                                                                                                          |
+| `conversationState`                         | Inspect supported `~`-prefixed protobuf state to discover blob dependencies                                                                                                                      |
+| `agentKv:blob:<sha256>`                     | Preserve bytes and SQLite storage class; verify content and references                                                                                                                           |
+| `headerLog` plus `composerConvHeaders:*`    | Materialize a valid chunked header log into `fullConversationHeadersOnly` for export; do not invent missing chunks                                                                               |
+| Portable renderer KV                        | `chat-kv-registry.ts` copies drafts, conversation state, checkpoints, code-block diffs, and recognized artifact and bubble-checkpoint keys that belong to the chat. Unknown keys are left behind |
+| `isNAL`                                     | Read as an explicit storage-format hint for statistics; never change it to bypass Cursor's compatibility checks                                                                                  |
 
 The dependency reader supports the observed conversation-state representation in composer versions 13 through 18. This is a partial wire-format reader, not a general Cursor codec. Unknown structured state remains unsupported. `~` alone encodes empty bytes and is not proof that a chat is an empty draft. `_v` does not distinguish legacy conversations from Agent conversations.
 
@@ -142,11 +149,28 @@ Known ID and URI fields are remapped structurally. Message text and arbitrary st
 
 A read transaction provides one database view without making a full database copy. The workspace and global databases, and external attachment files, are not one atomic snapshot. In WAL mode, writes can continue while a reader is active, but checkpoint progress may be delayed. Other journal modes retain SQLite's normal locking behavior. The extension does not change journal mode or force checkpoints.
 
+Manage can combine checked scopes from several workspace rows into one format-5
+archive. Every selected entry must resolve again in the same Cursor profile and
+must name the same normalized global database before staging starts. One global
+read view supplies composer bodies and messages. Workspace databases are opened
+briefly, one at a time, to resolve their catalogues. Explicit storage bindings
+outrank URI fallback. Ambiguous or conflicting ownership stops the export.
+Because these workspace entries share one profile-global composer store, the same
+composer ID denotes one conversation and is written once. The writer records only
+bounded aggregate provenance, never source database paths.
+
+The worker keeps one archive writer and streams the selected families, resources,
+and supported host snapshots sequentially. A failure or cancellation aborts the
+shared staging directory and does not publish a partial replacement. This does not
+make external resource reads simultaneous across workspaces; they remain subject to
+the same non-atomic filesystem caveat as a single-workspace export. Combining
+different Cursor profiles would require scoped archive identities and is rejected.
+
 ## Import
 
 1. Acquire the extension's process lock for the target global database.
 2. Extract the archive incrementally into private temporary storage. Reject unsafe paths, duplicate members, invalid hashes, unsupported formats, and oversized records.
-3. Build a temporary SQLite index and calculate canonical snapshot fingerprints. Resolve repeat-import decisions and resource conflicts before writing chat data.
+3. Verify the archive inventory, then use a SQLite working index in the extracted copy for chat, message, and resource planning. Calculate canonical `cct-snapshot-v2` fingerprints. Resolve repeat-import decisions and resource conflicts before writing chat data. For format 5, verification uses the hashed `index.sqlite` before those planning tables are added to the extracted copy. For format 4, verification uses `inventory.ndjson`, and the working index is created in the extract directory.
 4. Record pending identities and expected hashes in the private journal.
 5. Remap known IDs and prepare message/resource rows in a private SQLite database, outside Cursor's write transactions.
 6. Install prepared rows in bounded transactions, normally at most 128 rows or 8 MiB. A permitted single value can exceed the batch budget, up to the 32 MiB value limit.
@@ -160,7 +184,7 @@ Owned SQLite children stop on cancellation, timeout, or worker disconnect. Conne
 
 ## Repeat-import policy
 
-Snapshot identity is independent of titles and remapped destination IDs. An unchanged previously imported snapshot in the same destination is skipped. A changed source snapshot creates a separate chat. Continuing or renaming the destination chat does not authorize replacement.
+Snapshot identity is independent of titles and remapped destination IDs. New receipts use `cct-snapshot-v2`. An unchanged previously imported snapshot in the same destination is skipped. A changed source snapshot creates a separate chat. Continuing or renaming the destination chat does not authorize replacement.
 
 A deleted imported chat can be restored as a new independent copy when its receipt and remaining state can be verified. Leftover rows are not treated as a reusable chat. Unfinished pending work is reconciled before a new copy is created. Clearing the extension's receipt storage removes this history.
 
@@ -184,8 +208,11 @@ JSON import fallback.
 | JSON nesting            | 64 levels                                                                              |
 | JSON payload properties | 1,000,000 by default (`cursorChatTransit.limits.maxJsonProperties`, 100,000–5,000,000) |
 | ZIP entries             | 250,000                                                                                |
+| Expanded archive        | 64 GiB                                                                                 |
+| ZIP member expansion    | 1,000 times the compressed size of a non-empty member                                  |
+| Host snapshot metadata  | 256 KiB                                                                                |
 
-A record larger than the part target occupies its own part within the record limit. The property budget counts a user payload. A bubble line `{ bubbleId, payload }` does not charge those two envelope fields against that budget. Byte and nesting limits still apply. The total archive can exceed 1 GiB. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Temporary archive files use `cursorChatTransit.temporaryDirectory` when it is set, and the system temporary directory otherwise. Each operation creates its own child directory there. The finished archive is still staged beside its destination. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.
+A record larger than the part target occupies its own part within the record limit. The property budget counts a user payload. A bubble line `{ bubbleId, payload }` does not charge those two envelope fields against that budget. Byte and nesting limits still apply. The total archive can exceed 1 GiB and must stay within the expanded-byte and compression-ratio caps. Readers use ordinary `JSON.parse` for individual bounded values; NDJSON framing enforces byte limits. Temporary archive files use `cursorChatTransit.temporaryDirectory` when it is set, and the system temporary directory otherwise. Each operation creates its own child directory there. The finished archive is still staged beside its destination. Blob payloads are processed one at a time. Dependency traversal retains identifiers and roles, not every blob body.
 
 ZIP extraction validates paths and entry metadata before installation. Resource bytes are verified and existing files are reused only when their content matches. Format and safety constraints remain active during recovery. An incomplete import pauses after staging its plan and before publishing Cursor data. The worker sends only bounded counts and examples over IPC; the extension requests consent for this operation. Cancellation while waiting releases the worker and its locks. Reconciliation validates prior pending records and may update private receipts during inspection; cleanup of unpublished Cursor rows is deferred until the decision boundary has passed.
 
@@ -218,7 +245,7 @@ File and record events identify the action, path, chat ID/title when available, 
 
 Settings are read from explicit user values. Repository settings cannot redirect local storage or enable partial recovery. Query deadlines and busy-handler waits are independent and are captured when an operation starts. There is no whole-transfer deadline. Diagnostic probes use their own short internal limits.
 
-Local release preparation updates version files and the changelog only when explicitly requested. GitHub validates the chosen commit, builds a VSIX, and publishes it with checksums after release gates succeed. Registry publishing is not part of the workflow. See [Development](development.md) for first-release and retry behavior.
+Local release preparation updates version files and the changelog only when explicitly requested. GitHub validates the chosen commit, builds a VSIX, and publishes a GitHub Release with checksums after the release gates succeed. That workflow does not publish to the Visual Studio Marketplace or Open VSX. Those registries are separate install locations. See [Development](development.md).
 
 ## Scope and validation
 
@@ -327,9 +354,13 @@ The transfer scope owns cancellation subscriptions and timers. Terminal results 
 
 ## Import and export boundaries
 
-`import-bundle.ts` coordinates a transfer. `import-bundle-scan.ts` validates/indexes source chats and determines recovery availability; `import-bundle-resources.ts` resolves and verifies resources; `import-bundle-publish.ts` prepares and publishes chat rows; `import-bundle-reconcile.ts` handles deferred reconciliation. Shared plan shapes and small helpers live in `import-bundle-common.ts`. All modules use the existing journal and conflict checks; there is one write path.
+`import-bundle.ts` coordinates a transfer. `import-bundle-scan.ts` validates and indexes source chats and determines recovery availability; `import-bundle-resources.ts` resolves and verifies resources; `import-bundle-publish.ts` prepares and publishes chat rows and a validated host snapshot when that path applies; `import-bundle-reconcile.ts` handles deferred reconciliation. Shared plan shapes and small helpers live in `import-bundle-common.ts`. All modules use the existing journal and conflict checks; there is one write path.
 
-`export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. The archive version stays unchanged; annotated partial text uses the same streamed record layout and integrity checks.
+`export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. This build writes format 5 and still reads format 4. Annotated partial text uses the streamed record layout and the same integrity checks.
+
+`artifact-support.ts` marks images, plans, and canvases as supported filesystem artifacts. Structured visualization references are recognized, and their HTML is not restored. Terminal files and transcript files have no supported chat-owned artifact reference. A chunked header log is conversation metadata, not that transcript artifact. `artifact-source.ts` reads an allowlisted file twice and accepts it only when device, inode, size, and timestamps still match.
+
+`host-snapshots.ts` accepts a committed session whose manifest version is 1 or 2, whose `ItemTable` schema is `key TEXT, value BLOB`, and whose root blob is present. Publication renames a private staging directory onto `sessions/<sessionId>` only when that directory does not already exist. `journal-db.ts` schema 2 records `db`, `file`, and `session` effects. A host restore is a `session` effect, not an edit of both authorities.
 
 ## Bundled native SQLite
 

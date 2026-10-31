@@ -177,6 +177,16 @@ test('idle hides the progress bar; busy without a percent shows it indeterminate
 
   assert.equal(
     buttons.find((b) => b.dataset.action === 'export')?.disabled,
+    false,
+  );
+
+  assert.equal(
+    buttons.find((b) => b.dataset.action === 'import')?.disabled,
+    false,
+  );
+
+  assert.equal(
+    buttons.find((b) => b.dataset.action === 'chooseWorkspace')?.disabled,
     true,
   );
 
@@ -306,7 +316,7 @@ test('busy, missing capability and unverified results override a stale restart f
   }
 });
 
-test('waiting for input hides progress but keeps transfer and Quit actions blocked', () => {
+test('waiting hides progress but keeps transfer actions available for lock feedback', () => {
   const { receive, el, buttons } = fakeDom();
 
   send(receive, { busy: true, status: 'running', sourceAvailable: true });
@@ -325,13 +335,15 @@ test('waiting for input hides progress but keeps transfer and Quit actions block
   assert.equal(el('progress').classes.has('is-indeterminate'), false);
   assert.equal(el('.status-mark').textContent, '○');
 
-  for (const action of ['export', 'import', 'chooseWorkspace', 'quitCursor']) {
+  for (const action of ['export', 'import']) {
     assert.equal(
       buttons.find((b) => b.dataset.action === action)?.disabled,
-      true,
+      false,
     );
   }
 
+  assert.equal(el('btn-chooseWorkspace').disabled, true);
+  assert.equal(el('btn-quitCursor').disabled, true);
   assert.equal(el('btn-quitCursor').hidden, true);
   assert.equal(el('btn-cancel').hidden, true);
   send(receive, { busy: true, status: 'running', sourceAvailable: true });

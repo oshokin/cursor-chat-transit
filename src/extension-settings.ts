@@ -222,6 +222,14 @@ export function exportDirectory(
   return existingDirectory(context, LAST_EXPORT_DIR) || os.homedir();
 }
 
+/** Remembered export directory without touching the filesystem. */
+export function exportDirectoryHint(
+  /** Extension storage and host state. */
+  context: vscode.ExtensionContext,
+): string {
+  return context.globalState.get<string>(LAST_EXPORT_DIR) || os.homedir();
+}
+
 /** Last successful local import directory, else the export directory. */
 export function importDirectory(
   /** Extension storage and host state. */

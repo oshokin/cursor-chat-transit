@@ -47,17 +47,20 @@ Workspace filtering checks for stored history without reading message bodies or 
 
 ## Archive contents and limits
 
-An archive contains a manifest, per-chat metadata, bounded NDJSON parts, and supported binary resources:
+An archive contains a manifest, per-chat metadata, and supported binary resources. Format 5 also contains a hashed SQLite index and content-addressed payloads. Format 4 contains bounded NDJSON parts:
 
-- Chat headers, conversation entries, and message records.
-- Referenced local conversation blobs.
-- Chat images, Cursor plan files, and canvases when available and supported.
+- Chat headers, conversation entries, and message records. A valid external header log is expanded into that conversation during export.
+- Referenced local conversation blobs and portable renderer records that belong to the chat.
+- Chat images, Cursor plan files, and canvases when available and supported. Visualization HTML, terminal files, and transcript files are not restored as artifacts.
+- A committed agent-host session, as `session.sqlite` plus `meta.json`, when that store passes validation. The profile-global agent-host database is not included.
 
 This build writes archive format version 5 and reads versions 5 and 4. Version 5
 uses a hashed SQLite inventory and content-addressed payloads; version 4 remains
 readable through its bounded NDJSON inventory. Monolithic JSON files and other
 archive versions are not accepted. The archive as a whole can exceed 1 GiB; an
-individual JSON record or SQLite value is limited to 32 MiB. See the
+individual JSON record or SQLite value is limited to 32 MiB. The expanded
+archive is limited to 64 GiB, and a non-empty ZIP member may expand at most
+1,000 times. See the
 [storage and archive contract](architecture.md) for details.
 
 An export is a chat archive, not a complete Cursor profile or project backup. It does not copy your source tree or intentionally collect account credentials and extension settings. Messages and attachments may themselves contain sensitive information.
@@ -127,15 +130,19 @@ After import and restart, open the copied chat and use Cursor's **Export Transcr
 
 ## Manage chats
 
-Choose **Manage chats** in the existing sidebar footer. The native tree supports search, checks and deletion of selected history. Export stays in the main transfer view. There is no manual per-workspace hiding preference.
+Choose **Manage chats** in the existing sidebar footer. The native tree supports search, checks, export, workspace-scoped import, and deletion of selected history. There is no manual per-workspace hiding preference.
 
 The initial scan hides confirmed empty history and unavailable workspace reads. **Show all workspaces** reveals those rows; the same toolbar position then offers **Hide empty or unavailable workspaces**. These are reversible view filters, not proof that data is disposable. Unknown formats are retained when the scan cannot establish an empty or unavailable state.
 
-Toolbar order follows the workflow: Search, Refresh, visibility, Select all visible or Clear selection, then Check selected and Delete selected when something is checked. Search finds names, paths and chat titles in the visible workspace set, including collapsed rows. It reveals a result in the tree; it does not create a separate bulk-selection filter. Message text is not indexed.
+Toolbar order follows the workflow: Search, Refresh, visibility, Select all visible or Clear selection, then Check selected, Export selected, and Delete selected when something is checked. Search finds names, paths and chat titles in the visible workspace set, including collapsed rows. It reveals a result in the tree; it does not create a separate bulk-selection filter. Message text is not indexed.
 
 Use checkboxes for deletion selection. A workspace checkbox includes its chats. Unchecking a child leaves its siblings selected. Selection survives focus changes and visibility toggles. **Clear selection** also clears hidden selections; **Refresh** clears all selections and reloads metadata. **Select all visible** selects the current workspace rows, including their collapsed children. Review the confirmation because selected rows may subsequently have been hidden.
 
-Each chat or workspace has inline **Check** and one trash action. Checking a workspace selects that workspace’s local Cursor data, not only its chats. To delete chats and keep the workspace, check the chats themselves. **Delete selected…** always acts on every checked row, whether invoked from the toolbar or a row. Clicking or right-clicking a row only changes native focus; it never clears checkboxes or adds that row. With no checked items, a workspace row offers **Delete workspace data…** and a chat row offers **Delete chat…**. The workspace open in the current window cannot have its data deleted from that window. The confirmation lists the exact scope, including checked items hidden by a filter. Checks run without writing Cursor data. A check is not a guarantee that Cursor can continue a conversation, or authorization to delete it.
+With no checked items, a workspace row offers inline **Check**, **Import chats into this workspace…**, and, when safe, **Delete workspace data…**. Import is not shown on chat rows or in the Manage toolbar: the clicked workspace is the explicit destination, while the native file dialog selects one ZIP. The existing stale-storage checks, incomplete-archive review, import journal, and restart notice still apply.
+
+Checking a workspace means all its chats for **Export selected…**, but its complete local Cursor data for deletion. To delete chats and keep the workspace, check the chats themselves. Checked chats may span several workspaces from the same Cursor profile; one combined format-5 ZIP is written, duplicate global composer IDs are included once, and a later import copies every included chat into one chosen destination workspace. Different Cursor profiles, stale storage, and ambiguous workspace ownership are rejected rather than guessed. The combined archive is read sequentially and does not load all chat payloads into memory.
+
+When rows are checked, their inline actions become **Check selected**, **Export selected…**, and **Delete selected…**. These commands always act on every checked row, including hidden or collapsed rows. Clicking or right-clicking a row only changes native focus; it never clears checkboxes or adds that row. With no checked items, a chat row offers **Delete chat…**. The workspace open in the current window cannot have its data deleted from that window. The confirmation lists the exact deletion scope, including checked items hidden by a filter. Checks run without writing Cursor data. A check is not a guarantee that Cursor can continue a conversation, or authorization to delete it.
 
 ### Delete selected history
 
@@ -228,7 +235,7 @@ Changing the profile clears the selected workspace. Changing storage paths or SQ
 
 `limits.maxJsonProperties` applies to the next operation, including statistics, export, import, and empty-workspace checks. The export and import worker uses that budget for chat headers, composer records, and message lines. A property-limit error is not a reason to raise the byte or nesting limits. `temporaryDirectory` must be an existing absolute directory on this computer. The extension creates and deletes only a private child of that directory. It does not move Cursor databases, operation journals, or the finished archive onto that disk.
 
-Subagent chats stay under the chat that spawned them. Exporting that parent includes the linked subagents. The current window can be checked and its chats can be deleted; its workspace storage directory stays while that window is open. Manage chats orders workspace groups by name or by database activity. **Sort workspaces…** in the view menu chooses the mode. Recently active follows database and WAL writes, not the last time a project was opened. Inside one project, the storage Cursor opens is listed first. A project with only one storage has no extra storage label; the full path stays in the tooltip. The same folder name on a different path is a different project. **Current window** is the database this window has open. Choosing that database again keeps the label. **Opens with this folder** or **Opens with this workspace** appears only when several storages share one project. **Other storage** is a separate history for that same project and can still be exported. **Storage not verified** appears only for those extra storages when the opening id cannot be computed. **Sort workspaces…** offers Name (A–Z) and Recent activity. Escape leaves the mode and the checkboxes unchanged. The native tree has no stable way to keep that title bold.
+Subagent chats stay under the chat that spawned them. Exporting that parent includes the linked subagents. The current window can be checked and its chats can be deleted; its workspace storage directory stays while that window is open. Manage chats orders workspace groups by name or by database activity. **Sort workspaces** in the view overflow menu chooses the mode, and the active item is marked. Recently active follows database and WAL writes, not the last time a project was opened. Inside one project, the storage Cursor opens is listed first. A project with only one storage has no extra storage label; the full path stays in the tooltip. The same folder name on a different path is a different project. **Current window** is the database this window has open. Choosing that database again keeps the label. **Opens with this folder** or **Opens with this workspace** appears only when several storages share one project. **Other storage** is a separate history for that same project and can still be exported. **Storage not verified** appears only for those extra storages when the opening id cannot be computed. **Name (A–Z)** and **Recent activity** are the two orders. Changing the order does not change checkboxes.
 
 Timeouts apply to the next transfer or analysis. A query deadline is not a deadline for the whole operation; a busy-handler wait does not cover every kind of SQLite lock.
 

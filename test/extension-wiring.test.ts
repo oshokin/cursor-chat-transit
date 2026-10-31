@@ -63,8 +63,8 @@ const fakeVscode = {
       };
     },
     /** Remember the sidebar provider registered during activation. */
-    registerWebviewViewProvider(_id: string, value: unknown) {
-      provider = value;
+    registerWebviewViewProvider(id: string, value: unknown) {
+      if (id === 'cursorChatTransit.view') provider = value;
 
       return dispose;
     },
@@ -175,6 +175,9 @@ test('activation still registers all commands, one operation log and the sidebar
         'manageShowAll',
         'manageShowRemovable',
         'manageCheckSelected',
+        'manageExportItem',
+        'manageExportSelected',
+        'manageImportWorkspace',
         'manageDelete',
         'manageDeleteItem',
         'manageDeleteWorkspaceData',
@@ -227,7 +230,7 @@ test('operation lock excludes a second command and releases shared state after f
   });
 
   assert.equal(secondRan, false);
-  assert.equal(warnings.length, 1);
+  assert.deepEqual(warnings, ['Cursor Chat Transit is already running.']);
   unblock();
   await rejection;
   assert.equal(state.runtime.busy, false);

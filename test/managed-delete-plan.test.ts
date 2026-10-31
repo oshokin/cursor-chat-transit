@@ -352,7 +352,11 @@ test('the toolbar keeps one visibility slot, moves refresh to the overflow menu,
     'navigation@4',
   ]);
 
-  assert.deepEqual(group('cursorChatTransit.manageDelete'), ['navigation@6']);
+  assert.deepEqual(group('cursorChatTransit.manageExportSelected'), [
+    'navigation@6',
+  ]);
+
+  assert.deepEqual(group('cursorChatTransit.manageDelete'), ['navigation@7']);
 
   assert.equal(
     manifest.contributes.menus.commandPalette.filter(

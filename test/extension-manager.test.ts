@@ -214,6 +214,7 @@ const fake = {
   },
   ProgressLocation: { Notification: 15 },
   window: {
+    registerWebviewViewProvider: () => ({ dispose() {} }),
     createTreeView: (
       _id: string,
       options: vscode.TreeViewOptions<ManagedNode>,
@@ -1690,6 +1691,174 @@ test('manifest exposes one row trash action per checkbox state and keeps toolbar
       .map((item: { command: string }) => item.command),
     ['cursorChatTransit.manageDelete'],
   );
+});
+
+test('manifest exposes checked export beside check on every selectable row', () => {
+  const manifest = JSON.parse(
+    readFileSync(path.join(__dirname, '../package.json'), 'utf8'),
+  );
+
+  const menus = manifest.contributes.menus;
+
+  const rows = menus['view/item/context'] as Array<{
+    command: string;
+    when: string;
+    group: string;
+  }>;
+
+  const titles = menus['view/title'] as Array<{
+    command?: string;
+    when: string;
+  }>;
+
+  const imports = rows.filter(
+    (item) => item.command === 'cursorChatTransit.manageImportWorkspace',
+  );
+
+  const selectedExports = rows.filter(
+    (item) => item.command === 'cursorChatTransit.manageExportSelected',
+  );
+
+  const itemExports = rows.filter(
+    (item) => item.command === 'cursorChatTransit.manageExportItem',
+  );
+
+  assert.equal(imports.length, 1);
+  assert.match(imports[0].when, /managed\(Workspace\|CurrentWorkspace\)/);
+  assert.doesNotMatch(imports[0].when, /managedChat/);
+  assert.doesNotMatch(imports[0].when, /manageHasCheckedItems/);
+  assert.doesNotMatch(imports[0].when, /manageBusy/);
+
+  assert.equal(
+    titles.some(
+      (item) => item.command === 'cursorChatTransit.manageImportWorkspace',
+    ),
+    false,
+  );
+
+  assert.equal(itemExports.length, 1);
+
+  assert.equal(
+    itemExports[0].when,
+    'view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && !cursorChatTransit.manageHasCheckedItems',
+  );
+
+  assert.equal(itemExports[0].group, 'inline@2');
+
+  assert.equal(selectedExports.length, 1);
+
+  assert.equal(
+    selectedExports[0].when,
+    'view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && cursorChatTransit.manageHasCheckedItems',
+  );
+
+  assert.equal(selectedExports[0].group, 'inline@2');
+
+  const checkSelected = rows.find(
+    (item) => item.command === 'cursorChatTransit.manageCheckSelected',
+  );
+
+  assert.ok(checkSelected);
+
+  assert.equal(
+    checkSelected.when,
+    'view == cursorChatTransit.manage && viewItem =~ /^managed(Workspace|Chat|CurrentWorkspace|ReadOnlyChat)$/ && cursorChatTransit.manageHasCheckedItems',
+  );
+
+  const titleExport = titles.find(
+    (item) => item.command === 'cursorChatTransit.manageExportSelected',
+  );
+
+  assert.ok(titleExport);
+  assert.doesNotMatch(titleExport.when, /manageBusy/);
+
+  assert.equal(
+    rows.filter(
+      (item) =>
+        item.command === 'cursorChatTransit.manageCheck' ||
+        item.command === 'cursorChatTransit.manageImportWorkspace' ||
+        item.command === 'cursorChatTransit.manageDeleteWorkspaceData',
+    ).length,
+    3,
+  );
+
+  assert.deepEqual(
+    rows
+      .filter(
+        (item) =>
+          item.when.includes('managed') &&
+          item.when.includes('&& cursorChatTransit.manageHasCheckedItems'),
+      )
+      .map((item) => item.command),
+    [
+      'cursorChatTransit.manageCheckSelected',
+      'cursorChatTransit.manageExportSelected',
+      'cursorChatTransit.manageDelete',
+    ],
+  );
+});
+
+test('Manage export uses the same icon pair as the primary export action', () => {
+  const manifest = JSON.parse(
+    readFileSync(path.join(__dirname, '../package.json'), 'utf8'),
+  );
+
+  const commands = manifest.contributes.commands as Array<{
+    command: string;
+    icon?: unknown;
+  }>;
+
+  const icon = (command: string) =>
+    commands.find((item) => item.command === command)?.icon;
+
+  assert.deepEqual(
+    icon('cursorChatTransit.manageExportItem'),
+    icon('cursorChatTransit.export'),
+  );
+
+  assert.deepEqual(
+    icon('cursorChatTransit.manageExportSelected'),
+    icon('cursorChatTransit.export'),
+  );
+
+  assert.deepEqual(
+    icon('cursorChatTransit.manageImportWorkspace'),
+    icon('cursorChatTransit.import'),
+  );
+});
+
+test('export uses an invoked row only until checkbox selection exists', async () => {
+  const manager = new Manager(context, log);
+
+  const invoked = {
+    workspace: entries[0],
+    chat: { composerId: 'focused-only' },
+  };
+
+  const chat = {
+    workspace: entries[1],
+    chat: { composerId: 'selected-chat', name: 'Selected' },
+  };
+
+  try {
+    assert.deepEqual(manager.exportSelection(invoked), [
+      { workspace: entries[0], chats: [invoked.chat] },
+    ]);
+
+    assert.deepEqual(manager.exportSelection({ workspace: entries[0] }), [
+      { workspace: entries[0], chats: undefined },
+    ]);
+
+    await manager.select({ workspace: entries[0] }, true);
+    await manager.select(chat, true);
+
+    assert.deepEqual(manager.exportSelection(invoked), [
+      { workspace: entries[0], chats: undefined },
+      { workspace: entries[1], chats: [chat.chat] },
+    ]);
+  } finally {
+    manager.dispose();
+  }
 });
 
 test('select empty replaces checks, ignores a late scan, and does not start twice', async () => {

@@ -1,23 +1,31 @@
 # Changelog
 
-## [1.1.0] - 2026-10-31
+## 1.1.0
 
 ### Added
 
-- Bundle better-sqlite3 13.0.3 and SQLite 3.53.4 for offline native database access on x64/arm64 Windows, macOS and Linux.
-- Enforce native SQL deadlines outside the busy worker, with parent-loss protection and rollback tests.
-- Add typed Buffer/64-bit integer IPC and explicit FULL durability for main and attached databases.
+- Write archive format 5. A hashed `index.sqlite` is the inventory and catalog, payloads are stored by SHA-256, and the required capabilities are `sqlite-index-v1` and `content-addressed-blobs-v1`. Format 4 remains readable. Older monolithic JSON exports are rejected.
+- When Cursor has committed a supported per-session agent-host store, export a WAL-aware snapshot of that session's `session.sqlite` and `meta.json`. Import restores it only under the original free session ID, after schema, manifest, root, and identity checks, and only when the matching renderer ID is also free. A collision or unsupported layout becomes a remapped renderer-owned copy. Private protobuf and content-addressed state is not synthesized or merged. The profile-global agent-host database is not copied.
+- Copy portable renderer records that belong to one chat, including drafts, conversation state, checkpoints, code-block diffs, and recognized artifact keys.
+- Materialize an external header log into the exported conversation when Cursor stores the ordered headers in chunks.
+- Choose workspace order in **Manage chats** from **Sort workspaces**. The active order, name or recent activity, is checked.
+- Import a ZIP directly into a chosen **Manage chats** workspace row. Export checked chats or whole workspace rows from several same-profile workspaces into one streaming format-5 ZIP, then import that archive into one destination workspace.
+- Record a non-destructive real-Cursor checklist with `scripts/acceptance-cursor.sh`. It stores the executable hash, version output, extension commit, and platform. It does not export, import, or send a message.
 
 ### Changed
 
-- Remove the system SQLite dependency and the obsolete sqlitePath setting.
-- Use byte-bounded native resource reads, prepared message/resource inserts, and shared warm standalone workers without retained database handles.
-- Keep archive version, journal state, supported schema checks and interrupted-import recovery compatible.
+- Bundle better-sqlite3 13.0.3 and SQLite 3.53.4 for offline access on x64 and arm64 Windows, macOS, and Linux (glibc and musl). Remove the system SQLite dependency and the `sqlitePath` setting.
+- Enforce native SQL deadlines outside the busy worker, with parent-loss protection. Use typed Buffer and 64-bit integer IPC. Set FULL durability on the main database and on attached databases.
+- Read selected resources in byte-bounded native batches. Reuse warm standalone workers that do not keep database handles. Insert prepared message and resource rows.
+- Identify chat snapshots with `cct-snapshot-v2`. Record import side effects in the private journal (schema 2) and keep interrupted-import recovery.
+- Treat a complete local transfer as preserved bytes, not as proof that Cursor can continue the Agent.
 
 ### Fixed
 
-- Display Windows paths with literal backslashes in human logs while safely escaping quotes and controls.
-- Verify batched deletions with one UNION ALL query and check the result count.
+- Accept nested message rows and standalone Agent rows. Preserve opaque conversation state that this build does not decode. Remap known identities inside supported state, including family and canvas references, task-result agent IDs, and subagent task links.
+- Stream large deletion metadata instead of holding an entire deletion plan in one value.
+- Show Windows paths with literal backslashes in human logs. Escape quotes and control characters.
+- Verify a batched deletion with one `UNION ALL` query and check the result count.
 
 ## 1.0.1
 

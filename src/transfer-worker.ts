@@ -8,7 +8,11 @@ import {
   findEmptyWorkspaces,
   prepareManagedDelete,
 } from './managed-delete-run';
-import { exportToFile, listWorkspaceChats } from './export-transfer';
+import {
+  exportManyToFile,
+  exportToFile,
+  listWorkspaceChats,
+} from './export-transfer';
 import { importFromBundle } from './import-bundle';
 import type { RecoveryPreview } from './recovery-preview';
 import { runStatistics, type StatisticsJob } from './statistics';
@@ -255,6 +259,10 @@ async function run(
       job.selectedIds,
       job.assessRecovery,
     );
+  }
+
+  if (job.kind === 'export-many') {
+    return exportManyToFile(ctx, job.sources || [], job.filePath);
   }
 
   return importFromBundle(ctx, job.filePath, job.workspace, {

@@ -47,7 +47,7 @@ npm run check
 
 `npm run check` is compile + typecheck + lint + format + tests.
 
-Change workspace, import, export, and Manage chats share one annotated inventory. That pass also returns incomplete storage directories, so Manage does not list the profile again. One physical workspace has one in-flight catalogue read per refresh. Closing search releases the picker immediately and does not cancel a tree that joined that read. A search opened again while that read is still running shows the same terminal result, including a workspace that failed. A late response from an older refresh does not replace headers or the filtered root list. Clearing check results drops that filtered list. A one-row import reread keeps the duplicate flag from the full inventory. An unreadable image directory is an error, not a missing file. A file URI with an authority keeps `//authority` in the hashed path on Linux and macOS. Windows drive-letter hashes and Keep-after-a-changed-expected-id are fixture tests, not live Windows or macOS runs. `npm run test:host` is the Extension Development Host; it was not a substitute for a Cursor profile.
+Change workspace, import, export, and Manage chats share one annotated inventory. That pass also returns incomplete storage directories, so Manage does not list the profile again. One physical workspace has one in-flight catalogue read per refresh. Closing search releases the picker immediately and does not cancel a tree that joined that read. A search opened again while that read is still running shows the same terminal result, including a workspace that failed. A late response from an older refresh does not replace headers or the filtered root list. Clearing check results drops that filtered list. A one-row import reread keeps the duplicate flag from the full inventory. Manage export snapshots its checkbox scopes, re-resolves every physical storage, requires one normalized profile-global database, and sends one `export-many` job to one worker. That worker uses one global read view, short per-workspace catalogue views, and one streaming format-5 writer; it never merges completed ZIP files. An unreadable image directory is an error, not a missing file. A file URI with an authority keeps `//authority` in the hashed path on Linux and macOS. Windows drive-letter hashes and Keep-after-a-changed-expected-id are fixture tests, not live Windows or macOS runs. `npm run test:host` is the Extension Development Host; it was not a substitute for a Cursor profile.
 
 TypeScript sources live in `src/` and compile to `out/`. The sidebar client compiles from `webview/` to `resources/sidebar-client.js`. `npm run watch` (or the VS Code **watch** task) rebuilds both. Tests and scripts run with `tsx`. `tsc -p tsconfig.check.json` typechecks scripts and tests. Node tests live in `test/*.test.ts`; `*.sqlite.test.ts` needs the sqlite3 CLI. `test/host` is the VS Code smoke runner.
 
@@ -74,7 +74,15 @@ The extension discovers the real local Cursor user-data directory unless you set
 
 ## Packaging
 
-`package.json#files` is the allowlist (`out/*.js`, resources, README, changelog and license). `src/`, `tmp/`, tests, `.dev`, and user DBs must not enter the VSIX. `npm run check-package` inventories the ZIP with the direct development dependency `yauzl`, checks every source module has compiled output in the VSIX, and rejects development data. No external `unzip` is required.
+`package.json#files` is the allowlist (`out/*.js`, resources, README, changelog, license, and `vendor/**`). `src/`, `tmp/`, tests, `.dev`, and user databases must not enter the VSIX. `npm run check-package` inventories the ZIP with `yauzl`, checks that every source module has compiled output, checks the bundled better-sqlite3 prebuilds, and rejects development data. No external `unzip` is required.
+
+## Distribution
+
+Users install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=oshokin.cursor-chat-transit), the [Open VSX Registry](https://open-vsx.org/extension/oshokin/cursor-chat-transit), or a [GitHub Release](https://github.com/oshokin/cursor-chat-transit/releases) VSIX. The publisher id is `oshokin`.
+
+CI publishes the GitHub Release: a version tag, the VSIX, and a SHA-256 checksum. `scripts/publish-release.ts` does not publish to either extension registry. Updating those listings is a separate step.
+
+This build writes archive format 5 and reads formats 5 and 4. `package.json` is `1.1.0`. The local tags are `v1.0.0` and `v1.0.1`. `scripts/acceptance-cursor.sh` records a real Cursor executable and a manual checklist. It does not open chat databases.
 
 ## Release
 
@@ -167,7 +175,7 @@ Core/integration tests fail up front when `sqlite3` is absent. Use `task test:un
 
 On Windows 10/11, `task setup` downloads the official Node.js zip when npm is missing. The watch script runs TypeScript via Node.
 
-Settings and command IDs use `cursorChatTransit.*`. File imports accept only version-4 ZIP archives. Import receipts are stored in SQLite.
+Settings and command IDs use `cursorChatTransit.*`. New exports are format 5 ZIP archives. Imports accept formats 5 and 4. Receipts are SQLite files named `import-v4-<hash>.sqlite` under `<user-data>/cursor-chat-transit`. That filename prefix is historical; the journal schema is version 2.
 
 ## Opt-in performance checks
 
@@ -217,7 +225,7 @@ Use disposable Cursor profiles and copies of test chats. Do not test destructive
 3. Export with Recover Text enabled and disabled. Use full bodies, preview-only bodies, known-role gaps, unknown roles and no surviving text. Full text must never be replaced by a shorter preview. Original database rows remain unchanged.
 4. Import the recovered ZIP, decline and then accept the partial-history review, restart Cursor, open the copied history and run **Export Transcript**. Verify source-order text and visible preview/gap labels. This native Cursor check is a release acceptance requirement: automated SQLite tests alone cannot establish it. Repeat import must not add another copy.
 5. Close other Cursor windows, stop Agent tasks, and delete test history in the remaining window. Verify confirmation, progress, cancellation, partial outcomes, a busy database and the Quit button after writes. Quit completely and reopen; deleted chats must stay deleted, unrelated history must open, and new messages must save. Check the OS/build combinations you intend to support; passing Linux SQLite tests alone does not certify macOS or Windows Cursor.
-6. Verify the seven documented settings at User scope. Running workers keep captured values. Workspace values cannot redirect paths or enable salvage. Deletion must work without any OS-process scan and must never quit Cursor automatically.
+6. Verify the eight documented settings. Path and timeout settings are machine-scoped. Log level and text recovery are application settings. Running workers keep captured values. Workspace values cannot redirect paths or enable salvage. Deletion must work without any OS-process scan and must never quit Cursor automatically.
 
 Automated tests exercise real SQLite export/import round trips, ordinary deletion-worker execution, workspace-data removal, cancellation rollback, partial commits, uncertain commit acknowledgements, index changes, shared ownership, triggers/foreign keys, SQL batching, grouped checks, selection, notifications and command wiring. Close SQLite sessions before deleting fixture directories. Native Cursor rendering, cache behavior after shutdown, and Export Transcript still require manual verification.
 

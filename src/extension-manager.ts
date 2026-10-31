@@ -11,9 +11,14 @@ import {
   loadHostEntries,
 } from './extension-workspaces';
 import type { ManagedNode } from './managed-node';
-import { managedSearchItems, showManagedSearch } from './managed-search';
+import {
+  managedSearchItems,
+  showManagedSearch,
+  type ManagedSearchItem,
+} from './managed-search';
 import { requestsFromNodes, selectionSummary } from './managed-delete-plan';
 import { ManagedSelection } from './managed-selection';
+import { groupManagedNodes } from './managed-selection';
 import { startOperationLog } from './operation-log';
 import type { TransitLog } from './output-ui';
 import { orderedChatHeaders, workspacePickItems } from './picker';
@@ -182,6 +187,17 @@ export class ChatManager
   /** Check the checkbox selection, including confirmed descendants of checked rows. */
   async checkSelected(): Promise<void> {
     await this.check();
+  }
+
+  /** Checked scopes first; otherwise export the invoked row, just like Check. */
+  exportSelection(node?: ManagedNode): ReturnType<typeof groupManagedNodes> {
+    const checked = this.selection
+      .values()
+      .filter((candidate) => !candidate.error);
+
+    return groupManagedNodes(
+      checked.length ? checked : node && !node.error ? [node] : [],
+    );
   }
 
   /** Resolve checked scopes before row fallback; keyboard focus never changes deletion targets. */
@@ -1309,10 +1325,16 @@ export class ChatManager
   }
 
   /** Search includes collapsed workspaces; loaded header lists are reused by tree expansion. */
-  async find(reveal: (node: ManagedNode) => PromiseLike<void>): Promise<void> {
+  async find(
+    reveal: (node: ManagedNode) => PromiseLike<void>,
+    picker?: vscode.QuickPick<ManagedSearchItem>,
+  ): Promise<void> {
     if (this.searching) return this.searching;
 
-    this.searching = this.openSearch(reveal).finally(() => {
+    this.searching = this.openSearch(
+      reveal,
+      picker || vscode.window.createQuickPick(),
+    ).finally(() => {
       this.searching = undefined;
     });
 
@@ -1322,11 +1344,12 @@ export class ChatManager
   /** Own only the search UI; it never holds the transfer lock. */
   private async openSearch(
     reveal: (node: ManagedNode) => PromiseLike<void>,
+    picker: vscode.QuickPick<ManagedSearchItem>,
   ): Promise<void> {
     const generation = this.loading.signal;
 
     const selected = await showManagedSearch({
-      picker: vscode.window.createQuickPick(),
+      picker,
       onError: (error) =>
         this.operations.error(
           `Search failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -1837,6 +1860,23 @@ export function registerManager(
     }),
   );
 
+  /** Export checked rows, or the invoked row when no checkbox is checked. */
+  const exportManaged = async (node?: ManagedNode) => {
+    const sources = manager.exportSelection(node);
+
+    if (!sources.length) {
+      vscode.window.showInformationMessage(
+        'Select workspace data or individual chats to export.',
+      );
+
+      return;
+    }
+
+    const { doExport } = await import('./extension-export');
+
+    await withLock(context, () => doExport({ context, operations, sources }));
+  };
+
   const actions: Record<string, (node?: ManagedNode) => void | Promise<void>> =
     {
       manageSearch: () =>
@@ -1874,6 +1914,18 @@ export function registerManager(
       manageShowAll: () => manager.toggleVisibility(),
       manageShowRemovable: () => manager.toggleVisibility(),
       manageCheckSelected: () => manager.checkSelected(),
+      manageExportItem: exportManaged,
+      manageExportSelected: exportManaged,
+      manageImportWorkspace: async (node) => {
+        if (!node || node.error || node.chat)
+          throw new Error('Choose an available workspace to import into.');
+
+        const { doImport } = await import('./extension-import');
+
+        await withLock(context, () =>
+          doImport({ context, operations, destination: node.workspace }),
+        );
+      },
       // Title actions can receive host context; bulk deletion ignores every argument.
       manageDelete: () => manager.deleteSelected(),
       manageDeleteItem: (node) => manager.deleteSelected(node),

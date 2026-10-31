@@ -3,6 +3,7 @@ export { cloneExportObjectForCopy } from './chat-copy';
 export { assertOrderedReferences } from './chat-json';
 export {
   buildExportObject,
+  exportManyToFile,
   exportToFile,
   listWorkspaceChats,
 } from './export-transfer';

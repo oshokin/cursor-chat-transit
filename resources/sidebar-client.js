@@ -83,7 +83,7 @@ window.addEventListener('message', (event) => {
     for (const button of buttons) {
         const action = button.dataset.action;
         button.disabled =
-            (busy && ['export', 'import', 'chooseWorkspace'].includes(action)) ||
+            (busy && action === 'chooseWorkspace') ||
                 (action === 'export' && s.sourceAvailable !== true);
         if (action === 'recoverLock') {
             button.hidden = s.canRecoverLock !== true;

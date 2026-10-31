@@ -1,85 +1,27 @@
 # Cursor Chat Transit
 
-Move your Cursor chats between workspaces and devices.
+Move Cursor chats between workspaces and devices. Export selected conversations, or a workspace's chat history, to a `*.cursor-chat.zip` archive and import it into another workspace. An archive can include supported messages, images, plans, canvases, and local conversation state. The same snapshot is imported once. A changed snapshot becomes a separate conversation.
 
-Export selected conversations or a workspace's chat history to a ZIP archive, then import it into another Cursor workspace. An export includes supported messages, images, plans, canvases, and local conversation state. Importing the same snapshot again keeps the existing copy; importing a changed snapshot creates a separate conversation.
+Cursor's chat storage is private. A Cursor update can break export, import, or the ability to continue a chat. An archive can contain prompts, source, tool output, paths, and secrets. Treat it as sensitive. This extension does not back up your profile. You use it at your own risk.
 
-Cursor does not provide a way to move chats between workspaces. This extension does. Cursor's chat storage is a private format, not a public contract. A Cursor update can change that format and break export, import, or the ability to continue a chat. There is no promise that a new Cursor build will keep working with the current archive.
+## Install
 
-This is free software. You use it at your own risk. The author is not responsible for what you do with it, or for lost chats, damaged databases, or a Cursor update that stops an archive from importing. Backups are your responsibility. The extension does not make them for you.
+Install **Cursor Chat Transit** (`oshokin`) from a registry, or from a GitHub Release:
 
-Exports can contain prompts, responses, source fragments, tool output, paths, images,
-plans, canvases, and credentials or personal data that appeared in a conversation.
-Treat every archive as sensitive. Review where it is saved and do not attach an
-unredacted archive or Cursor database to a public issue.
+- [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=oshokin.cursor-chat-transit)
+- [Open VSX Registry](https://open-vsx.org/extension/oshokin/cursor-chat-transit)
+- [GitHub Releases](https://github.com/oshokin/cursor-chat-transit/releases) — download the `.vsix`, then **Extensions → … → Install from VSIX…**
 
-## Features
+Source and issues: [github.com/oshokin/cursor-chat-transit](https://github.com/oshokin/cursor-chat-transit).
 
-- Find local, SSH, WSL, and container workspaces stored in your local Cursor profile.
-- Count titled and untitled chats, and see whether a chat looks like a legacy or Agent conversation, before you export.
-- Follow transfer stages, elapsed time, and measured progress in the sidebar.
-- Preserve available message text in ZIP exports, including clearly labelled preview fragments and gaps when full bodies are missing.
-- Find, check, and select chat history in a persistent native manager. Bulk history deletion runs as a normal extension operation after one confirmation; quit and reopen Cursor afterward.
-- Recover usable history from an incomplete export after reviewing the missing data and confirming that import.
+You need a desktop Cursor or VS Code-compatible host with API 1.128 or later, a local Cursor profile, and a runtime that supports Node-API 10. The extension runs on the local computer, including when the project is remote. SQLite is inside the VSIX. VS Code can host the extension. It does not provide Cursor's conversation UI. Building from source is in [Development](docs/development.md).
 
-## Requirements and installation
+## Use
 
-You need a desktop Cursor or VS Code-compatible host with API version 1.128 or later, access to a local Cursor profile, and a host runtime supporting Node-API 10. The extension runs on the local computer, including when the project is remote. Browser-only editors are not supported. VS Code can host the extension, but does not provide Cursor's native conversation interface.
+Open **Cursor Chat Transit** in the Activity Bar. **Change…** selects the workspace. **Export chats** writes a ZIP. **Import chats** reads one. If chats were added, choose **Quit Cursor**, then reopen Cursor. **Manage chats** finds, checks, exports, imports, and deletes local history. Its workspace-row import action always targets that workspace. Checked chats or whole workspace rows can be exported from several workspaces into one ZIP; importing that ZIP still copies all included chats into one destination workspace.
 
-SQLite is included in the VSIX: no system SQLite, Node.js installation, build tools, or first-run downloads are required. The universal package includes Windows, macOS, and Linux (glibc/musl) prebuilds for x64 and arm64. `cursorChatTransit.limits.maxJsonProperties` limits object properties in one JSON payload (default 1,000,000). `cursorChatTransit.temporaryDirectory` chooses the disk used for temporary archive files; leave it empty to use the system temporary directory. Neither setting changes Cursor's databases, and neither restores missing message text.
+A successful import keeps local bytes. It does not prove that Cursor can resume an Agent. Settings, limits, host-owned sessions, and the continuation check are in [Usage](docs/usage.md). Storage behavior is in [Architecture](docs/architecture.md).
 
-To install a release:
+## License
 
-1. Download the `.vsix` asset from a [GitHub Release](https://github.com/oshokin/cursor-chat-transit/releases).
-2. Open **Extensions → … → Install from VSIX…** in Cursor.
-3. Select the package and reload if prompted.
-4. Open **Cursor Chat Transit** in the Activity Bar.
-
-No extension registry is required. To build your own VSIX, see [Development](docs/development.md).
-
-## Export chats
-
-1. Choose **Change…** in the sidebar to select the source workspace.
-2. Select **Export chats**.
-3. Export all chats or choose **Select chats…**.
-4. Save the suggested `*.cursor-chat.zip` file.
-
-The filename includes the workspace or selected chat name and a timestamp. If an export is incomplete, the result identifies the affected chats. Check the operation log before relying on that archive.
-
-## Import chats
-
-1. Select the destination workspace in the sidebar.
-2. Choose **Import chats** and select a `*.cursor-chat.zip` archive.
-3. Wait for the result.
-4. If chats were added, choose **Quit Cursor**, then reopen Cursor to load them.
-
-**Quit Cursor** closes the application through Cursor's own quit action. Cursor still handles confirmation and unsaved-work prompts. The extension does not start Cursor again. If the button is unavailable, quit from the application menu.
-
-Imports create new local chat and message IDs and leave existing conversations in place. An import that changes nothing does not need a restart.
-
-Cursor 3.27 has two observed chat-storage authorities: renderer-owned records in the
-local profile and, for chats Cursor has committed there, a per-session agent-host
-store. Transit restores a supported native store only as an exact, validated
-snapshot under its original free session ID; otherwise it creates a remapped
-renderer-owned copy. It never synthesizes or merges Cursor's private protobuf/CAS
-state. A successful import, round trip, or source-data check proves preserved local
-bytes, not that Cursor's backend can resume the Agent. The defensible continuation
-check is to reopen the copy in the exact Cursor build and account you intend to use
-and successfully send a disposable new message. See [Usage](docs/usage.md) for the
-acceptance procedure and its limits.
-
-## Manage chats
-
-Use the native **Manage chats** view to find workspaces and chats, check their data, and delete either individual chats or the local data of an inactive workspace. Checking a workspace selects that workspace’s Cursor data, including its chats. Check the chats themselves to delete history and keep the workspace. **Show empty and unavailable workspaces** uses the same list. **Sort workspaces…** orders projects by name or by database activity. When one project has several storages, the one Cursor opens is listed first and labeled. Another storage stays available for export. Export remains in the main transfer view.
-
-**Export: Recover Text** is on by default in User Settings. The ZIP exporter keeps existing message records and can fill absent records with labelled previews or gaps in supported ordered conversations. It never replaces an existing empty message or repairs Cursor rendering. With the option off, available source records are still exported, but no replacement messages are created. The source is unchanged. Import asks for confirmation before publishing incomplete history. Open the imported chat in Cursor to use Cursor's own **Export Transcript**; this extension does not add a Markdown exporter. Compatibility with Cursor's transcript renderer must be checked on the Cursor version you use.
-
-Use checkboxes for bulk deletion. With checked items, the trash action in either a row or the toolbar deletes the checked set. With no checked items, a row action deletes only that row; the toolbar asks for a selection. Native row highlighting does not change the checked set.
-
-Before deletion, close other Cursor windows and stop running Agent tasks. Confirm the selection, wait for the result, then use **Quit Cursor** and reopen the IDE. Chat-only deletion keeps the workspace directory. **Delete workspace data** removes that workspace’s local Cursor storage and its exclusively owned history; project files, shared agent blobs and the global plans folder stay. Shared history blocks workspace deletion. **Select empty workspaces** only checks workspaces whose supported indexes have no chat history; it does not delete them, and a chat created afterward blocks that deletion. There is no automatic undo or backup, and the database file is not vacuumed. The operation uses the existing worker and SQLite checks; it does not inspect operating-system processes or automatically quit Cursor.
-
-## Further reading
-
-Counts, format labels, picker filters, archive limits, repeat imports, settings, and troubleshooting are in [Usage](docs/usage.md). Setup and releases are in [Development](docs/development.md). Storage behavior is in [Architecture](docs/architecture.md).
-
-[MIT](LICENSE), including the original copyright notice and the notice for subsequent work on Cursor Chat Transit.
+[MIT](LICENSE).

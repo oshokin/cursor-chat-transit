@@ -12,6 +12,7 @@ import { codeOf, isAbort, openLog } from './extension-errors';
 import {
   transferSettings,
   exportDirectory,
+  exportDirectoryHint,
   rememberExportDir,
   requireLocalFile,
 } from './extension-settings';
@@ -32,7 +33,10 @@ import { resolveAutomaticWorkspace } from './workspace-opening';
 import { ZIP_FILTER } from './file-dialogs';
 import { runTransfer } from './transfer-process';
 import { startOperationLog } from './operation-log';
-import { formatIncompleteExportNotice } from './operation-ui';
+import {
+  formatIncompleteExportNotice,
+  resolveSelectedWorkspace,
+} from './operation-ui';
 import { type TransitLog } from './output-ui';
 import {
   buildFamily,
@@ -40,6 +44,7 @@ import {
   exportConversationHeaders,
 } from './chat-family';
 import { chatPickItems } from './picker';
+import type { ExportSource } from './transfer-process';
 
 /** Export chats from the selected (or picked) workspace to a local ZIP archive. */
 export async function doExport(opts: {
@@ -55,7 +60,19 @@ export async function doExport(opts: {
   selectedIds?: string[];
   /** Export the entire supplied workspace without asking for a selection. */
   allChats?: boolean;
+  /** Checked Manage scopes for one same-profile combined archive. */
+  sources?: ExportSource[];
 }): Promise<void> {
+  if (opts.sources) {
+    await doExportMany({
+      context: opts.context,
+      operations: opts.operations,
+      sources: opts.sources,
+    });
+
+    return;
+  }
+
   const log = startOperationLog(opts.operations, 'export');
 
   setUi({
@@ -437,6 +454,215 @@ export async function doExport(opts: {
     log.finish('failed', codeOf(err), err);
 
     throw err;
+  } finally {
+    finishPhaseProgress(log);
+  }
+}
+
+/** Export immutable Manage checkbox scopes into one combined archive. */
+async function doExportMany(opts: {
+  context: vscode.ExtensionContext;
+  operations: TransitLog;
+  sources: ExportSource[];
+}): Promise<void> {
+  const log = startOperationLog(opts.operations, 'export');
+
+  setUi({
+    status: 'waiting',
+    statusTitle: 'Choose where to save',
+    statusDetail:
+      'A system Save dialog is open. It may appear behind the Cursor window.',
+    progress: undefined,
+    statusItems: [],
+  });
+
+  try {
+    if (!opts.sources.length) {
+      setUi({
+        status: 'cancelled',
+        statusTitle: 'Export cancelled',
+        statusDetail: 'No chats selected.',
+      });
+
+      log.finish('cancelled');
+
+      return;
+    }
+
+    const explicitChats = opts.sources.reduce(
+      (sum, source) => sum + (source.selectedIds?.length || 0),
+      0,
+    );
+
+    const filename = suggestExportFilename({
+      workspaceName: opts.sources.length === 1 ? 'workspace' : 'workspaces',
+      selection: {
+        kind: 'selected',
+        count: Math.max(1, explicitChats || opts.sources.length),
+      },
+    });
+
+    const saveUri = await vscode.window.showSaveDialog({
+      title: 'Export selected chats',
+      defaultUri: vscode.Uri.file(
+        path.join(exportDirectoryHint(opts.context), filename),
+      ),
+      filters: ZIP_FILTER,
+      saveLabel: 'Export',
+    });
+
+    if (!saveUri) {
+      log.finish('cancelled');
+
+      setUi({
+        status: 'cancelled',
+        statusTitle: 'Export cancelled',
+        statusDetail: 'Save dialog was dismissed.',
+      });
+
+      return;
+    }
+
+    const dest = requireLocalFile(saveUri, 'Export destination');
+
+    setUi({
+      status: 'running',
+      statusTitle: 'Preparing export…',
+      statusDetail: 'Rechecking selected workspaces.',
+    });
+
+    // The native dialog must appear immediately. Storage discovery is async but
+    // can be slow on large or remote-backed profiles, so it starts only after
+    // the user has chosen a destination.
+    const { entries } = await hostState();
+    const sources: ExportSource[] = [];
+
+    for (const source of opts.sources) {
+      const resolved = resolveSelectedWorkspace(source.workspace, entries);
+
+      if (resolved.status !== 'ok') {
+        throw new Error(
+          'A selected workspace is no longer available. Refresh Manage chats and try again.',
+        );
+      }
+
+      sources.push({
+        workspace: resolved.workspace,
+        selectedIds: source.selectedIds && [...source.selectedIds],
+      });
+    }
+
+    const settings = transferSettings();
+
+    log.file(dest);
+
+    setUi({
+      status: 'running',
+      statusTitle: 'Exporting chats…',
+      statusDetail: 'Reading selected workspaces.',
+    });
+
+    const summary = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Exporting selected chats',
+        cancellable: true,
+      },
+      (progress, token) =>
+        runTransfer<
+          | { skipped: true; reason: string }
+          | NonNullable<import('./types').ExportObject['summary']>
+        >(
+          {
+            kind: 'export-many',
+            recoverText: recoverTextSetting(),
+            timeoutMs: settings.timeoutMs,
+            busyTimeoutMs: settings.busyTimeoutMs,
+            plansDir: settings.plansDir,
+            maxJsonProperties: settings.maxJsonProperties,
+            temporaryDirectory: settings.temporaryDirectory,
+            workspace: sources[0].workspace,
+            sources,
+            filePath: dest,
+          },
+          {
+            signal: linkedSignal(token),
+            onPhase: attachPhaseProgress(progress, log, 'export'),
+            onNote: log.note,
+            onEvent: log.event,
+          },
+        ),
+    );
+
+    if ('skipped' in summary) {
+      log.finish('cancelled');
+
+      setUi({
+        status: 'cancelled',
+        statusTitle: 'Export cancelled',
+        statusDetail: 'The selected chats could not be resolved.',
+      });
+
+      return;
+    }
+
+    await rememberExportDir(opts.context, dest);
+
+    if (!summary.complete) {
+      const notice = formatIncompleteExportNotice(summary.issues || []);
+
+      log.finish('incomplete');
+
+      setUi({
+        status: 'incomplete',
+        statusTitle: `Exported ${summary.exported}/${summary.selected} chats`,
+        statusDetail: notice.detail,
+      });
+
+      notifyCompletion(
+        () => vscode.window.showWarningMessage(notice.toast, 'Open log'),
+        (choice) =>
+          choice === 'Open log' ? openLog(opts.operations) : undefined,
+        () => opts.operations.warn('Unable to show export notification.'),
+      );
+
+      return;
+    }
+
+    log.finish('completed');
+
+    setUi({
+      status: 'completed',
+      statusTitle: `Exported ${summary.exported} chat${summary.exported === 1 ? '' : 's'}`,
+      statusDetail: path.basename(dest),
+    });
+
+    notifyCompletion(
+      () =>
+        vscode.window.showInformationMessage(
+          `Exported ${summary.exported} chat${summary.exported === 1 ? '' : 's'}.`,
+          'Open log',
+        ),
+      (choice) =>
+        choice === 'Open log' ? openLog(opts.operations) : undefined,
+      () => opts.operations.warn('Unable to show export notification.'),
+    );
+  } catch (error) {
+    if (isAbort(error)) {
+      log.finish('cancelled');
+
+      setUi({
+        status: 'cancelled',
+        statusTitle: 'Export cancelled',
+        statusDetail: 'The export was cancelled.',
+      });
+
+      return;
+    }
+
+    log.finish('failed', codeOf(error), error);
+
+    throw error;
   } finally {
     finishPhaseProgress(log);
   }
