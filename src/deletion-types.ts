@@ -167,10 +167,7 @@ export type ManagedPrepareResult =
     } & ManagedDeleteRefusal);
 
 /** Fields shared by deletion worker jobs. */
-type DeletionConnection = Pick<
-  TransferContext,
-  'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
->;
+type DeletionConnection = Pick<TransferContext, 'timeoutMs' | 'busyTimeoutMs'>;
 
 /** What the host knows about the window that started the operation. */
 export interface ManagedWindowFacts {

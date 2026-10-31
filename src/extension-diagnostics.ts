@@ -1,6 +1,4 @@
-import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 import * as vscode from 'vscode';
 import { inspectDatabase } from './db';
 import {
@@ -9,11 +7,11 @@ import {
   type DiagnosticCheck,
   type DiagnosticReport,
 } from './diagnostics-ui';
-import { config, storageOptions } from './extension-settings';
+import { storageOptions } from './extension-settings';
 import { runtime } from './extension-state';
 import { resolveSelectedWorkspace } from './operation-ui';
 import * as paths from './paths';
-import { ensureInitFile, findSqliteExecutable, sqliteVersion } from './sqlite';
+import { sqliteVersion } from './sqlite';
 
 /** Human host label; never show the numeric ExtensionKind. */
 export function hostKindLabel(kind: vscode.ExtensionKind): string {
@@ -75,35 +73,20 @@ export async function timedCheck(
   }
 }
 
-/** Independent diagnostics; missing sqlite3 must not block the window. */
+/** Independent diagnostics; a native binding failure must not block the window. */
 export async function collectDiagnosticReport(
   /** Extension storage and host state. */
   context: vscode.ExtensionContext,
 ): Promise<DiagnosticReport> {
-  const { sqlitePath } = config();
-  const executable = findSqliteExecutable(sqlitePath || undefined);
-
   const checks = await collectChecks([
     {
-      label: 'SQLite CLI',
+      label: 'Bundled SQLite',
       run: () =>
-        timedCheck('SQLite CLI', async (signal) => {
-          if (!executable) {
-            return {
-              label: 'SQLite CLI',
-              status: 'error',
-              summary: 'sqlite3 was not found on this machine.',
-            };
-          }
-
-          const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
-
-          await fs.promises.mkdir(tmp, { recursive: true });
-          const initFile = await ensureInitFile(tmp);
-          const version = await sqliteVersion(executable, initFile, signal);
+        timedCheck('Bundled SQLite', async (signal) => {
+          const version = await sqliteVersion(signal);
 
           return {
-            label: 'SQLite CLI',
+            label: 'Bundled SQLite',
             status: 'ok',
             summary: `Available, ${redact(version)}`,
           };
@@ -138,18 +121,6 @@ export async function collectDiagnosticReport(
       label: 'Write contract',
       run: () =>
         timedCheck('Write contract', async (signal) => {
-          if (!executable) {
-            return {
-              label: 'Write contract',
-              status: 'unknown',
-              summary: 'Skipped because sqlite3 is unavailable.',
-            };
-          }
-
-          const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
-
-          await fs.promises.mkdir(tmp, { recursive: true });
-          const initFile = await ensureInitFile(tmp);
           const userDir = paths.preferStorageRoot(storageOptions());
 
           const entries = await paths.listWorkspaceEntriesAsync(userDir, {
@@ -173,18 +144,14 @@ export async function collectDiagnosticReport(
           const entry = resolved.workspace;
 
           const ws = await inspectDatabase({
-            executable,
             database: entry.workspaceDbPath,
-            initFile,
             readOnly: true,
             signal,
             timeoutMs: 8000,
           });
 
           const gl = await inspectDatabase({
-            executable,
             database: entry.globalDbPath,
-            initFile,
             readOnly: true,
             signal,
             timeoutMs: 8000,

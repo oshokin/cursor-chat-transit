@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     path.join(project, 'out/transfer-events.js'),
   ) as typeof import('../src/transfer-events');
 
-  const { ensureInitFile, execSqlScript, findSqliteExecutable } = require(
+  const { execSqlScript } = require(
     path.join(project, 'out/sqlite.js'),
   ) as typeof import('../src/sqlite');
 
@@ -34,9 +34,6 @@ async function main(): Promise<void> {
     chatCount > 100
   )
     throw new Error('Use 1–10000 blobs and 1–100 chats.');
-  const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
-
-  if (!executable) throw new Error('sqlite3 is required.');
 
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), 'cct-statistics-bench-'),
@@ -47,8 +44,6 @@ async function main(): Promise<void> {
   ) as typeof import('../src/core');
 
   const ctx = {
-    executable,
-    initFile: await ensureInitFile(root),
     timeoutMs: 120000,
   };
 

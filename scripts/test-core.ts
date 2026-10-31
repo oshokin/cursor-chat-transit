@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { findSqliteExecutable } from '../src/sqlite';
+import { findSqliteExecutable } from '../test/support/sqlite-cli';
 import { spawnSync } from 'node:child_process';
 
 /** Repository root. */
@@ -58,12 +58,12 @@ if (!selected.length) throw new Error('No test files found');
  * Tests inside one file normally run one at a time, so a long SQLite file
  * becomes the whole run. These files use a private temp directory per test,
  * so several may run at once.
- * Windows process creation is already the slow part: extra sqlite3.exe
- * processes make every test slower, so those files stay serial there.
+ * Windows process creation is already the slow part, so these files stay
+ * serial there.
  * Files that patch process-wide hooks stay serial on every OS.
  */
 const sqliteTestConcurrency = 4;
-/** Intra-file parallelism. Off on Windows, where each sqlite3.exe is expensive. */
+/** Intra-file parallelism. Off on Windows, where worker startup is expensive. */
 const parallelSqlite = process.platform !== 'win32';
 
 /** SQLite files whose tests share module-level hooks. */
@@ -110,8 +110,7 @@ if (!watch) {
 }
 
 /**
- * Past the CPU count, more workers only pay off when a test is waiting on
- * sqlite3. On Windows that wait is the process start itself.
+ * Past the CPU count, more workers only pay off while tests await I/O.
  */
 const cpuCount = os.availableParallelism();
 const workers = String(parallelSqlite ? Math.max(cpuCount, 8) : cpuCount);
@@ -124,11 +123,7 @@ try {
       '--import',
       'tsx',
       '--test',
-      // A paused sqlite pipe keeps the worker alive after the last test.
-      // Exit once every test and hook has finished.
-      ...(watch
-        ? ['--watch']
-        : ['--test-force-exit', '--test-concurrency', workers]),
+      ...(watch ? ['--watch'] : ['--test-concurrency', workers]),
       ...entrypoints,
     ],
     { cwd: root, stdio: 'inherit', shell: false },

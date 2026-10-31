@@ -6,6 +6,7 @@ import path from 'node:path';
 import * as db from '../src/db';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import type {
   TransferContext,
   WorkspaceEntry,
@@ -19,7 +20,7 @@ const X = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 /** Nested bubble id Y. */
 const Y = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable ? false : 'sqlite3 CLI is required for transfer tests';
 
@@ -90,10 +91,7 @@ async function fixture(
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
 
-  const ctx: TransferContext = {
-    executable: executable as string,
-    initFile: await sql.ensureInitFile(dir),
-  };
+  const ctx: TransferContext = {};
 
   const workspace: WorkspaceEntry = {
     storageRoot: dir,

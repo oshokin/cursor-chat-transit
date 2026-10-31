@@ -3,7 +3,6 @@ import type { Receipt } from './import-policy';
 import { SqliteSession } from './sqlite-session';
 import type { ImportJournal, PendingImportChat } from './journal';
 import { journalPathFor } from './journal';
-import { ensureInitFile, findSqliteExecutable } from './sqlite';
 import { TransferError } from './types';
 
 /** Pending batch stored in the v4 journal database. */
@@ -33,6 +32,34 @@ export interface PendingChatRow {
   quality: 'complete' | 'history-only';
 }
 
+/** Durable state of one importer-owned destination model projection. */
+export interface ProjectionState {
+  /** Immutable source composer identity. */
+  sourceComposerId: string;
+  /** Immutable source snapshot identity. */
+  snapshotHash: string;
+  /** Receipt-backed destination composer. */
+  targetComposerId: string;
+  /** Versioned transformation that produced the managed value. */
+  projectionVersion: string;
+  /** Hash of the last model config owned by the importer. */
+  managedHash: string;
+  /** Hash of the currently desired model config. */
+  desiredHash: string;
+  /** Last durable outcome. */
+  outcome: 'applied' | 'already-current' | 'user-owned' | 'conflict';
+  /** Last time this state was observed or changed. */
+  updatedAt: string;
+}
+
+/** Prepared model projection write awaiting reconciliation. */
+export interface PendingProjection extends ProjectionState {
+  /** Unique projection operation. */
+  operationId: string;
+  /** Hash expected before the CAS write. */
+  beforeHash: string;
+}
+
 /** SQLite receipt store. Old JSON journals are not opened. */
 export class JournalStore {
   /** Bind an open sqlite session. Use `open`. */
@@ -47,8 +74,6 @@ export class JournalStore {
 
   /** Open or create the v4 journal for this target. */
   static async open(opts: {
-    /** Explicit executable from extension configuration. */
-    executable?: string;
     /** Directory that holds the journal database. */
     journalDir: string;
     /** Canonical target identity. */
@@ -56,19 +81,12 @@ export class JournalStore {
     /** Cancellation. */
     signal?: AbortSignal;
   }): Promise<JournalStore> {
-    const executable = opts.executable || findSqliteExecutable();
-
-    if (!executable) throw new Error('sqlite3 is required to record imports.');
-
     const filePath = journalPathFor(opts.journalDir, opts.targetKey);
-    const initFile = await ensureInitFile(opts.journalDir);
     let session: SqliteSession;
 
     try {
       session = await SqliteSession.open({
-        executable,
         database: filePath,
-        initFile,
         signal: opts.signal,
       });
     } catch (err) {
@@ -124,7 +142,50 @@ CREATE TABLE IF NOT EXISTS pending_bubbles (
   sha256 TEXT NOT NULL,
   PRIMARY KEY (operation_id, target_composer_id, target_bubble_id)
 );
+CREATE TABLE IF NOT EXISTS projections (
+  source_composer_id TEXT NOT NULL,
+  snapshot_hash TEXT NOT NULL,
+  target_composer_id TEXT NOT NULL,
+  projection_version TEXT NOT NULL,
+  managed_hash TEXT NOT NULL,
+  desired_hash TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source_composer_id, snapshot_hash, target_composer_id)
+);
+CREATE TABLE IF NOT EXISTS pending_projection (
+  operation_id TEXT PRIMARY KEY,
+  source_composer_id TEXT NOT NULL,
+  snapshot_hash TEXT NOT NULL,
+  target_composer_id TEXT NOT NULL,
+  projection_version TEXT NOT NULL,
+  before_hash TEXT NOT NULL,
+  managed_hash TEXT NOT NULL DEFAULT '',
+  desired_hash TEXT NOT NULL,
+  prepared_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS projection_events (
+  operation_id TEXT PRIMARY KEY,
+  source_composer_id TEXT NOT NULL,
+  snapshot_hash TEXT NOT NULL,
+  target_composer_id TEXT NOT NULL,
+  projection_version TEXT NOT NULL,
+  before_hash TEXT NOT NULL,
+  after_hash TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 `);
+
+      const pendingProjectionColumns = await session.exec(
+        `SELECT count(*) FROM pragma_table_info('pending_projection') WHERE name='managed_hash';`,
+      );
+
+      if (pendingProjectionColumns.trim() === '0') {
+        await session.exec(
+          `ALTER TABLE pending_projection ADD COLUMN managed_hash TEXT NOT NULL DEFAULT '';`,
+        );
+      }
 
       const existingHex = (
         await session.exec(
@@ -265,6 +326,111 @@ INSERT INTO meta(key, value) VALUES ('version', '1');`,
     );
 
     return rows;
+  }
+
+  /** Last durable destination projection for one source receipt. */
+  async projection(input: {
+    sourceComposerId: string;
+    snapshotHash: string;
+    targetComposerId: string;
+  }): Promise<ProjectionState | undefined> {
+    const line = (
+      await this.session.exec(
+        `SELECT json_object(
+          'sourceComposerId', source_composer_id,
+          'snapshotHash', snapshot_hash,
+          'targetComposerId', target_composer_id,
+          'projectionVersion', projection_version,
+          'managedHash', managed_hash,
+          'desiredHash', desired_hash,
+          'outcome', outcome,
+          'updatedAt', updated_at
+        ) FROM projections
+        WHERE source_composer_id=${sqlText(input.sourceComposerId)}
+          AND snapshot_hash=${sqlText(input.snapshotHash)}
+          AND target_composer_id=${sqlText(input.targetComposerId)};`,
+      )
+    ).trim();
+
+    return line ? (JSON.parse(line) as ProjectionState) : undefined;
+  }
+
+  /** Projection operation left between preparation and durable audit. */
+  async pendingProjection(): Promise<PendingProjection | undefined> {
+    const line = (
+      await this.session.exec(
+        `SELECT json_object(
+          'operationId', operation_id,
+          'sourceComposerId', source_composer_id,
+          'snapshotHash', snapshot_hash,
+          'targetComposerId', target_composer_id,
+          'projectionVersion', projection_version,
+          'beforeHash', before_hash,
+          'desiredHash', desired_hash,
+          'updatedAt', prepared_at,
+          'managedHash', CASE WHEN managed_hash='' THEN before_hash ELSE managed_hash END,
+          'outcome', 'conflict'
+        ) FROM pending_projection LIMIT 1;`,
+      )
+    ).trim();
+
+    return line ? (JSON.parse(line) as PendingProjection) : undefined;
+  }
+
+  /** Persist projection intent before mutating Cursor. */
+  async beginProjection(input: PendingProjection): Promise<void> {
+    await this.session.exec(`BEGIN IMMEDIATE;
+DELETE FROM pending_projection;
+INSERT INTO pending_projection(
+  operation_id, source_composer_id, snapshot_hash, target_composer_id,
+  projection_version, before_hash, managed_hash, desired_hash, prepared_at
+) VALUES (
+  ${sqlText(input.operationId)}, ${sqlText(input.sourceComposerId)},
+  ${sqlText(input.snapshotHash)}, ${sqlText(input.targetComposerId)},
+  ${sqlText(input.projectionVersion)}, ${sqlText(input.beforeHash)},
+  ${sqlText(input.managedHash)},
+  ${sqlText(input.desiredHash)}, ${sqlText(input.updatedAt)}
+);
+COMMIT;`);
+  }
+
+  /** Finalize one projection outcome and append its audit event. */
+  async completeProjection(
+    input: PendingProjection,
+    outcome: ProjectionState['outcome'],
+    afterHash: string,
+    managedHash = afterHash,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+
+    await this.session.exec(`BEGIN IMMEDIATE;
+INSERT OR REPLACE INTO projections(
+  source_composer_id, snapshot_hash, target_composer_id, projection_version,
+  managed_hash, desired_hash, outcome, updated_at
+) VALUES (
+  ${sqlText(input.sourceComposerId)}, ${sqlText(input.snapshotHash)},
+  ${sqlText(input.targetComposerId)}, ${sqlText(input.projectionVersion)},
+  ${sqlText(managedHash)}, ${sqlText(input.desiredHash)}, ${sqlText(outcome)},
+  ${sqlText(now)}
+);
+INSERT OR REPLACE INTO projection_events(
+  operation_id, source_composer_id, snapshot_hash, target_composer_id,
+  projection_version, before_hash, after_hash, outcome, created_at
+) VALUES (
+  ${sqlText(input.operationId)}, ${sqlText(input.sourceComposerId)},
+  ${sqlText(input.snapshotHash)}, ${sqlText(input.targetComposerId)},
+  ${sqlText(input.projectionVersion)}, ${sqlText(input.beforeHash)},
+  ${sqlText(afterHash)}, ${sqlText(outcome)}, ${sqlText(now)}
+);
+DELETE FROM pending_projection WHERE operation_id=${sqlText(input.operationId)};
+COMMIT;`);
+  }
+
+  /** Discard prepared intent after a verified no-write outcome. */
+  async clearPendingProjection(operationId: string): Promise<void> {
+    await this.session.exec(
+      `DELETE FROM pending_projection WHERE operation_id=${sqlText(operationId)};`,
+    );
   }
 
   /** Stream expected bubble hashes for one pending chat. */
@@ -616,7 +782,7 @@ DELETE FROM pending;`);
     );
   }
 
-  /** Close the sqlite3 process. */
+  /** Close the journal database session. */
   async close(): Promise<void> {
     await this.session.close();
   }

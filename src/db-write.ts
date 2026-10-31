@@ -79,8 +79,8 @@ export function itemCasReplaceSql(
   const next = sqlText(JSON.stringify(value));
   const keySql = sqlText(key);
 
-  // With sqlite3 -bail, a failed guard terminates before COMMIT. Closing
-  // the connection then rolls back the entire open transaction.
+  // A failed guard aborts before COMMIT. Closing the connection then rolls
+  // back the entire open transaction.
   const guard =
     'CREATE TEMP TABLE IF NOT EXISTS cct_cas_guard (ok INTEGER CONSTRAINT cct_cas_conflict CHECK(ok = 1));';
 
@@ -106,7 +106,24 @@ export function itemCasReplaceSql(
   ].join('\n');
 }
 
-/** True when a sqlite3 CLI failure is a CAS mismatch. */
+/** Replace one cursorDiskKV text value only when its raw bytes still match. */
+export function kvCasReplaceSql(
+  key: string,
+  expectedRaw: string,
+  nextRaw: string,
+): string {
+  const expectedHex = Buffer.from(expectedRaw, 'utf8')
+    .toString('hex')
+    .toUpperCase();
+
+  return [
+    'CREATE TEMP TABLE IF NOT EXISTS cct_cas_guard (ok INTEGER CONSTRAINT cct_cas_conflict CHECK(ok = 1));',
+    `UPDATE cursorDiskKV SET value=${sqlText(nextRaw)} WHERE key=${sqlText(key)} AND typeof(value)='text' AND upper(hex(CAST(value AS BLOB)))='${expectedHex}';`,
+    'INSERT INTO temp.cct_cas_guard(ok) SELECT 0 WHERE changes() != 1;',
+  ].join('\n');
+}
+
+/** True when an SQLite failure is a CAS mismatch. */
 export function isCasConflict(err: unknown): boolean {
   const text =
     err instanceof Error

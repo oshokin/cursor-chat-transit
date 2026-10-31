@@ -1,3 +1,4 @@
+import { logValue } from './log-format';
 import * as vscode from 'vscode';
 import type {
   ManagedDeleteRequest,
@@ -17,7 +18,6 @@ import {
 import {
   currentWorkspaceDatabase,
   listHostEntriesAsync,
-  prepareSqlite,
 } from './extension-workspaces';
 import {
   confirmationCopy,
@@ -75,7 +75,6 @@ export async function deleteManagedChats(
         statusDetail: 'Checking workspace data and chat ownership.',
       });
 
-      const sqlite = await prepareSqlite(context);
       const settings = transferSettings();
 
       const prepared = await vscode.window.withProgress(
@@ -92,7 +91,6 @@ export async function deleteManagedChats(
           return runTransfer<ManagedPrepareResult>(
             {
               kind: 'prepare-managed-delete',
-              ...sqlite,
               ...settings,
               userDataRoot: host.userDir,
               requests,
@@ -136,7 +134,7 @@ export async function deleteManagedChats(
 
       for (const target of prepared.plan.targets)
         log.fact(
-          `Workspace deletion prepared workspace=${JSON.stringify(target.name)} storageId=${JSON.stringify(target.workspace.storageId)} chats=${target.ids.length}`,
+          `Workspace deletion prepared workspace=${logValue(target.name)} storageId=${logValue(target.workspace.storageId)} chats=${target.ids.length}`,
         );
 
       setUi({
@@ -192,7 +190,6 @@ export async function deleteManagedChats(
           return runTransfer<ManagedDeleteResult>(
             {
               kind: 'delete-managed-data',
-              ...sqlite,
               ...settings,
               plan: prepared.plan,
               workspaces: fresh.entries,

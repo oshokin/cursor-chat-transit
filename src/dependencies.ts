@@ -3,7 +3,6 @@ export {
   attachmentDirectory,
   decodeAttachment,
   encodeAttachment,
-  readAttachmentFile,
   resolveAttachmentPath,
   verifyAttachmentFile,
   writeAttachmentFile,
@@ -30,5 +29,3 @@ export {
   encodeSqliteBytes,
   parseExportResources,
 } from './resource-codec';
-export { collectExportResources } from './resource-export';
-export { planImportResources } from './resource-import';

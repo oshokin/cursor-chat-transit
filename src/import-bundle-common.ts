@@ -25,6 +25,13 @@ export interface Plan {
   skipped: ImportResult['skippedChats'];
   /** Chats already present at the same snapshot. */
   already: ImportResult['alreadyImportedChats'];
+  /** Same-snapshot copies whose archived model may need compatibility repair. */
+  repair: Array<{
+    /** Catalog ordinal of the archived source chat. */
+    ordinal: number;
+    /** Existing destination composer id. */
+    targetComposerId: string;
+  }>;
   /** Chats whose snapshot differs from the destination. */
   newVersions: ImportResult['newVersionChats'];
   /** Chats recovered from a previous interrupted import. */
@@ -69,6 +76,8 @@ export function resultFrom(
   written: string[],
   /** Destination ids imported as history-only. */
   historyOnlyIds: string[],
+  /** Existing same-snapshot copies repaired in this run. */
+  modelConfigsRepaired = 0,
 ): ImportResult {
   return {
     imported: written.length,
@@ -76,9 +85,9 @@ export function resultFrom(
     historyOnly: historyOnlyIds.length,
     skipped: plan.skipped.length,
     alreadyImported: plan.already.length,
-    alreadyPresent: plan.already.length,
     newVersions: plan.newVersions.length,
     restored: plan.restored.length,
+    modelConfigsRepaired,
     incomplete: 0,
     composerIds: written,
     historyOnlyIds,

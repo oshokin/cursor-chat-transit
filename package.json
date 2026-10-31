@@ -2,7 +2,7 @@
   "name": "cursor-chat-transit",
   "displayName": "Cursor Chat Transit",
   "description": "Move your Cursor chats between workspaces and devices.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "oshokin",
   "icon": "resources/marketplace.png",
   "license": "MIT",
@@ -48,12 +48,6 @@
           "default": "",
           "scope": "machine",
           "description": "Local Cursor user-data directory. Empty means auto-detect."
-        },
-        "cursorChatTransit.sqlitePath": {
-          "type": "string",
-          "default": "",
-          "scope": "machine",
-          "description": "Absolute path to the local sqlite3 executable."
         },
         "cursorChatTransit.plansDirectory": {
           "type": "string",
@@ -409,7 +403,7 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p tsconfig.json && tsc -p tsconfig.webview.json",
+    "compile": "node --import tsx scripts/prepare-sqlite.ts && tsc -p tsconfig.json && tsc -p tsconfig.webview.json",
     "watch": "node --import tsx scripts/watch.ts",
     "watch:src": "tsc -p tsconfig.json -w --preserveWatchOutput",
     "watch:webview": "tsc -p tsconfig.webview.json -w --preserveWatchOutput",
@@ -423,7 +417,7 @@
     "test:sqlite": "node --import tsx scripts/test-core.ts --sqlite test",
     "test:host": "node --import tsx scripts/test-host.ts",
     "test:perf": "node --import tsx scripts/perf-statistics.ts && node --import tsx scripts/perf-bundle.ts && node --import tsx scripts/perf-plan-inventory.ts",
-    "check-package": "node --import tsx scripts/check-package.ts",
+    "check-package": "node --import tsx scripts/check-package.ts && node --import tsx scripts/check-native-package.ts",
     "release:preview": "node --import tsx scripts/prepare-release.ts preview",
     "release:prepare": "node --import tsx scripts/prepare-release.ts prepare",
     "ensure-ci-sqlite": "node --import tsx scripts/ensure-ci-sqlite.ts",
@@ -438,6 +432,7 @@
     "@eslint/js": "^10.0.1",
     "@release-it/conventional-changelog": "12.0.2",
     "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/better-sqlite3": "9.6.0",
     "@types/node": "24.19.1",
     "@types/semver": "7.8.0",
     "@types/vscode": "1.125.0",
@@ -465,5 +460,8 @@
   "allowScripts": {
     "@vscode/vsce-sign@2.1.0": true,
     "esbuild@0.28.2": true
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.3"
   }
 }

@@ -16,12 +16,8 @@ import {
   findEmptyWorkspaces,
   prepareManagedDelete,
 } from '../src/managed-delete-run';
-import {
-  ensureInitFile,
-  execSql,
-  execSqlScript,
-  findSqliteExecutable,
-} from '../src/sqlite';
+import { execSql, execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
 import { assessWorkspaceHistory } from '../src/workspace-history';
 
@@ -83,10 +79,7 @@ async function liveProfile(): Promise<{
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cct-live-schema-'));
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const globalDbPath = path.join(root, 'User', 'globalStorage', 'state.vscdb');
   const project = path.join(root, 'projects', 'repo', 'sentinel');
@@ -292,10 +285,7 @@ test(
   async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cct-live-odd-'));
 
-    const ctx: TransferContext = {
-      executable: executable!,
-      initFile: await ensureInitFile(root),
-    };
+    const ctx: TransferContext = {};
 
     const globalDbPath = path.join(
       root,

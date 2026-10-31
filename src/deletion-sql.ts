@@ -431,12 +431,13 @@ export async function deleteMessageRows(
       predicates
         .map(
           (/** SQL predicate for one composer. */ where) =>
-            `SELECT EXISTS(SELECT 1 FROM main.cursorDiskKV WHERE ${where} LIMIT 1);`,
+            `SELECT EXISTS(SELECT 1 FROM main.cursorDiskKV WHERE ${where} LIMIT 1)`,
         )
-        .join('\n'),
+        .join(' UNION ALL '),
     );
 
     if (
+      remaining.trim().split(/\s+/).length !== batch.length ||
       remaining
         .trim()
         .split(/\s+/)

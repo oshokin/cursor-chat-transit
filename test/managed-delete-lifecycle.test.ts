@@ -83,12 +83,6 @@ loader._load = function (id, parent, isMain) {
     return { transferSettings: () => ({ busyTimeoutMs: 0 }) };
   if (id === './extension-workspaces')
     return {
-      prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
-      listHostEntries: () => ({
-        entries: [],
-        userDir: '/fixture',
-        identity: undefined,
-      }),
       listHostEntriesAsync: async () => ({
         entries: [],
         userDir: '/fixture',

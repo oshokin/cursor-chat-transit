@@ -203,8 +203,6 @@ test('measured NDJSON consumption reports exact file bytes and no success after 
   const ticks: import('../src/types').TransferPhaseMetrics[] = [];
 
   const ctx = {
-    executable: '',
-    initFile: '',
     onPhase: (
       _phase: unknown,
       metrics?: import('../src/types').TransferPhaseMetrics,

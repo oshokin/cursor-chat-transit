@@ -29,3 +29,16 @@ export function formatLogLine(
 ): string {
   return `[${logTimestamp(date)}] [${level}] ${logSentence(text)}`;
 }
+
+/** Quote human-facing fields without JSON-escaping Windows path separators. */
+export function logValue(value: string): string {
+  const clean = value
+    .replace(
+      /[\p{Cc}\p{Cf}]/gu,
+      (character) =>
+        `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    )
+    .replace(/"/g, '\\"');
+
+  return `"${clean}"`;
+}

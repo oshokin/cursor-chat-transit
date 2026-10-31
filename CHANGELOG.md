@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.1.0] - 2026-10-31
+
+### Added
+
+- Bundle better-sqlite3 13.0.3 and SQLite 3.53.4 for offline native database access on x64/arm64 Windows, macOS and Linux.
+- Enforce native SQL deadlines outside the busy worker, with parent-loss protection and rollback tests.
+- Add typed Buffer/64-bit integer IPC and explicit FULL durability for main and attached databases.
+
+### Changed
+
+- Remove the system SQLite dependency and the obsolete sqlitePath setting.
+- Use byte-bounded native resource reads, prepared message/resource inserts, and shared warm standalone workers without retained database handles.
+- Keep archive version, journal state, supported schema checks and interrupted-import recovery compatible.
+
+### Fixed
+
+- Display Windows paths with literal backslashes in human logs while safely escaping quotes and controls.
+- Verify batched deletions with one UNION ALL query and check the result count.
+
+## 1.0.1
+
+### Chat transfer
+
+- Remap composer and message identifiers inside Cursor's current `conversationState` format, including nested stream and tool rows, and keep parent and subagent ids aligned in that state.
+- Treat a previous import as a new copy when its stored conversation state still contains the source chat id, so those older copies can be remapped correctly.
+- Replace an archived model that is unavailable on the destination with the destination's current selection. Keep an available archived model, including unknown fields.
+- On a repeated import of the same snapshot, repair the existing copy's unavailable model without creating another chat. Leave a model the user selected after import unchanged.
+- Reconcile an interrupted model repair from the import journal, and ask to quit and reopen Cursor after a repair-only import.
+
+### Workspace and chat selection
+
+- Count user messages from stored top-level bubbles when Cursor's compatibility index is empty.
+- Treat current-format chats that keep their history in conversation state as ready when the stored root user messages and state ids match.
+- Mark current-format chats incomplete when nested stream or tool rows have no stored root, conversation state still names the source chat, or family metadata points at a missing composer.
+
 ## 1.0.0
 
 Initial release of Cursor Chat Transit.

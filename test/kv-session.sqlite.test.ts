@@ -5,7 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { SqliteSession } from '../src/sqlite-session';
 import { readSessionKv } from '../src/kv-session';
-import { ensureInitFile, findSqliteExecutable, execSql } from '../src/sqlite';
+import { execSql } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 
 /** Close the sqlite process before deleting its files. A failed first after-hook does not run the rest. */
 async function removeFixture(
@@ -33,9 +34,7 @@ async function openReadSession(
   const root = await fs.mkdtemp(path.join(os.tmpdir(), dirPrefix));
 
   const options = {
-    executable,
     database: path.join(root, 'kv.sqlite'),
-    initFile: await ensureInitFile(root),
   };
 
   try {
@@ -161,9 +160,7 @@ test(
     t.after(() => removeFixture(undefined, root));
 
     const options = {
-      executable,
       database: path.join(root, 'kv.sqlite'),
-      initFile: await ensureInitFile(root),
     };
 
     await execSql({

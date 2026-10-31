@@ -12,11 +12,8 @@ import {
   prepareManagedDelete,
 } from '../src/managed-delete-run';
 import { MAX_SQLITE_VALUE_BYTES } from '../src/bundle-limits';
-import {
-  ensureInitFile,
-  execSqlScript,
-  findSqliteExecutable,
-} from '../src/sqlite';
+import { execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { runStatistics } from '../src/statistics';
 import { SqliteSession } from '../src/sqlite-session';
 import { observeTransfer } from '../src/transfer-events';
@@ -46,10 +43,7 @@ async function profile(): Promise<{
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cct-empty-'));
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const globalDbPath = path.join(root, 'User', 'globalStorage', 'state.vscdb');
 

@@ -1,7 +1,8 @@
+import { readSessionKv } from './kv-session';
 import { bubbleRange, sqlText } from './core';
 import { validTimestamp } from './activity';
 import { bubbleKeySql, detectLayout, readSchema } from './schema';
-import { execSql, execSqlHexRows } from './sqlite';
+import { execSql, execSqlByteRows, withSqlite } from './sqlite';
 import type { BubbleRecord, ComposerHeader, Layout, SqliteConn } from './types';
 
 /** Decode UTF-8 bytes as JSON, or null if empty. */
@@ -52,10 +53,9 @@ export async function readItemTextState(
   key: string,
 ): Promise<ItemTextState> {
   const row = (
-    await selectHexRows(
+    await selectByteRows(
       conn,
-      `SELECT hex(typeof(value)), hex(value) FROM ItemTable WHERE key = ${sqlText(key)};`,
-      2,
+      `SELECT CAST(typeof(value) AS BLOB), CAST(value AS BLOB) FROM ItemTable WHERE key = ${sqlText(key)};`,
     )
   )[0];
 
@@ -92,19 +92,17 @@ export function asComposerHeader(
   return value as ComposerHeader;
 }
 
-/** Run a read-only hex query and collect decoded rows. */
-export async function selectHexRows(
+/** Run a read-only query and collect raw SQLite values as bytes. */
+export async function selectByteRows(
   conn: SqliteConn,
   /** SQL statement to run. */
   sql: string,
-  cols: number,
 ): Promise<Buffer[][]> {
   const rows: Buffer[][] = [];
 
-  await execSqlHexRows({
+  await execSqlByteRows({
     ...conn,
     sql,
-    cols,
     readOnly: true,
     onRow: (fields) => {
       rows.push(fields);
@@ -226,15 +224,14 @@ export async function readComposerHeadersTable(
     name: string,
   ) =>
     includeColumnDates && columns?.includes(name)
-      ? `hex(CAST(${name} AS TEXT))`
-      : "hex('')";
+      ? `CAST(CAST(${name} AS TEXT) AS BLOB)`
+      : "CAST('' AS BLOB)";
 
   const composers: ComposerHeader[] = [];
 
-  await execSqlHexRows({
+  await execSqlByteRows({
     ...conn,
-    sql: `SELECT hex(composerId), ${hasWorkspaceId ? "hex(COALESCE(workspaceId, ''))" : "hex('')"}, hex(value), ${timestampColumn('createdAt')}, ${timestampColumn('lastUpdatedAt')}${hasSubagent ? ", hex(COALESCE(CAST(isSubagent AS TEXT), ''))" : ''} FROM composerHeaders;`,
-    cols: hasSubagent ? 6 : 5,
+    sql: `SELECT CAST(composerId AS BLOB), ${hasWorkspaceId ? "CAST(COALESCE(workspaceId, '') AS BLOB)" : "CAST('' AS BLOB)"}, CAST(value AS BLOB), ${timestampColumn('createdAt')}, ${timestampColumn('lastUpdatedAt')}${hasSubagent ? ", CAST(COALESCE(CAST(isSubagent AS TEXT), '') AS BLOB)" : ''} FROM composerHeaders;`,
     readOnly: true,
     onRow: (
       /** Hex columns for one composerHeaders row. */
@@ -307,10 +304,9 @@ export async function composerHeaderWorkspaceColumn(
 ): Promise<string | null> {
   if (!columns?.includes('workspaceId')) return null;
 
-  const rows = await selectHexRows(
+  const rows = await selectByteRows(
     conn,
-    `SELECT hex(CAST(COALESCE(workspaceId, '') AS TEXT)) FROM composerHeaders WHERE composerId = ${sqlText(composerId)};`,
-    1,
+    `SELECT CAST(CAST(COALESCE(workspaceId, '') AS TEXT) AS BLOB) FROM composerHeaders WHERE composerId = ${sqlText(composerId)};`,
   );
 
   if (!rows.length || !rows[0]?.[0]) return '';
@@ -334,10 +330,9 @@ export async function composerHeaderArchiveColumn(
 ): Promise<ArchiveColumn> {
   if (!columns?.includes('isArchived')) return 'unsupported';
 
-  const rows = await selectHexRows(
+  const rows = await selectByteRows(
     conn,
-    `SELECT hex(CAST(COALESCE(isArchived, '') AS TEXT)) FROM composerHeaders WHERE composerId = ${sqlText(composerId)};`,
-    1,
+    `SELECT CAST(CAST(COALESCE(isArchived, '') AS TEXT) AS BLOB) FROM composerHeaders WHERE composerId = ${sqlText(composerId)};`,
   );
 
   if (!rows.length || !rows[0]?.[0]) return 'absent';
@@ -366,10 +361,9 @@ export async function readKvTextImpl(
   key: string,
 ): Promise<string | null> {
   const row = (
-    await selectHexRows(
+    await selectByteRows(
       conn,
-      `SELECT hex(value) FROM cursorDiskKV WHERE key = ${sqlText(key)};`,
-      1,
+      `SELECT CAST(value AS BLOB) FROM cursorDiskKV WHERE key = ${sqlText(key)};`,
     )
   )[0];
 
@@ -391,24 +385,7 @@ export async function readKvBytes(
   conn: SqliteConn,
   key: string,
 ): Promise<KvBytes | null> {
-  const row = (
-    await selectHexRows(
-      conn,
-      `SELECT hex(typeof(value)), hex(CAST(value AS BLOB)) FROM cursorDiskKV WHERE key = ${sqlText(key)};`,
-      2,
-    )
-  )[0];
-
-  if (!row || !row[0]) return null;
-  const storageClass = textFromBuf(row[0]);
-
-  if (storageClass !== 'text' && storageClass !== 'blob') {
-    throw new Error(
-      `Unsupported SQLite storage class: ${storageClass || 'empty'}`,
-    );
-  }
-
-  return { storageClass, bytes: row[1] || Buffer.alloc(0) };
+  return withSqlite(conn, (session) => readSessionKv(session, key));
 }
 
 /** Read many `agentKv:blob:*` values. Missing keys are omitted. */
@@ -422,19 +399,19 @@ export async function readKvBlobs(
   for (let offset = 0; offset < unique.length; offset += 32) {
     const chunk = unique.slice(offset, offset + 32);
 
-    const sql = chunk
-      .map((key) => {
-        if (!/^agentKv:blob:[0-9a-f]{64}$/.test(key)) {
-          throw new Error('Invalid blob key.');
-        }
+    for (const key of chunk)
+      if (!/^agentKv:blob:[0-9a-f]{64}$/.test(key))
+        throw new Error('Invalid blob key.');
+    const rows: Buffer[][] = [];
 
-        const quoted = sqlText(key);
-
-        return `SELECT hex(${quoted}), hex(typeof(value)), hex(CAST(value AS BLOB)) FROM cursorDiskKV WHERE key = ${quoted};`;
-      })
-      .join('\n');
-
-    const rows = await selectHexRows(conn, sql, 3);
+    await execSqlByteRows({
+      ...conn,
+      sql: `SELECT CAST(key AS BLOB), CAST(typeof(value) AS BLOB), CAST(value AS BLOB) FROM cursorDiskKV WHERE key IN (${chunk.map(() => '?').join(',')});`,
+      parameters: chunk,
+      onRow: (fields) => {
+        rows.push(fields);
+      },
+    });
 
     for (const row of rows) {
       const key = textFromBuf(row[0] || Buffer.alloc(0));
@@ -501,12 +478,13 @@ export async function forEachBubble(
   const { sql } = bubbleKeySql(composerId);
   let count = 0;
 
-  await execSqlHexRows({
+  await execSqlByteRows({
     ...conn,
     sql,
-    cols: 3,
     readOnly: true,
     onRow: async (fields) => {
+      if (fields[3] && Number(fields[3].toString('utf8')) > 33554432)
+        throw new Error('Message exceeds the SQLite value size limit.');
       const bubble = bubbleFromFields(fields);
 
       if (!bubble) return;
@@ -526,10 +504,9 @@ export async function listBubbleIds(
   const { lower, upper } = bubbleRange(composerId);
   const ids = new Set<string>();
 
-  await execSqlHexRows({
+  await execSqlByteRows({
     ...conn,
-    sql: `SELECT hex(key) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)};`,
-    cols: 1,
+    sql: `SELECT CAST(key AS BLOB) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)};`,
     readOnly: true,
     onRow: (/** Hex-encoded cursorDiskKV key. */ [keyBuf]) => {
       const key = textFromBuf(keyBuf);
@@ -543,20 +520,6 @@ export async function listBubbleIds(
   });
 
   return ids;
-}
-
-/** Range-scan bubble rows for one composer. */
-export async function readBubbles(
-  conn: SqliteConn,
-  composerId: string,
-): Promise<BubbleRecord[]> {
-  const bubbles: BubbleRecord[] = [];
-
-  await forEachBubble(conn, composerId, (bubble) => {
-    bubbles.push(bubble);
-  });
-
-  return bubbles;
 }
 
 /** Mutable read entry points so tests can inject concurrent changes. */

@@ -1,7 +1,9 @@
+import { SqliteSupervisor } from './sqlite-supervisor';
 import type { DeletionJob } from './deletion-types';
 import type { RecoveryPreview } from './recovery-preview';
 import type { StatisticsJob, StatisticsUpdate } from './statistics';
 import type { TransferEvent } from './transfer-events';
+import type { ModelImportPolicy } from './model-compatibility';
 import type {
   TransferPhase,
   TransferPhaseMetrics,
@@ -15,13 +17,13 @@ export interface TransferJob {
   recoverText?: boolean;
   /** Which operation to run. */
   kind: 'export' | 'import' | 'list-chats';
-  /** sqlite3 executable. */
-  executable: string;
-  /** sqlite3 init file. */
-  initFile: string;
   /** Per-process sqlite timeout. */
   timeoutMs?: number;
+  /** SQLite busy timeout. */
   busyTimeoutMs?: number;
+  /** Destination model compatibility facts for import. */
+  modelImportPolicy?: ModelImportPolicy;
+  /** Plans directory. */
   plansDir?: string;
   /** Object-property budget for one JSON payload during this operation. */
   maxJsonProperties?: number;
@@ -89,11 +91,13 @@ export async function runTransfer<T>(
 
   const child = fork(script, [], {
     execArgv,
+    env: { ...process.env, CCT_SQLITE_SUPERVISED: '1' },
     stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
   });
 
   return await new Promise<T>((resolve, reject) => {
     let settled = false;
+    const supervisor = new SqliteSupervisor(child);
 
     /** Settle the worker promise once. */
     const finish = (
@@ -116,6 +120,8 @@ export async function runTransfer<T>(
     const onMessage = (message: {
       /** IPC kind: event, phase, note, done, error, or recovery. */
       type: string;
+      requestId?: number;
+      timeoutMs?: number;
       /** Preflight counts when `type` is `recovery`. No message bodies. */
       preview?: RecoveryPreview;
       /** A compact statistics result; no chat payloads. */
@@ -141,6 +147,9 @@ export async function runTransfer<T>(
       /** Extra error detail copied onto the thrown Error. */
       detail?: string;
     }) => {
+      if (supervisor.observe(message as import('./sqlite-protocol').SqlWatch))
+        return;
+
       if (message.type === 'recovery' && message.preview) {
         void (handlers.onRecovery?.(message.preview) || Promise.resolve(false))
           .then((/** Whether the worker accepted the job. */ accepted) => {
@@ -211,9 +220,10 @@ export async function runTransfer<T>(
       // `exit` can be queued ahead of the last IPC message in the same poll.
       setImmediate(() => {
         fail(
-          new Error(
-            `The transfer process stopped (${code ?? 'signal'}). Cursor was not restarted.`,
-          ),
+          supervisor.reason() ||
+            new Error(
+              `The transfer process stopped (${code ?? 'signal'}). Cursor was not restarted.`,
+            ),
         );
       });
     };
@@ -221,17 +231,20 @@ export async function runTransfer<T>(
     /** Cancel the child when the caller aborts. */
     const onAbort = () => {
       if (child.connected) child.send({ type: 'cancel' }, () => undefined);
+
+      supervisor.cancel();
     };
 
     /** Drop listeners after the walk settles. */
     const cleanup = () => {
+      supervisor.dispose();
       child.off('message', onMessage);
-      child.off('exit', onExit);
+      child.off('close', onExit);
       handlers.signal?.removeEventListener('abort', onAbort);
     };
 
     child.on('message', onMessage);
-    child.once('exit', onExit);
+    child.once('close', onExit);
     child.once('error', (err) => fail(err));
     handlers.signal?.addEventListener('abort', onAbort, { once: true });
 

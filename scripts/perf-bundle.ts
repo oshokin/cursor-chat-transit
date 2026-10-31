@@ -14,13 +14,36 @@ async function main(): Promise<void> {
     path.join(project, 'out/bundle-writer.js'),
   ) as typeof import('../src/bundle-writer');
 
-  const { importFromBundle } = require(
-    path.join(project, 'out/import-bundle.js'),
-  ) as typeof import('../src/import-bundle');
+  const { runTransfer } = require(
+    path.join(project, 'out/transfer-process.js'),
+  ) as typeof import('../src/transfer-process');
 
-  const { exportToFile } = require(
-    path.join(project, 'out/export-transfer.js'),
-  ) as typeof import('../src/export-transfer');
+  let maxBatchMs = 0;
+
+  const importFromBundle = (
+    ctx: TransferContext,
+    filePath: string,
+    workspace: WorkspaceEntry,
+  ) =>
+    runTransfer<import('../src/types').ImportResult>(
+      { ...ctx, kind: 'import', filePath, workspace },
+      {
+        onPhase: ctx.onPhase,
+        onEvent: (event) => {
+          if (
+            event.action === 'Commit prepared batch' &&
+            event.status === 'completed'
+          )
+            maxBatchMs = Math.max(maxBatchMs, event.elapsedMs || 0);
+        },
+      },
+    );
+
+  const exportToFile = (
+    ctx: TransferContext,
+    workspace: WorkspaceEntry,
+    filePath: string,
+  ) => runTransfer({ ...ctx, kind: 'export', filePath, workspace }, {});
 
   const sql = require(
     path.join(project, 'out/sqlite.js'),
@@ -36,9 +59,6 @@ async function main(): Promise<void> {
     payloadBytes < 1
   )
     throw new Error('Invalid benchmark size.');
-  const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
-
-  if (!executable) throw new Error('sqlite3 is required.');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-bench-'));
   const chat = '11111111-1111-4111-8111-111111111111';
   let rss = process.memoryUsage().rss;
@@ -48,10 +68,7 @@ async function main(): Promise<void> {
   }, 25);
 
   try {
-    const ctx: TransferContext = {
-      executable,
-      initFile: await sql.ensureInitFile(root),
-    };
+    const ctx: TransferContext = {};
 
     const workspace: WorkspaceEntry = {
       storageRoot: root,
@@ -97,7 +114,12 @@ async function main(): Promise<void> {
       await writer.writeBubble(bubble, {
         composerId: chat,
         bubbleId: bubble,
-        text: body,
+        text:
+          process.env.CCT_BENCH_RANDOM === '1'
+            ? randomBytes(Math.ceil((payloadBytes * 3) / 4))
+                .toString('base64')
+                .slice(0, payloadBytes)
+            : body,
       });
     }
 
@@ -112,7 +134,6 @@ async function main(): Promise<void> {
         writePhaseMs += performance.now() - writeStarted;
     };
 
-    let maxBatchMs = 0;
     let imported: Awaited<ReturnType<typeof importFromBundle>>;
     const start = performance.now();
     const eventsPath = path.join(project, 'out/transfer-events.js');
@@ -174,7 +195,8 @@ async function main(): Promise<void> {
           maxBatchMs: maxBatchMs || undefined,
           exportMs: Math.round(exportMs),
           repeatMs: Math.round(repeatMs),
-          peakRssBytes: rss,
+          controllerPeakRssBytes: rss,
+          memoryScope: 'controller only; excludes transfer workers',
           zipBytes: (await fs.stat(exportedPath)).size,
         },
         null,

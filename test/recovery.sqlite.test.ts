@@ -6,6 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import * as db from '../src/db';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import * as transfer from '../src/transfer';
 import { TransferError } from '../src/types';
 import type {
@@ -23,7 +24,7 @@ const C = '33333333-3333-4333-8333-333333333333';
 /** Unusable chat in mixed-export fixtures. */
 const D = '44444444-4444-4444-8444-444444444444';
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable ? false : 'sqlite3 CLI is required for recovery tests';
 
@@ -44,10 +45,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
 
-  const ctx: TransferContext = {
-    executable: executable as string,
-    initFile: await sql.ensureInitFile(dir),
-  };
+  const ctx: TransferContext = {};
 
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
@@ -471,8 +469,6 @@ test(
         runTransfer(
           {
             kind: 'import',
-            executable: ctx.executable!,
-            initFile: ctx.initFile,
             workspace,
             filePath: file,
             interactiveRecovery: true,
@@ -674,7 +670,6 @@ test(
     const targetKey = await targetKeyFor(workspace);
 
     const journal = await JournalStore.open({
-      executable: ctx.executable,
       journalDir,
       targetKey,
     });
@@ -725,7 +720,6 @@ test(
     assert.equal(await db.readKvText(gl, key), text);
 
     const retained = await JournalStore.open({
-      executable: ctx.executable,
       journalDir,
       targetKey,
     });
@@ -879,8 +873,6 @@ test(
     >(
       {
         kind: 'export',
-        executable: ctx.executable!,
-        initFile: ctx.initFile,
         workspace,
         filePath: file,
         selectedIds: [A],

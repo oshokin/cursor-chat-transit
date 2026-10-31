@@ -154,7 +154,6 @@ Open User Settings and search `@ext:oshokin.cursor-chat-transit`.
 | Setting                                            | Default   | Purpose                                                                                                                         |
 | -------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `cursorChatTransit.userDataDir`                    | Empty     | Use a specific local Cursor profile; empty means automatic discovery                                                            |
-| `cursorChatTransit.sqlitePath`                     | Empty     | Absolute path to SQLite when it is not on `PATH`                                                                                |
 | `cursorChatTransit.plansDirectory`                 | Empty     | Read and restore plans in a custom directory; empty uses `~/.cursor/plans`                                                      |
 | `cursorChatTransit.sqlite.operationTimeoutSeconds` | `600`     | Query/process or persistent-session request deadline, from 30 to 3600 seconds                                                   |
 | `cursorChatTransit.sqlite.busyTimeoutSeconds`      | `5`       | SQLite busy-handler wait, from 0 to 30 seconds                                                                                  |
@@ -175,6 +174,8 @@ Timeouts apply to the next transfer or analysis. A query deadline is not a deadl
 
 ## Database access
 
+SQLite is bundled through better-sqlite3 13.0.3 (SQLite 3.53.4). Queries run outside the extension host. Native SQL has an independent parent watchdog; cancellation and lost supervision release the worker and its writers. Windows log paths preserve normal single backslash separators, including UNC and extended-length paths.
+
 Exports read selected records through a read-only transaction and release it before archive hashing and compression. Imports prepare rows outside Cursor's database, write bounded batches, publish chat headers, and verify the result. Neither operation creates a full database backup. The extension has no full-profile restore command; its journal supports interrupted-import reconciliation, not arbitrary rollback.
 
 In WAL mode, reads allow concurrent writes but can delay checkpointing while a transaction is open. Other journal modes follow SQLite's normal reader/writer locking rules. The extension does not change journal mode or force checkpoints. Statistics use short read transactions and release them between rows.
@@ -193,7 +194,7 @@ File actions include concrete paths, chat identity when available, byte counts w
 
 | Problem                               | Action                                                                                    |
 | ------------------------------------- | ----------------------------------------------------------------------------------------- |
-| SQLite is unavailable                 | Check `sqlite3 --version` and configure its executable path                               |
+| SQLite is unavailable                 | Reinstall the full VSIX and use a supported Cursor runtime with Node-API 10               |
 | A workspace is missing                | Open it in Cursor and check the selected local profile                                    |
 | An imported chat is missing           | Quit and reopen Cursor, then check the destination workspace                              |
 | Cursor shows **Chat Too Old**         | Preserve or export the history and start a new chat; format analysis does not migrate it  |

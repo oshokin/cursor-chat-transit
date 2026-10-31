@@ -1,3 +1,4 @@
+import { logValue } from './log-format';
 import { formatLogLine } from './log-format';
 import { durationField } from './duration';
 import type { TransferEvent } from './transfer-events';
@@ -85,7 +86,7 @@ export function startOperationLog(
             : (key === 'elapsedMs' || key === 'timeoutMs') &&
                 typeof value === 'number'
               ? durationField(key, value)
-              : `${key}=${typeof value === 'string' ? JSON.stringify(clip(value, 4096)) : value}`,
+              : `${key}=${typeof value === 'string' ? logValue(clip(value, 4096)) : value}`,
         );
 
       line(
@@ -109,9 +110,9 @@ export function startOperationLog(
           ? `Chat ${metrics.chatIndex} of ${metrics.chatTotal}`
           : '',
         metrics.chatName
-          ? `chat=${JSON.stringify(clip(metrics.chatName, 4096))}`
+          ? `chat=${logValue(clip(metrics.chatName, 4096))}`
           : '',
-        metrics.file ? `file=${JSON.stringify(clip(metrics.file, 4096))}` : '',
+        metrics.file ? `file=${logValue(clip(metrics.file, 4096))}` : '',
         typeof processed === 'number' && typeof total === 'number'
           ? metrics.unit === 'bytes'
             ? `${processed} bytes (${humanBytes(processed)}) / ${total} bytes (${humanBytes(total)})`
@@ -163,7 +164,7 @@ export function startOperationLog(
 
       line(
         'INFO',
-        `Selected archive file=${JSON.stringify(clip(name, 4096))}${size}`,
+        `Selected archive file=${logValue(clip(name, 4096))}${size}`,
       );
     },
     /** One informational fact, such as import counts. Not a warning. */
@@ -201,7 +202,7 @@ export function startOperationLog(
 
       const reason =
         err instanceof Error && err.message
-          ? ` message=${JSON.stringify(clip(err.message, 240))}`
+          ? ` message=${logValue(clip(err.message, 240))}`
           : '';
 
       const text = `${kind} ${result} ${durationField('elapsedMs', finalElapsed)}${code}${reason}`;

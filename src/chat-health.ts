@@ -1,5 +1,6 @@
 import { readChatForExport } from './export-chat';
 import { assertOrderedReferences } from './chat-json';
+import { conversationStateIds } from './conversation-state';
 import { execSql } from './sqlite';
 import { bubbleRange, sqlText } from './core';
 import { inChat } from './transfer-events';
@@ -40,6 +41,7 @@ export async function inspectChatHealth(
   let fields: Record<string, unknown> = {};
   let layout = 'absent';
   let resources = 0;
+  let rootUserMessages = 0;
 
   const wrote = await inChat(id, header.name || id, () =>
     readChatForExport({
@@ -83,12 +85,18 @@ export async function inspectChatHealth(
 
           if (
             available.has(bubbleId) ||
-            (bubble.bubbleId !== undefined && bubble.bubbleId !== bubbleId) ||
+            (bubble.bubbleId !== undefined &&
+              bubble.bubbleId !== bubbleId &&
+              !(
+                typeof bubble.bubbleId === 'string' &&
+                bubbleId.startsWith(`${bubble.bubbleId}/`)
+              )) ||
             (bubble.composerId !== undefined && bubble.composerId !== id)
           )
             throw new Error('Message identity mismatch.');
           available.add(bubbleId);
           messageTypes.set(bubbleId, bubble.type);
+          if (!bubbleId.includes('/') && bubble.type === 1) rootUserMessages++;
         },
         /** Count one resource without writing it. */
         async writeResource() {
@@ -119,6 +127,21 @@ export async function inspectChatHealth(
 
   if (issues.length) return 'incomplete';
   if (layout === 'absent') return 'unknown';
+
+  const structuralIssue = await inspectCurrentStructure(
+    conn,
+    id,
+    fields,
+    available,
+    header,
+    references.length === 0 && rootUserMessages > 0,
+  );
+
+  if (structuralIssue) {
+    ctx.onNote?.(`Incomplete chat ${header.name || id}: ${structuralIssue}`);
+
+    return 'incomplete';
+  }
 
   try {
     assertOrderedReferences(
@@ -174,6 +197,11 @@ export async function inspectChatHealth(
     return 'ready';
   }
 
+  // Current Cursor may keep the ordered history in conversationState while the
+  // compatibility header array is empty. Root user bubbles prove useful history;
+  // slash-suffixed rows are nested stream/tool records, not conversation turns.
+  if (rootUserMessages > 0) return 'ready';
+
   // An empty visible list with orphan records/state is not a proven empty chat.
   if (
     available.size ||
@@ -185,4 +213,100 @@ export async function inspectChatHealth(
     return 'unknown';
 
   return 'empty';
+}
+
+/** Validate v13-v18 opaque ids, nested bubble ownership, and explicit family links. */
+async function inspectCurrentStructure(
+  conn: SqliteConn,
+  composerId: string,
+  fields: Record<string, unknown>,
+  available: ReadonlySet<string>,
+  header: ComposerHeader,
+  stateBacked: boolean,
+): Promise<string | undefined> {
+  const roots = new Set(
+    [...available].filter((bubbleId) => !bubbleId.includes('/')),
+  );
+
+  for (const bubbleId of available) {
+    const slash = bubbleId.indexOf('/');
+
+    if (slash >= 0 && !roots.has(bubbleId.slice(0, slash)))
+      return `nested message ${bubbleId} has no stored root`;
+  }
+
+  const requiredComposers = familyComposerIds(fields, header);
+  const version = fields._v;
+  const state = fields.conversationState;
+
+  let stateIds = new Set<string>();
+
+  if (
+    typeof version === 'number' &&
+    Number.isInteger(version) &&
+    version >= 13 &&
+    version <= 18 &&
+    typeof state === 'string' &&
+    state.trim() !== ''
+  ) {
+    stateIds = conversationStateIds(state);
+  }
+
+  if (stateBacked && version === 18) {
+    if (!stateIds.has(composerId))
+      return 'conversation state does not reference its current composer';
+
+    for (const root of roots)
+      if (!stateIds.has(root))
+        return `conversation state does not reference stored root ${root}`;
+  }
+
+  requiredComposers.delete(composerId);
+
+  for (const id of requiredComposers) {
+    if (await dbComposerExists(conn, id)) continue;
+
+    return `conversation state or family metadata references missing id ${id}`;
+  }
+
+  return undefined;
+}
+
+/** Composer ids named by the public family metadata on the body or header. */
+function familyComposerIds(
+  fields: Record<string, unknown>,
+  header: ComposerHeader,
+): Set<string> {
+  const ids = new Set<string>();
+
+  for (const record of [fields, header as Record<string, unknown>]) {
+    const children = record.subagentComposerIds;
+
+    if (Array.isArray(children))
+      for (const id of children) if (typeof id === 'string') ids.add(id);
+    const info = record.subagentInfo;
+
+    if (!info || typeof info !== 'object' || Array.isArray(info)) continue;
+
+    for (const key of ['parentComposerId', 'rootParentConversationId']) {
+      const id = (info as Record<string, unknown>)[key];
+
+      if (typeof id === 'string') ids.add(id);
+    }
+  }
+
+  return ids;
+}
+
+/** Whether a referenced composer body exists in the same global database view. */
+async function dbComposerExists(
+  conn: SqliteConn,
+  composerId: string,
+): Promise<boolean> {
+  const found = await execSql({
+    ...conn,
+    sql: `SELECT 1 FROM cursorDiskKV WHERE key=${sqlText(`composerData:${composerId}`)} LIMIT 1;`,
+  });
+
+  return Boolean(found.trim());
 }

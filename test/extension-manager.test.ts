@@ -284,7 +284,6 @@ loader._load = function (id, parent, isMain) {
     };
   if (id === './extension-workspaces')
     return {
-      listHostEntries: () => ({ entries, userDir: '/profile-managed' }),
       listHostEntriesAsync: async () => ({
         entries,
         userDir: '/profile-managed',
@@ -301,7 +300,6 @@ loader._load = function (id, parent, isMain) {
         };
       },
       currentWorkspaceDatabase: () => currentDatabase,
-      prepareSqlite: async () => ({ executable: 'sqlite3', initFile: '' }),
     };
   if (id === './extension-settings') return { transferSettings: () => ({}) };
   if (id === './transfer-process')

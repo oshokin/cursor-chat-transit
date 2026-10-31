@@ -62,7 +62,7 @@ try {
 test('Transit settings use documented defaults and only the new namespace', () => {
   values.clear();
   namespaces.length = 0;
-  assert.deepEqual(settings.config(), { userDataDir: '', sqlitePath: '' });
+  assert.deepEqual(settings.config(), { userDataDir: '' });
 
   assert.deepEqual(settings.transferSettings(), {
     timeoutMs: 600000,
@@ -98,10 +98,6 @@ test('workspace overrides cannot redirect a valid user path or silently enable r
     workspaceValue: path.resolve('repository-profile'),
   });
 
-  values.set('sqlitePath', {
-    workspaceFolderValue: path.resolve('untrusted-binary'),
-  });
-
   values.set('import.allowPartial', { workspaceValue: true });
   values.set('sqlite.operationTimeoutSeconds', { workspaceValue: 999 });
   values.set('limits.maxJsonProperties', { workspaceValue: 2000000 });
@@ -110,7 +106,7 @@ test('workspace overrides cannot redirect a valid user path or silently enable r
     workspaceFolderValue: path.resolve('repo-temp'),
   });
 
-  assert.deepEqual(settings.config(), { userDataDir: userDir, sqlitePath: '' });
+  assert.deepEqual(settings.config(), { userDataDir: userDir });
   assert.equal('importAllowPartial' in settings, false);
   assert.equal(settings.transferSettings().timeoutMs, 600000);
   assert.equal(settings.transferSettings().maxJsonProperties, 1000000);
@@ -145,7 +141,7 @@ test('all contributed settings use Transit prefix and retain appropriate scopes'
 
   const properties = manifest.contributes.configuration.properties;
 
-  assert.equal(Object.keys(properties).length, 9);
+  assert.equal(Object.keys(properties).length, 8);
 
   assert.ok(
     Object.keys(properties).every((name) =>
@@ -192,7 +188,6 @@ test('every declared setting has a working user value and defaults consistent wi
 
   const paths = {
     userDataDir: path.resolve('profile'),
-    sqlitePath: path.resolve('bin/sqlite3'),
     plansDirectory: path.resolve('plans'),
   };
 
@@ -202,10 +197,7 @@ test('every declared setting has a working user value and defaults consistent wi
   values.set('sqlite.busyTimeoutSeconds', { globalValue: 30 });
   values.set('logLevel', { globalValue: 'error' });
 
-  assert.deepEqual(settings.config(), {
-    userDataDir: paths.userDataDir,
-    sqlitePath: paths.sqlitePath,
-  });
+  assert.deepEqual(settings.config(), { userDataDir: paths.userDataDir });
 
   assert.deepEqual(settings.storageOptions(), {
     configuredUserDataDir: paths.userDataDir,
@@ -230,12 +222,7 @@ test('every declared setting has a working user value and defaults consistent wi
 });
 
 test('all path settings reject relative paths and control characters; both deadlines reject invalid values', () => {
-  for (const key of [
-    'userDataDir',
-    'sqlitePath',
-    'plansDirectory',
-    'temporaryDirectory',
-  ])
+  for (const key of ['userDataDir', 'plansDirectory', 'temporaryDirectory'])
     for (const bad of [
       'relative',
       path.resolve('bad') + '\n',

@@ -1,3 +1,4 @@
+import { logValue } from './log-format';
 import * as db from './db';
 import { canvasesDirectoryForWorkspace } from './canvases';
 import { defaultPlansDirectory } from './plans';
@@ -12,7 +13,7 @@ import type {
 /** Operation-log identity: real title when present, always the composer id. */
 export function chatLogLabel(header: ComposerHeader): string {
   const raw = typeof header.name === 'string' ? header.name.trim() : '';
-  const name = raw ? JSON.stringify(raw.slice(0, 120)) : '(untitled)';
+  const name = raw ? logValue(raw.slice(0, 120)) : '(untitled)';
 
   return `id=${header.composerId} name=${name}`;
 }
@@ -75,9 +76,8 @@ export function connOf(
   readOnly: boolean,
 ): SqliteConn {
   return {
-    executable: ctx.executable,
     database: dbPath,
-    initFile: ctx.initFile,
+    mustExist: true,
     readOnly,
     signal: ctx.signal,
     timeoutMs: ctx.timeoutMs,

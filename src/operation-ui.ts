@@ -281,6 +281,21 @@ export function formatImportNotice(
     };
   }
 
+  if ((result.modelConfigsRepaired || 0) > 0 && result.imported === 0) {
+    const repaired = result.modelConfigsRepaired || 0;
+    const repairedTitle = `Repaired ${repaired} imported chat model${repaired === 1 ? '' : 's'}`;
+    const detail = 'Quit Cursor and reopen it to load the compatible model.';
+
+    return {
+      title: repairedTitle,
+      detail,
+      toast: `${repairedTitle}. ${detail}`,
+      items,
+      restart: true,
+      status: 'completed',
+    };
+  }
+
   if (result.imported === 0 && result.alreadyImported > 0) {
     return {
       title: 'These chats are already imported',

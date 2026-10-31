@@ -1,3 +1,4 @@
+import { logValue } from './log-format';
 import { notifyCompletion } from './notifications';
 import { formatLogLine } from './log-format';
 import * as vscode from 'vscode';
@@ -17,9 +18,7 @@ export async function recoverStaleTransfer(
   if (!staleLock) return;
   await clearStaleLock(staleLock);
 
-  log.info(
-    `Cleared stale transfer lock path=${JSON.stringify(staleLock.lockPath)}`,
-  );
+  log.info(`Cleared stale transfer lock path=${logValue(staleLock.lockPath)}`);
 
   staleLock = undefined;
 

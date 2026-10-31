@@ -3,12 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  findSqliteExecutable,
-  ensureInitFile,
-  execSql,
-  execSqlScript,
-} from '../src/sqlite';
+import { execSql, execSqlByteRows, execSqlScript } from '../src/sqlite';
+import { ensureInitFile, findSqliteExecutable } from './support/sqlite-cli';
 import { bubbleRange } from '../src/core';
 
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
@@ -25,14 +21,12 @@ async function dbFixture(t: { after: (fn: () => Promise<void>) => void }) {
   const initFile = await ensureInitFile(dir);
 
   const conn = {
-    executable: executable as string,
     database,
-    initFile,
     readOnly: false,
     timeoutMs: 15000,
   };
 
-  return { dir, conn };
+  return { dir, initFile, conn };
 }
 
 test('EXPLAIN range query uses the key index', { skip }, async (t) => {
@@ -116,14 +110,12 @@ test(
       '0',
     );
 
-    const { execSqlHexRows } = await import('../src/sqlite');
     const rows: string[] = [];
 
-    await execSqlHexRows({
+    await execSqlByteRows({
       ...conn,
       busyTimeoutMs: 2345,
-      cols: 1,
-      sql: 'SELECT hex(timeout) FROM pragma_busy_timeout;',
+      sql: 'SELECT CAST(timeout AS BLOB) FROM pragma_busy_timeout;',
       onRow: ([value]) => {
         rows.push(value.toString());
       },
@@ -138,13 +130,13 @@ test(
   { skip },
   async (t) => {
     const { spawn } = await import('node:child_process');
-    const { conn } = await dbFixture(t);
+    const { conn, initFile } = await dbFixture(t);
 
     await execSqlScript({ ...conn, sql: 'CREATE TABLE writes (id INTEGER);' });
 
     const child = spawn(
-      conn.executable,
-      ['-init', conn.initFile, '-batch', conn.database],
+      executable as string,
+      ['-init', initFile, '-batch', conn.database],
       { stdio: 'pipe', shell: false },
     );
 

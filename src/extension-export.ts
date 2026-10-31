@@ -67,7 +67,7 @@ export async function doExport(opts: {
   });
 
   try {
-    const { sqlite, entries, identity } = await hostState(opts.context);
+    const { entries, identity } = await hostState();
 
     let workspace = opts.preferCurrent
       ? resolveAutomaticWorkspace(
@@ -101,7 +101,6 @@ export async function doExport(opts: {
     }
 
     const sqliteCtx = {
-      ...sqlite,
       ...transferSettings(),
       onPhase: log.phase,
     };
@@ -345,8 +344,6 @@ export async function doExport(opts: {
           {
             kind: 'export',
             recoverText: recoverTextSetting(),
-            executable: sqliteCtx.executable,
-            initFile: sqliteCtx.initFile,
             timeoutMs: sqliteCtx.timeoutMs,
             busyTimeoutMs: sqliteCtx.busyTimeoutMs,
             plansDir: sqliteCtx.plansDir,

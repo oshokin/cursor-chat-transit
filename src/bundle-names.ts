@@ -55,8 +55,3 @@ export function assertArchivePath(name: string): void {
     throw new Error('Archive entry path is not a safe relative path.');
   }
 }
-
-/** True when two entry names would collide on a case-insensitive volume. */
-export function sameArchiveName(left: string, right: string): boolean {
-  return left.toLowerCase() === right.toLowerCase();
-}

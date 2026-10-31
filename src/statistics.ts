@@ -2,7 +2,7 @@ import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import { healthLabel, inspectChatHealth } from './chat-health';
 import { inspectChatPresence } from './chat-presence';
 import { sqlText } from './core';
-import { readKvText } from './db';
+import { forEachBubble, readKvText } from './db';
 import { hasChatTitle } from './picker';
 import { openReadTransaction } from './read-transaction';
 import { execSql } from './sqlite';
@@ -14,8 +14,6 @@ import { WorkspaceHeaderReader } from './workspace-header-reader';
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
   TransferContext,
-  | 'executable'
-  | 'initFile'
   | 'timeoutMs'
   | 'busyTimeoutMs'
   | 'onNote'
@@ -118,8 +116,12 @@ export function userMessageCount(
 }
 
 /** Storage format is observable; continuation support is controlled by Cursor. */
-export function chatStatistics(body: Record<string, unknown>): string {
-  const count = userMessageCount(body);
+export function chatStatistics(
+  body: Record<string, unknown>,
+  /** Count derived from stored root bubbles when the compatibility index is empty. */
+  storedCount?: number,
+): string {
+  const count = storedCount ?? userMessageCount(body);
 
   const messages =
     count === undefined
@@ -134,6 +136,37 @@ export function chatStatistics(body: Record<string, unknown>): string {
         : 'Format unknown';
 
   return `${messages} · ${format}`;
+}
+
+/** Count top-level user bubbles when Cursor's compatibility index is empty. */
+async function storedUserMessageCount(
+  conn: import('./types').SqliteConn,
+  composerId: string,
+): Promise<number> {
+  let count = 0;
+
+  await forEachBubble(conn, composerId, (bubble) => {
+    if (bubble.bubbleId.includes('/')) return;
+
+    let value: unknown;
+
+    try {
+      value = JSON.parse(bubble.value);
+    } catch {
+      return;
+    }
+
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      (value as Record<string, unknown>).type === 1
+    ) {
+      count++;
+    }
+  });
+
+  return count;
 }
 
 /** Scan sequentially, release read views between rows, and keep row failures local. */
@@ -316,7 +349,18 @@ export async function runStatistics(
                 code: 'CHAT_METADATA_INVALID',
               });
 
-            const detail = chatStatistics(body as Record<string, unknown>);
+            const record = body as Record<string, unknown>;
+            const indexedCount = userMessageCount(record);
+
+            const storedCount =
+              job.deepCheck && indexedCount === 0
+                ? await storedUserMessageCount(view.conn, row.composerId)
+                : 0;
+
+            const detail = chatStatistics(
+              record,
+              storedCount > 0 ? storedCount : undefined,
+            );
 
             if (!job.deepCheck) return detail;
 

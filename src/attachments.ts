@@ -499,31 +499,6 @@ export async function collectAttachmentVariants(
   return { resources, missing: missingReferenced };
 }
 
-/** True when every referenced basename for this uuid is covered by the export. */
-export function imageExportCovers(
-  /** Attachment envelopes already exported. */
-  attachments: AttachmentResource[],
-  uuid: string,
-  /** Basenames the chat points at. */
-  referenced: string[],
-): boolean {
-  const rows = attachments.filter(
-    (row) => row.id.toLowerCase() === uuid.toLowerCase(),
-  );
-
-  if (!rows.length) return false;
-  if (!referenced.length) return true;
-  const names = new Set<string>();
-
-  for (const row of rows) {
-    names.add(attachmentFilename(row));
-
-    for (const alias of row.aliases || []) names.add(alias);
-  }
-
-  return referenced.every((name) => names.has(name));
-}
-
 /** Point structured image paths at the installed basename. Leave message text alone. */
 export function rewriteImageReferences(
   /** Composer or bubble JSON to rewrite. */
@@ -587,18 +562,6 @@ export function rewriteChatImagePaths(
       );
     }
   }
-}
-
-/** Read a local image into an export envelope. */
-export async function readAttachmentFile(
-  filePath: string,
-  uuid: string,
-  /** File extension without a directory. */
-  extension: string,
-): Promise<AttachmentResource> {
-  const bytes = await fs.promises.readFile(filePath);
-
-  return encodeAttachment(uuid, bytes, extension);
 }
 
 /** Write an attachment; reuse identical bytes, never overwrite a different file. */

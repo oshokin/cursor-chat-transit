@@ -1,167 +1,101 @@
-import { killSqliteChild } from './sqlite-process';
+import { fork, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { sqliteTimeoutError } from './sqlite-timeout';
-import { randomBytes } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { busyTimeoutCommand } from './sqlite';
 import { SqliteError } from './types';
+import type {
+  NativeDatabase,
+  NativeOptions,
+  SqlParams,
+  SqlRow,
+} from './sqlite-native';
+import type { SqlReply, SqlWatch } from './sqlite-protocol';
 
-/** Serialized sqlite3 connection with bounded replies and an owned child lifetime. */
+/** Warm workers have no database handles; limit idle memory and never keep the host alive. */
+const idleWorkers: ChildProcess[] = [];
+const idleTimers = new WeakMap<ChildProcess, NodeJS.Timeout>();
+
+function releaseWorker(child: ChildProcess): void {
+  child.removeAllListeners('message');
+  child.removeAllListeners('close');
+  child.removeAllListeners('error');
+  child.on('error', () => undefined);
+
+  if (!child.connected || idleWorkers.length >= 2) {
+    child.kill('SIGKILL');
+
+    return;
+  }
+
+  idleWorkers.push(child);
+  child.unref();
+  child.channel?.unref();
+
+  const timer = setTimeout(() => {
+    const index = idleWorkers.indexOf(child);
+
+    if (index >= 0) idleWorkers.splice(index, 1);
+    child.kill('SIGKILL');
+  }, 2000);
+
+  timer.unref();
+  idleTimers.set(child, timer);
+}
+
+/** Native SQL runs directly only when an independent parent owns its watchdog. */
+let supervised = false;
+let requestSequence = 0;
+
+/** Enable direct SQLite inside the transfer worker, never in the extension host. */
+export function superviseSqlite(): void {
+  supervised = true;
+}
+
+/** Options shared by application connections. */
+export interface SessionOptions extends NativeOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  maxLineBytes?: number;
+}
+
+/** Owned native connection with serialized requests, bounded rows, cancellation and rollback. */
 export class SqliteSession {
-  /** Marker that ends one SQL reply. */
-  private readonly nonce = randomBytes(16).toString('hex');
-  /** Stdout not yet split into lines. */
-  private buffer = '';
-  /** Tail of sqlite stderr. */
-  private stderr = '';
-  /** Previous statement on this connection. */
   private chain: Promise<unknown> = Promise.resolve();
-  /** In-flight stdout consumer, awaited before failure escapes or close returns. */
-  private consuming: Promise<void> = Promise.resolve();
-  /** Error that ended the session. */
+  private native?: NativeDatabase;
+  private iterator?: IterableIterator<SqlRow>;
+  private child?: ChildProcess;
+  private exited: Promise<void> = Promise.resolve();
+  private releaseExit?: () => void;
   private failure?: Error;
-  /** True after the child has exited. */
   private closed = false;
-  /** Resolves when the child closes. */
-  private readonly exited: Promise<void>;
-  /** Wall-clock limit for the statement in flight. */
-  private timer?: NodeJS.Timeout;
-  /** Delay before the child is killed after stop. */
-  private killTimer?: NodeJS.Timeout;
-  /** Reply expected for the statement in flight. */
   private waiter?: {
-    /** Completes the in-flight statement with its stdout. */
-    resolve: (text: string) => void;
-    /** Rejects the in-flight statement. */
+    resolve: () => void;
     reject: (error: Error) => void;
-    /** Stdout accumulated for this statement. */
-    text: string;
-    /** Optional per-line consumer instead of buffering the whole reply. */
-    onLine?: (line: string) => unknown | Promise<unknown>;
+    rows: (rows: SqlRow[]) => Promise<void>;
   };
-  /** Stop the session when the caller aborts. */
+  private consuming: Promise<void> = Promise.resolve();
   private readonly abort = () =>
     this.stop(
-      this.signal?.reason instanceof Error
-        ? this.signal.reason
+      this.options.signal?.reason instanceof Error
+        ? this.options.signal.reason
         : new Error('Cancelled'),
     );
 
-  /** Own one sqlite3 child. Use `open`. */
-  private constructor(
-    /** sqlite3 child this session owns. */
-    private readonly child: ChildProcessWithoutNullStreams,
-    /** Cancellation that stops the child. */
-    private readonly signal?: AbortSignal,
-    /** Wall-clock limit for one statement. */
-    private readonly timeoutMs = 120000,
-    /** Maximum encoded row length, independently bounded from collected replies. */
-    private readonly maxLineBytes = 4 * 1024 * 1024,
-  ) {
-    this.exited = new Promise((resolve) =>
-      child.once('close', () => {
-        this.closed = true;
-        clearTimeout(this.timer);
-        clearTimeout(this.killTimer);
-        this.signal?.removeEventListener('abort', this.abort);
+  private constructor(private readonly options: SessionOptions) {}
 
-        const busy = /database is locked|database is busy|SQLITE_BUSY/i.test(
-          this.stderr,
-        );
+  /** Open a native connection; standalone callers receive their own supervised SQLite process. */
+  static async open(options: SessionOptions): Promise<SqliteSession> {
+    options.signal?.throwIfAborted();
+    const session = new SqliteSession(options);
 
-        const error = new SqliteError(
-          busy
-            ? 'SQLite database is busy. Wait for the other operation to finish, then retry.'
-            : 'SQLite session stopped before completing its request.',
-        );
-
-        error.stderr = this.stderr.trim();
-        if (busy) error.code = 'SQLITE_BUSY';
-        this.failure ??= error;
-        this.waiter?.reject(this.failure);
-        this.waiter = undefined;
-        this.releaseStdio();
-        resolve();
-      }),
-    );
-
-    child.on('error', (error) => this.stop(error));
-
-    child.stdin.on('error', (error) => this.stop(error));
-
-    child.stdout.setEncoding('utf8');
-
-    child.stdout.on('data', (chunk: string) => {
-      if (this.failure) return;
-      child.stdout.pause();
-
-      this.consuming = this.onStdout(chunk)
-        .catch((error: unknown) => {
-          this.stop(error instanceof Error ? error : new Error(String(error)));
-        })
-        .finally(() => {
-          // A paused stdout never observes EOF. Node then keeps the pipe
-          // referenced after sqlite exits, and the test process never ends.
-          if (!child.stdout.destroyed) child.stdout.resume();
-        });
-    });
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      this.stderr = (this.stderr + chunk.toString('utf8')).slice(-4000);
-    });
-
-    signal?.addEventListener('abort', this.abort, { once: true });
-    if (signal?.aborted) this.abort();
-  }
-
-  /** Open without changing the database journal or locking mode. */
-  static async open(opts: {
-    /** sqlite3 executable. */
-    executable: string;
-    database: string;
-    /** When true, open the database read-only. */
-    readOnly?: boolean;
-    /** sqlite3 `-init` file. */
-    initFile: string;
-    /** Cancellation for the child. */
-    signal?: AbortSignal;
-    /** SQLite busy timeout in milliseconds. */
-    busyTimeoutMs?: number;
-    /** Wall-clock limit for one statement. */
-    timeoutMs?: number;
-    /** Maximum encoded row size for bounded export records. */
-    maxLineBytes?: number;
-  }): Promise<SqliteSession> {
-    opts.signal?.throwIfAborted();
-
-    const child = spawn(
-      opts.executable,
-      [
-        '-init',
-        opts.initFile,
-        '-batch',
-        '-bail',
-        ...(opts.readOnly ? ['-readonly'] : []),
-        opts.database,
-      ],
-      { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-
-    const session = new SqliteSession(
-      child,
-      opts.signal,
-      opts.timeoutMs,
-      opts.maxLineBytes,
-    );
+    options.signal?.addEventListener('abort', session.abort, { once: true });
 
     try {
-      // SQLite 3.53 uses boxed output when it decides the session is a console.
-      // Windows pipes sometimes look like a console, and -batch is not enough.
-      // Keep the default "|" column separator: checkpoint rows are parsed as 0|0|0.
-      await session.exec(
-        `${busyTimeoutCommand(opts.busyTimeoutMs ?? 5000)}
-.mode list
-PRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
-      );
+      if (supervised) {
+        const { NativeDatabase } = await import('./sqlite-native');
+
+        session.native = session.watch(() => new NativeDatabase(options));
+      } else await session.openChild();
 
       return session;
     } catch (error) {
@@ -171,104 +105,115 @@ PRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
     }
   }
 
-  /** Serialize a statement and collect its bounded result. */
-  exec(
-    /** SQL statement to run. */
-    sql: string,
-  ): Promise<string> {
-    return this.enqueue(sql);
+  /** Execute one statement or a result-free schema/transaction script. */
+  exec(sql: string, parameters: SqlParams = []): Promise<string> {
+    return this.text(sql, parameters, '|');
   }
 
-  /** Consume result rows without retaining the whole result. */
+  /** Collect a bounded metadata response with an explicit display separator. */
+  text(
+    sql: string,
+    parameters: SqlParams = [],
+    separator = '|',
+  ): Promise<string> {
+    let text = '';
+
+    return this.rows(sql, parameters, (row) => {
+      text += row.map(cellText).join(separator) + '\n';
+      if (Buffer.byteLength(text) > 4 * 1024 * 1024)
+        throw new Error('SQLite collected result exceeds 4 MiB; use rows.');
+    }).then(() => text);
+  }
+
+  /** Compatibility for small JSON metadata queries; large payloads use typed rows. */
   queryLines(
-    /** SQL statement to run. */
     sql: string,
     onLine: (line: string) => unknown | Promise<unknown>,
+    parameters: SqlParams = [],
   ): Promise<void> {
-    return this.enqueue(sql, onLine)
-      .then(() => undefined)
-      .catch(async (error: unknown) => {
+    return this.rows(sql, parameters, async (row) => {
+      const line = row.map(cellText).join('|');
+
+      if (
+        Buffer.byteLength(line) > (this.options.maxLineBytes ?? 4 * 1024 * 1024)
+      )
+        throw new Error('SQLite result row exceeds the configured byte limit.');
+      await onLine(line);
+    });
+  }
+
+  /** Await every row consumer before advancing; iterator cleanup precedes failure propagation. */
+  rows(
+    sql: string,
+    parameters: SqlParams,
+    onRow: (row: SqlRow) => void | Promise<void>,
+  ): Promise<void> {
+    const run = this.chain.then(async () => {
+      this.check();
+      let timer: NodeJS.Timeout | undefined;
+
+      try {
+        if (this.native) {
+          const request = this.startWatch();
+          let iterator: IterableIterator<SqlRow> | undefined;
+
+          try {
+            iterator = this.native.rows(sql, parameters);
+            this.iterator = iterator;
+
+            for (;;) {
+              this.check();
+              const next = iterator.next();
+
+              if (next.done) break;
+              this.consuming = Promise.resolve().then(() => onRow(next.value));
+              await this.consuming;
+            }
+          } finally {
+            iterator?.return?.();
+            this.iterator = undefined;
+            this.endWatch(request);
+          }
+        } else {
+          timer = setTimeout(
+            () =>
+              this.stop(
+                sqliteTimeoutError(
+                  this.options.timeoutMs ?? 120000,
+                  this.options.database,
+                ),
+              ),
+            this.options.timeoutMs ?? 120000,
+          );
+
+          await new Promise<void>((resolve, reject) => {
+            this.waiter = {
+              resolve,
+              reject,
+              rows: async (rows) => {
+                for (const row of rows) {
+                  this.check();
+                  await onRow(row);
+                }
+              },
+            };
+
+            this.child!.send({ type: 'query', sql, parameters }, (error) => {
+              if (error) this.stop(error);
+            });
+          });
+        }
+
+        this.check();
+      } catch (error) {
+        this.stop(error instanceof Error ? error : new Error(String(error)));
+        await this.exited;
         await this.consuming;
 
-        throw error;
-      });
-  }
-
-  /** Wait for child exit; never return while it can still hold a database lock. */
-  async close(): Promise<void> {
-    if (!this.closed) {
-      this.child.stdout.resume();
-      this.child.stderr.resume();
-      this.child.stdin.end();
-
-      this.killTimer ??= setTimeout(
-        () => killSqliteChild(this.child, true),
-        2000,
-      );
-    }
-
-    await this.exited;
-    await this.consuming;
-    this.releaseStdio();
-  }
-
-  /** Drop stdio handles so a finished sqlite child cannot keep Node alive. */
-  private releaseStdio(): void {
-    for (const stream of [
-      this.child.stdin,
-      this.child.stdout,
-      this.child.stderr,
-    ]) {
-      stream.removeAllListeners('error');
-      stream.on('error', () => undefined);
-      if (!stream.destroyed) stream.destroy();
-    }
-
-    this.child.unref();
-  }
-
-  /** Fail the current query and kill the sqlite child. */
-  private stop(error: Error): void {
-    this.failure ??= error;
-    clearTimeout(this.timer);
-    this.waiter?.reject(this.failure);
-    this.waiter = undefined;
-    if (this.closed) return;
-    // Drain discarded stdout so child close is not held by paused pipe buffers.
-    this.child.stdout.resume();
-    killSqliteChild(this.child);
-
-    this.killTimer ??= setTimeout(
-      () => killSqliteChild(this.child, true),
-      2000,
-    );
-  }
-
-  /** Run SQL after the previous statement on this connection. */
-  private enqueue(
-    /** SQL statement to run. */
-    sql: string,
-    onLine?: (line: string) => unknown | Promise<unknown>,
-  ): Promise<string> {
-    const run = this.chain.then(() => {
-      if (this.failure || this.closed)
-        throw this.failure || new Error('SQLite is closed.');
-
-      return new Promise<string>((resolve, reject) => {
-        this.waiter = { resolve, reject, text: '', onLine };
-
-        this.timer = setTimeout(
-          () => this.stop(sqliteTimeoutError(this.timeoutMs)),
-          this.timeoutMs,
-        );
-
-        this.child.stdin.write(
-          `${sql}\nSELECT 'CCTEND${this.nonce}';\n`,
-          (error) => {
-            if (error) this.stop(error);
-          },
-        );
-      });
+        throw this.failure;
+      } finally {
+        clearTimeout(timer);
+      }
     });
 
     this.chain = run.catch(() => undefined);
@@ -276,34 +221,177 @@ PRAGMA cache_size=-2000; PRAGMA temp_store=FILE; PRAGMA foreign_keys=ON;`,
     return run;
   }
 
-  /** Split sqlite stdout into result lines and the end marker. */
-  private async onStdout(chunk: string): Promise<void> {
-    this.buffer += chunk;
-    if (this.buffer.length > this.maxLineBytes)
-      throw new Error(`SQLite result row exceeds ${this.maxLineBytes} bytes.`);
+  /** Close idempotently and do not return while a consumer or writer remains active. */
+  async close(): Promise<void> {
+    if (this.closed) {
+      await this.exited;
+      await this.consuming;
 
-    for (;;) {
-      const nl = this.buffer.indexOf('\n');
+      return;
+    }
 
-      if (nl < 0) return;
-      const line = this.buffer.slice(0, nl).replace(/\r$/, '');
+    this.closed = true;
+    this.options.signal?.removeEventListener('abort', this.abort);
+    if (this.waiter) this.stop(new Error('SQLite connection closed.'));
+    this.iterator?.return?.();
+    this.native?.close();
+    if (this.child?.connected)
+      this.child.send({ type: 'close' }, () => undefined);
+    await this.exited;
+    await this.consuming;
+    await this.chain;
+  }
 
-      this.buffer = this.buffer.slice(nl + 1);
+  private startWatch(): SqlWatch {
+    const event: SqlWatch = {
+      type: 'sqlite-start',
+      requestId: ++requestSequence,
+      timeoutMs: this.options.timeoutMs ?? 120000,
+    };
 
-      if (line === `CCTEND${this.nonce}`) {
-        clearTimeout(this.timer);
+    if (process.connected) process.send?.(event);
+
+    return event;
+  }
+
+  private endWatch(event: SqlWatch): void {
+    if (process.connected) process.send?.({ ...event, type: 'sqlite-end' });
+  }
+
+  private watch<T>(run: () => T): T {
+    const event = this.startWatch();
+
+    try {
+      return run();
+    } finally {
+      this.endWatch(event);
+    }
+  }
+
+  private check(): void {
+    if (this.failure) throw this.failure;
+    if (this.closed) throw new Error('SQLite is closed.');
+    this.options.signal?.throwIfAborted();
+  }
+  private stop(error: Error): void {
+    this.failure ??= error;
+    this.iterator?.return?.();
+    this.native?.close();
+    this.child?.kill('SIGKILL');
+    this.waiter?.reject(this.failure);
+    this.waiter = undefined;
+  }
+  private async openChild(): Promise<void> {
+    const compiled = path.join(__dirname, 'sqlite-worker.js');
+
+    const script = fs.existsSync(compiled)
+      ? compiled
+      : path.join(__dirname, 'sqlite-worker.ts');
+
+    let child = idleWorkers.pop();
+
+    if (child) {
+      clearTimeout(idleTimers.get(child));
+
+      if (!child.connected) child = undefined;
+      else {
+        child.ref();
+        child.channel?.ref();
+        child.removeAllListeners('error');
+      }
+    }
+
+    child ??= fork(script, [], {
+      execArgv: script.endsWith('.ts') ? ['--import', 'tsx'] : [],
+      serialization: 'advanced',
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+    });
+
+    this.child = child;
+
+    const owned = child;
+
+    this.exited = new Promise<void>((resolve) => {
+      this.releaseExit = resolve;
+
+      owned.once('close', () => {
+        this.failure ??= new Error(
+          'SQLite worker stopped before completing its request.',
+        );
+
+        this.waiter?.reject(this.failure);
+        this.waiter = undefined;
+        resolve();
+      });
+    });
+
+    child.on('error', (error) => this.stop(error));
+    child.stderr?.resume();
+
+    child.on('message', (message: SqlReply) => {
+      if (message.type === 'rows') {
+        this.consuming = this.consuming
+          .then(async () => {
+            await this.waiter?.rows(message.rows);
+            if (!this.failure && child.connected)
+              child.send({ type: 'ack' }, () => undefined);
+          })
+          .catch((error) => this.stop(error));
+      } else if (message.type === 'closed') {
+        this.child = undefined;
+        this.releaseExit?.();
+        releaseWorker(owned);
+      } else if (message.type === 'error') {
+        const error = new SqliteError(message.message);
+
+        error.stderr = message.message;
+        error.code = message.code;
+        this.stop(error);
+      } else if (message.type === 'ready' || message.type === 'done') {
         const waiter = this.waiter;
 
         this.waiter = undefined;
-        waiter?.resolve(waiter.text);
-      } else if (this.waiter?.onLine) await this.waiter.onLine(line);
-      else if (this.waiter) {
-        this.waiter.text += `${line}\n`;
-        if (this.waiter.text.length > 4 * 1024 * 1024)
-          throw new Error(
-            'SQLite collected result exceeds 4 MiB; use queryLines.',
-          );
+        waiter?.resolve();
       }
+    });
+
+    const timer = setTimeout(
+      () =>
+        this.stop(
+          sqliteTimeoutError(Math.max(10000, this.options.timeoutMs ?? 120000)),
+        ),
+      Math.max(10000, this.options.timeoutMs ?? 120000),
+    );
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.waiter = { resolve, reject, rows: async () => undefined };
+
+        child.send(
+          {
+            type: 'open',
+            options: {
+              database: this.options.database,
+              readOnly: this.options.readOnly,
+              busyTimeoutMs: this.options.busyTimeoutMs,
+              mustExist: this.options.mustExist,
+            },
+          },
+          (error) => {
+            if (error) this.stop(error);
+          },
+        );
+      });
+    } finally {
+      clearTimeout(timer);
     }
   }
+}
+
+function cellText(value: unknown): string {
+  return value === null
+    ? ''
+    : Buffer.isBuffer(value)
+      ? value.toString('utf8')
+      : String(value);
 }

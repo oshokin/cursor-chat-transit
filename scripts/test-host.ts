@@ -60,6 +60,7 @@ async function runHost(root: string, tmp: string): Promise<void> {
         extensionTestsPath: path.join(root, 'out/test-host/index.js'),
         launchArgs: [
           '--disable-extensions',
+          ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
           `--user-data-dir=${path.join(tmp, 'data')}`,
           `--extensions-dir=${path.join(tmp, 'ext')}`,
         ],

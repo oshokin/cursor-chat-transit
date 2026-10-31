@@ -14,6 +14,10 @@ export interface WireField {
 /** Reject conversationState payloads larger than this. */
 const MAX_BYTES = 16 * 1024 * 1024;
 
+/** Canonical UUID shape used by Cursor composer and root-bubble identities. */
+const UUID_TEXT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Read a protobuf varint; reject truncated or overflowing encodings. */
 function readVarint(bytes: Buffer, start: number): [bigint, number] {
   let value = 0n;
@@ -95,4 +99,88 @@ export function field1Candidates(state: unknown): string[] {
       (row) => row.field === 1 && row.wire === 2 && row.bytes.length === 32,
     )
     .map((row) => row.bytes.toString('hex'));
+}
+
+/** Exact UUID-valued protobuf strings, including strings in nested messages. */
+export function conversationStateIds(state: unknown): Set<string> {
+  const ids = new Set<string>();
+
+  collectIds(decodeState(state), ids);
+
+  return ids;
+}
+
+/** Walk protobuf messages while treating arbitrary string fields as opaque. */
+function collectIds(bytes: Buffer, ids: Set<string>, depth = 0): void {
+  if (depth > 64) throw new Error('Conversation state nesting limit');
+
+  for (const field of readFields(bytes)) {
+    if (field.wire !== 2) continue;
+    const text = field.bytes.toString('utf8');
+
+    if (UUID_TEXT.test(text)) {
+      ids.add(text);
+      continue;
+    }
+
+    try {
+      collectIds(field.bytes, ids, depth + 1);
+    } catch {
+      // Length-delimited strings and raw bytes need not be nested messages.
+    }
+  }
+}
+
+/** Rewrite fixed-width UUID references without changing protobuf framing. */
+export function remapConversationStateIds(
+  state: unknown,
+  ids: ReadonlyMap<string, string>,
+): unknown {
+  if (typeof state !== 'string' || !state.startsWith('~') || ids.size === 0)
+    return state;
+  const bytes = decodeState(state);
+
+  const replacements = new Map(
+    [...ids]
+      .filter(([source, target]) => source !== target)
+      .map(([source, target]) => [
+        Buffer.from(source, 'utf8').toString('hex'),
+        Buffer.from(target, 'utf8'),
+      ]),
+  );
+
+  for (const [source, target] of ids) {
+    if (Buffer.byteLength(source) !== Buffer.byteLength(target)) {
+      throw new Error('Conversation state ids must have equal byte lengths');
+    }
+  }
+
+  remapMessage(bytes, replacements);
+
+  return `~${bytes.toString('base64')}`;
+}
+
+/** Remap exact string fields while preserving unknown protobuf bytes. */
+function remapMessage(
+  bytes: Buffer,
+  replacements: ReadonlyMap<string, Buffer>,
+  depth = 0,
+): void {
+  if (depth > 64) throw new Error('Conversation state nesting limit');
+
+  for (const field of readFields(bytes)) {
+    if (field.wire !== 2) continue;
+    const replacement = replacements.get(field.bytes.toString('hex'));
+
+    if (replacement) {
+      replacement.copy(bytes, field.offset);
+      continue;
+    }
+
+    try {
+      remapMessage(field.bytes, replacements, depth + 1);
+    } catch {
+      // An arbitrary string or byte field is not a nested protobuf message.
+    }
+  }
 }

@@ -16,7 +16,7 @@ For setup, validation, packaging, and releases, see [Development](development.md
 | Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts` | Header resolution, consistent database reads, and archive creation             |
 | Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                     | Validation, preparation, bounded writes, and interrupted-import reconciliation |
 | Archive          | `bundle-*.ts`, `ndjson-io.ts`                                                     | Format validation, bounded records, indexes, and ZIP I/O                       |
-| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                        | Asynchronous SQLite processes, read views, schema checks, and SQL operations   |
+| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                        | Bundled native SQLite, supervised queries, read views and schema checks        |
 | Resources        | `dependencies.ts`, `resource-*.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`   | Reference discovery and byte-preserving resource transfer                      |
 | Receipts         | `journal*.ts`, `import-policy.ts`, `import-reconcile.ts`                          | Snapshot identity, pending work, and repeat-import decisions                   |
 | Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`    | Structured facts, readable logs, and measured progress                         |
@@ -254,3 +254,17 @@ The transfer scope owns cancellation subscriptions and timers. Terminal results 
 `import-bundle.ts` coordinates a transfer. `import-bundle-scan.ts` validates/indexes source chats and determines recovery availability; `import-bundle-resources.ts` resolves and verifies resources; `import-bundle-publish.ts` prepares and publishes chat rows; `import-bundle-reconcile.ts` handles deferred reconciliation. Shared plan shapes and small helpers live in `import-bundle-common.ts`. All modules use the existing journal and conflict checks; there is one write path.
 
 `export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. The archive version stays unchanged; annotated partial text uses the same streamed record layout and integrity checks.
+
+## Bundled native SQLite
+
+`sqlite-native.ts` owns better-sqlite3 13.0.3, prepared-statement reuse, FULL synchronous writes and fatal-on-SQL-error rollback. `sqlite-session.ts` exposes serialized asynchronous operations. The transfer worker executes native SQL directly under `sqlite-supervisor.ts` in its independent parent. A small orphan watchdog watches only that parent's PID and kills a synchronously busy worker after host death. It has no database handles and does not enumerate processes.
+
+Standalone callers (including host diagnostics) use supervised native workers with typed IPC and acknowledged, byte-bounded row batches. Up to two idle processes may be reused for two seconds; they hold no database handles, transactions or attachments. Each live connection owns an exclusive worker. Native errors and cancellation never poison another connection. Neither application path spawns the sqlite3 CLI.
+
+Metadata text queries are single statements; scripts deliberately discard results. SQL scripts use SQLite's parser through db.exec, including trigger bodies; there is no JavaScript SQL splitter. Large values travel as buffers, and staged message/resource writes use bound parameters. Dependency batches use one size query and one typed value query in the same snapshot. The 32 MiB value and existing batch budgets remain enforced.
+
+Write errors close and poison the owned connection, rolling back uncommitted work. Opening writable Cursor databases requires their existing file; private staging databases explicitly opt into creation. ATTACH remains subject to schema validation and SQLite's WAL crash-atomicity restrictions. FULL is set explicitly on main and attached connections. The driver does not change Cursor's journal or locking mode.
+
+`prepare-sqlite.ts` copies only the pinned driver's runtime JS, license and eight prebuilds to vendor. The universal VSIX is offline-capable. Native loading requires Node-API 10 in the actual worker, independently of the development .nvmrc. The sqlite3 CLI remains only a development/test oracle, not an application dependency.
+
+Human log fields use logValue rather than JSON serialization: path separators stay literal, quotes and controls are escaped. Archive JSON and durable metadata serialization remain unchanged.

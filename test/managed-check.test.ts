@@ -9,7 +9,6 @@ import type { WorkspaceEntry } from '../src/types';
 const jobs: StatisticsJob[] = [];
 let abort: AbortController;
 let cancelAfterFirst = false;
-let preparations = 0;
 let locks = 0;
 
 const runtime = {
@@ -48,11 +47,6 @@ loader._load = function (id, parent, isMain) {
     };
   if (id === './extension-workspaces')
     return {
-      prepareSqlite: async () => {
-        preparations++;
-
-        return { executable: 'sqlite3', initFile: '' };
-      },
       loadHostEntries: async () => ({
         entries: [],
         userDir: '/fixture',
@@ -96,7 +90,7 @@ beforeEach(() => {
   jobs.length = 0;
   abort = new AbortController();
   cancelAfterFirst = false;
-  preparations = locks = 0;
+  locks = 0;
 });
 
 test('bulk checks group selected chats and read workspace headers in the same job', async () => {
@@ -114,7 +108,6 @@ test('bulk checks group selected chats and read workspace headers in the same jo
   );
 
   assert.equal(locks, 1);
-  assert.equal(preparations, 1);
   assert.equal(jobs.length, 2);
 
   assert.deepEqual(

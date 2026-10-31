@@ -16,7 +16,6 @@ const result = (overrides: Partial<ImportResult>): ImportResult => ({
   historyOnly: 0,
   skipped: 0,
   alreadyImported: 0,
-  alreadyPresent: 0,
   newVersions: 0,
   incomplete: 0,
   composerIds: [],
@@ -33,6 +32,19 @@ test('already imported plus skipped chats is incomplete, without a restart', () 
   assert.equal(notice.status, 'incomplete');
   assert.match(notice.detail, /1 chat was skipped/);
   assert.equal(notice.restart, false);
+});
+
+test('repaired imported models request one Cursor restart', () => {
+  const notice = formatImportNotice(
+    result({
+      alreadyImported: 1,
+      modelConfigsRepaired: 1,
+    }),
+  );
+
+  assert.equal(notice.title, 'Repaired 1 imported chat model');
+  assert.equal(notice.restart, true);
+  assert.match(notice.detail, /Quit Cursor and reopen/);
 });
 
 test('history-only updated copy remains incomplete', () => {
@@ -204,7 +216,6 @@ test('formatImportNotice prefers a calm already-imported result', () => {
     historyOnly: 0,
     skipped: 0,
     alreadyImported: 5,
-    alreadyPresent: 5,
     newVersions: 0,
     incomplete: 0,
     composerIds: [],

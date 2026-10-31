@@ -9,7 +9,6 @@ import {
   setUi,
   withLock,
 } from './extension-state';
-import { prepareSqlite } from './extension-workspaces';
 import type { ManagedNode } from './managed-node';
 import { groupManagedNodes } from './managed-selection';
 import { notifyCompletion } from './notifications';
@@ -82,7 +81,6 @@ export async function checkManagedNodes(
           token,
         ) => {
           const signal = linkedSignal(token);
-          const sqlite = await prepareSqlite(context);
           const settings = transferSettings();
 
           for (const [index, group] of groups.entries()) {
@@ -96,7 +94,6 @@ export async function checkManagedNodes(
             }>(
               {
                 kind: 'chat-statistics',
-                ...sqlite,
                 ...settings,
                 workspace: group.workspace,
                 chats: group.chats,

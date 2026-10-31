@@ -6,9 +6,6 @@ import * as vscode from 'vscode';
 /** File picker filter for `*.zip` exports. */
 export const ZIP_FILTER = { 'Cursor chat export': ['zip'] };
 
-/** @deprecated Use ZIP_FILTER. Kept so older call sites fail closed on JSON. */
-export const JSON_FILTER = ZIP_FILTER;
-
 /** Local default is independent of the selected chat's workspace scheme. */
 export function importDialogOptions(
   localDirectory: string,

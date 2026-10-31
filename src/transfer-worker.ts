@@ -1,3 +1,6 @@
+import { guardSqliteParent } from './sqlite-orphan-guard';
+import type { ChildProcess } from 'node:child_process';
+import { superviseSqlite } from './sqlite-session';
 import { deleteSelectedChats } from './chat-deletion';
 import type { DeletionJob } from './deletion-types';
 import {
@@ -32,6 +35,7 @@ process.once('disconnect', () => {
 process.once('SIGTERM', () => abort.abort());
 /** True after the worker accepts its start message. */
 let started = false;
+let orphanGuard: ChildProcess | undefined;
 
 /**
  * Deliver the final IPC message, then close the channel.
@@ -39,6 +43,7 @@ let started = false;
  */
 function finishWorker(code: number, message: Record<string, unknown>): void {
   clearTimeout(disconnectedExit);
+  orphanGuard?.kill();
   finishing = true;
 
   if (!process.connected || !process.send) {
@@ -90,6 +95,11 @@ process.on(
     started = true;
 
     const job = message.job;
+
+    if (process.env.CCT_SQLITE_SUPERVISED === '1') {
+      orphanGuard = guardSqliteParent();
+      superviseSqlite();
+    }
 
     void observeTransfer(
       {
@@ -201,10 +211,9 @@ async function run(
 
   const ctx: TransferContext = {
     recoverText: job.recoverText,
-    executable: job.executable,
-    initFile: job.initFile,
     timeoutMs: job.timeoutMs,
     busyTimeoutMs: job.busyTimeoutMs,
+    modelImportPolicy: job.modelImportPolicy,
     plansDir: job.plansDir,
     canvasesDir: job.canvasesDir,
     maxJsonProperties: job.maxJsonProperties,

@@ -6,6 +6,7 @@ import path from 'node:path';
 import * as db from '../src/db';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import { readJsonFile } from '../src/format';
 import type {
@@ -16,7 +17,7 @@ import type {
 import { agentChatFixture } from './blob-fixture';
 
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable
@@ -44,8 +45,6 @@ test(
     t.after(() => fs.rm(root, { recursive: true, force: true }));
 
     const ctx: TransferContext = {
-      executable: executable as string,
-      initFile: await sql.ensureInitFile(root),
       plansDir: path.join(root, 'plans'),
     };
 

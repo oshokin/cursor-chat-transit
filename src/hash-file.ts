@@ -1,7 +1,6 @@
 import { transferEvent } from './transfer-events';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import { open } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
 
@@ -62,26 +61,4 @@ export async function hashFile(
   });
 
   return { sha256: hash.digest('hex'), bytes };
-}
-
-/** Write lowercase hex of `source` without building one giant hex string. */
-export async function writeHexFile(
-  /** Source path inside the archive or on disk. */
-  source: string,
-  dest: string,
-): Promise<void> {
-  const input = fs.createReadStream(source, { highWaterMark: 1024 * 1024 });
-  const handle = await open(dest, 'wx');
-
-  try {
-    for await (const chunk of input) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-
-      await handle.write(buf.toString('hex'));
-    }
-
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 }

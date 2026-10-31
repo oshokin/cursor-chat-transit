@@ -8,12 +8,8 @@ import path from 'node:path';
 import { MAX_SQLITE_VALUE_BYTES } from '../src/bundle-limits';
 import { deleteSelectedChats } from '../src/chat-deletion';
 import { deleteHeaderReferences, deleteMessageRows } from '../src/deletion-sql';
-import {
-  findSqliteExecutable,
-  ensureInitFile,
-  execSql,
-  execSqlScript,
-} from '../src/sqlite';
+import { execSql, execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import type { Layout, WorkspaceEntry, TransferContext } from '../src/types';
 
@@ -61,10 +57,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
 
   t.after(() => removeTemp(root));
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const globalDbPath = path.join(root, 'global.vscdb');
   const entries: WorkspaceEntry[] = [];
@@ -187,10 +180,7 @@ async function writerFixture(
     }
   });
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const database = path.join(root, 'global.vscdb');
   const workspaceDb = path.join(root, 'workspace.vscdb');
@@ -280,10 +270,7 @@ async function liveWorkspace(
 
   t.after(() => removeTemp(root));
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const globalDbPath = path.join(root, 'global.vscdb');
   const storageIds = ['migrated', ...(spec.extraStorageIds || [])];
@@ -399,8 +386,6 @@ test(
     >(
       {
         kind: 'delete-chats',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         workspaces: entries,
         targets,
       },
@@ -818,10 +803,7 @@ test(
 
     t.after(() => removeTemp(root));
 
-    const ctx: TransferContext = {
-      executable: executable!,
-      initFile: await ensureInitFile(root),
-    };
+    const ctx: TransferContext = {};
 
     const globalDbPath = path.join(root, 'global.vscdb');
     const directory = path.join(root, 'workspaceStorage', 'migrated');

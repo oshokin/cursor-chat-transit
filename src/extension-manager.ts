@@ -9,7 +9,6 @@ import {
   currentWorkspaceDatabase,
   listHostEntriesAsync,
   loadHostEntries,
-  prepareSqlite,
 } from './extension-workspaces';
 import type { ManagedNode } from './managed-node';
 import { managedSearchItems, showManagedSearch } from './managed-search';
@@ -254,7 +253,6 @@ export class ChatManager
       scan = await withLock(
         this.context,
         async () => {
-          const sqlite = await prepareSqlite(this.context);
           const host = await listHostEntriesAsync();
 
           return vscode.window.withProgress(
@@ -267,7 +265,6 @@ export class ChatManager
               runTransfer<EmptyWorkspaceScan>(
                 {
                   kind: 'find-empty-workspaces',
-                  ...sqlite,
                   ...transferSettings(),
                   userDataRoot: host.userDir,
                   workspaces: host.entries,
@@ -1108,8 +1105,6 @@ export class ChatManager
     const log = startOperationLog(this.operations, 'load managed chats');
 
     try {
-      const sqlite = await prepareSqlite(this.context);
-
       /** Headers returned by the list. */
       const result = await runTransfer<{
         /** Headers returned by the list-chats job. */
@@ -1117,7 +1112,6 @@ export class ChatManager
       }>(
         {
           kind: 'list-chats',
-          ...sqlite,
           ...transferSettings(),
           workspace,
           filePath: '',
@@ -1249,8 +1243,6 @@ export class ChatManager
     const rows = new Map<string, StatisticsUpdate>();
 
     try {
-      const sqlite = await prepareSqlite(this.context);
-
       /** How many items failed. */
       const result = await runTransfer<{
         /** How many checks failed. */
@@ -1258,7 +1250,6 @@ export class ChatManager
       }>(
         {
           kind: 'workspace-statistics',
-          ...sqlite,
           ...transferSettings(),
           workspaces: entries,
           deepCheck: true,
@@ -1603,7 +1594,6 @@ export class ChatManager
           }>(
             {
               kind: 'workspace-catalogue',
-              ...(await prepareSqlite(this.context)),
               ...transferSettings(),
               workspaces: batch,
             },
@@ -1881,7 +1871,6 @@ export function registerManager(
       if (
         [
           'userDataDir',
-          'sqlitePath',
           'plansDirectory',
           'sqlite.operationTimeoutSeconds',
           'sqlite.busyTimeoutSeconds',

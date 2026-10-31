@@ -1,12 +1,11 @@
 import { pickWithStatistics } from './extension-statistics';
 import { workspaceStatisticsKey } from './statistics';
 import type { TransitLog } from './output-ui';
-import fs from 'node:fs';
 import path from 'node:path';
 import * as vscode from 'vscode';
 import { currentIdentity } from './core';
 import { setSource } from './extension-state';
-import { config, storageOptions } from './extension-settings';
+import { storageOptions } from './extension-settings';
 import * as paths from './paths';
 import {
   workspacePickItems,
@@ -14,7 +13,6 @@ import {
   workspacePickTitle,
   type WorkspacePickAction,
 } from './picker';
-import { ensureInitFile, findSqliteExecutable } from './sqlite';
 import type { WorkspaceEntry, WorkspaceIdentity } from './types';
 import { workspacePresentation } from './workspace-presentation';
 import {
@@ -22,33 +20,6 @@ import {
   destinationStaysVisible,
   sameDatabasePath,
 } from './workspace-opening';
-
-/** Resolve sqlite3 and an empty `-init` file in globalStorage. */
-export async function prepareSqlite(
-  /** Extension storage and host state. */
-  context: vscode.ExtensionContext,
-): Promise<{
-  /** sqlite3 executable. */
-  executable: string;
-  /** sqlite3 `-init` file in globalStorage. */
-  initFile: string;
-}> {
-  const { sqlitePath } = config();
-  const executable = findSqliteExecutable(sqlitePath || undefined);
-
-  if (!executable) {
-    throw new Error(
-      'sqlite3 CLI not found. Install sqlite3 locally and/or set cursorChatTransit.sqlitePath.',
-    );
-  }
-
-  const tmp = path.join(context.globalStorageUri.fsPath, 'sqlite-init');
-
-  await fs.promises.mkdir(tmp, { recursive: true });
-  const initFile = await ensureInitFile(tmp);
-
-  return { executable, initFile };
-}
 
 /** User-data directory and the identity of this window, without reading storage. */
 function hostScope(): {
@@ -63,26 +34,6 @@ function hostScope(): {
       vscode.workspace.workspaceFile,
       vscode.workspace.workspaceFolders,
     ),
-  };
-}
-
-/**
- * Synchronous inventory for a low-level task that does not need opening facts.
- * UI routes use `listHostEntriesAsync`.
- */
-export function listHostEntries(): {
-  /** Cursor user-data directory that was searched. */
-  userDir: string;
-  /** Discovered workspace storage pairs. */
-  entries: WorkspaceEntry[];
-  /** Identity of the workspace open in this window, when it can be read. */
-  identity: WorkspaceIdentity | undefined;
-} {
-  const scope = hostScope();
-
-  return {
-    ...scope,
-    entries: paths.listWorkspaceEntries(scope.userDir),
   };
 }
 
@@ -143,19 +94,8 @@ export async function loadHostEntries(options?: {
   return { ...listed, entries };
 }
 
-/** Load sqlite, storage root, workspace entries, and current identity. */
-export async function hostState(
-  /** Extension storage and host state. */
-  context: vscode.ExtensionContext,
-): Promise<{
-  /** sqlite3 executable and init file. */
-  /** Path of the sqlite3 executable. */
-  sqlite: {
-    /** sqlite3 executable chosen for this host. */
-    executable: string;
-    /** SQLite init file passed to that executable. */
-    initFile: string;
-  };
+/** Load storage root, workspace entries, and current identity. */
+export async function hostState(): Promise<{
   /** Cursor user-data directory that was searched. */
   userDir: string;
   /** Discovered workspace storage pairs. */
@@ -163,10 +103,7 @@ export async function hostState(
   /** Identity of the workspace open in this window, when it can be read. */
   identity: WorkspaceIdentity | undefined;
 }> {
-  const sqlite = await prepareSqlite(context);
-  const listed = await loadHostEntries();
-
-  return { sqlite, ...listed };
+  return loadHostEntries();
 }
 
 /**
@@ -296,7 +233,6 @@ export async function pickWorkspace(
     buttonLabel: 'Count chats in each workspace',
     operations: analysis.operations,
     job: async () => ({
-      ...(await prepareSqlite(analysis.context)),
       kind: 'workspace-statistics',
       workspaces: entries,
     }),

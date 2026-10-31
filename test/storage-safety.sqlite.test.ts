@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, fork } from 'node:child_process';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import * as dep from '../src/dependencies';
 import * as transfer from '../src/transfer';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
@@ -20,7 +21,7 @@ const digest = dep.sha256Hex(bytes);
 /** `cursorDiskKV` key for the fixture blob. */
 const key = `agentKv:blob:${digest}`;
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable ? false : 'sqlite3 CLI is required for safety tests';
 
@@ -57,10 +58,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
 
-  const ctx: TransferContext = {
-    executable: executable as string,
-    initFile: await sql.ensureInitFile(dir),
-  };
+  const ctx: TransferContext = {};
 
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
@@ -108,7 +106,7 @@ test(
       planted = true;
 
       execFileSync(
-        ctx.executable,
+        executable as string,
         [
           workspace.globalDbPath,
           `INSERT INTO cursorDiskKV VALUES ('${key}',X'99');`,
@@ -154,7 +152,7 @@ test(
 
     ctx.onPhase = (phase) => {
       if (phase === 'verify') {
-        execFileSync(ctx.executable, [
+        execFileSync(executable as string, [
           workspace.globalDbPath,
           `UPDATE cursorDiskKV SET value=X'99' WHERE key='${key}';`,
         ]);
@@ -259,7 +257,7 @@ test(
 
     ctx.onPhase = (phase, metrics) => {
       if (phase === 'prepare' && metrics?.processed === 100) {
-        execFileSync(ctx.executable, [
+        execFileSync(executable as string, [
           workspace.globalDbPath,
           '.timeout 0',
           "INSERT INTO ItemTable VALUES('other-window','working');",
@@ -284,7 +282,7 @@ test(
       '0',
     );
 
-    execFileSync(ctx.executable, [
+    execFileSync(executable as string, [
       workspace.globalDbPath,
       '.timeout 0',
       "BEGIN IMMEDIATE; UPDATE ItemTable SET value='still working' WHERE key='other-window'; COMMIT;",
@@ -350,8 +348,6 @@ test(
       type: 'start',
       job: {
         kind: 'import',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         workspace,
         filePath: file,
       },
@@ -360,7 +356,7 @@ test(
     await exited;
     assert.equal(disconnected, true);
 
-    execFileSync(ctx.executable, [
+    execFileSync(executable as string, [
       workspace.globalDbPath,
       '.timeout 0',
       "BEGIN IMMEDIATE; INSERT INTO ItemTable VALUES('after-disconnect','ok'); COMMIT;",
@@ -385,7 +381,7 @@ test(
       if (phase === 'write' && metrics?.processed && !checked) {
         checked = true;
 
-        execFileSync(ctx.executable, [
+        execFileSync(executable as string, [
           workspace.globalDbPath,
           '.timeout 0',
           "INSERT INTO ItemTable VALUES('between-batches','ok');",

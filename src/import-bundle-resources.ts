@@ -1,9 +1,8 @@
-import { rm } from 'node:fs/promises';
+import { readFile } from './trace-fs';
+import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import path from 'node:path';
-import { operationTempDir } from './operation-temp';
 import { attachmentDirectory, resolveAttachmentPath } from './attachments';
 import { canvasFilePath, readCanvasFile } from './canvases';
-import { sqlText } from './core';
 import * as db from './db';
 import { hashFile } from './hash-file';
 import { ChatRow, json } from './import-bundle-common';
@@ -18,7 +17,6 @@ import { planFilePath, readPlanFile } from './plans';
 import { sha256Hex } from './resource-bytes';
 import { installBlobFile } from './resource-files';
 import { SqliteSession } from './sqlite-session';
-import { writeFile } from './trace-fs';
 import { canvasesDirOf, inspectPair, plansDirOf } from './transfer-context';
 import { traceIO, transferEvent } from './transfer-events';
 import type { SqliteConn, TransferContext, WorkspaceEntry } from './types';
@@ -220,14 +218,14 @@ export async function insertKv(
       `${row.sha256}.bin`,
     );
 
-    const value =
-      row.storage_class === 'blob'
-        ? `readfile(${sqlText(blob)})`
-        : `CAST(readfile(${sqlText(blob)}) AS TEXT)`;
+    const bytes = await readFile(blob);
+
+    if (bytes.length > MAX_SQLITE_VALUE_BYTES)
+      throw new Error('Resource exceeds SQLite value limit.');
 
     await global.exec(
-      `INSERT INTO cursorDiskKV(key, value) SELECT ${sqlText(row.id)}, ${value}
-       WHERE NOT EXISTS (SELECT 1 FROM cursorDiskKV WHERE key = ${sqlText(row.id)});`,
+      `INSERT INTO cursorDiskKV(key,value) SELECT ?, ${row.storage_class === 'blob' ? '?' : 'CAST(? AS TEXT)'} WHERE NOT EXISTS(SELECT 1 FROM cursorDiskKV WHERE key=?);`,
+      [row.id, bytes, row.id],
     );
 
     processed++;
@@ -470,59 +468,57 @@ export async function restoreHexEncodedBlob(
     decoded: Buffer;
   },
 ): Promise<void> {
-  const dir = await operationTempDir('cct-blob-', conn.temporaryDirectory);
-  const previousPath = path.join(dir, 'previous.bin');
-  const decodedPath = path.join(dir, 'decoded.bin');
+  const session = await SqliteSession.open({ ...conn, readOnly: false });
 
   try {
-    await writeFile(previousPath, repair.previous, { mode: 0o600 });
-    await writeFile(decodedPath, repair.decoded, { mode: 0o600 });
-
-    const session = await SqliteSession.open({ ...conn, readOnly: false });
-
-    try {
-      await session.exec(`BEGIN IMMEDIATE;
-UPDATE cursorDiskKV SET value = readfile(${sqlText(decodedPath)})
-WHERE key = ${sqlText(repair.key)}
-  AND typeof(value) = 'text'
-  AND CAST(value AS BLOB) = readfile(${sqlText(previousPath)});`);
-
-      const changed = Number((await session.exec('SELECT changes();')).trim());
-
-      const stored =
-        changed === 1 ? await readSessionKv(session, repair.key) : null;
-
-      const restored =
-        stored?.storageClass === 'blob' &&
-        sha256Hex(stored.bytes) === sha256Hex(repair.decoded);
-
-      await session.exec(restored ? 'COMMIT;' : 'ROLLBACK;');
-
-      if (!restored) {
-        const err = new TransferError(
-          'A required chat resource already exists with different data.',
-        );
-
-        err.code = 'RESOURCE_CONFLICT';
-        err.detail = `phase=preflight reason=content key=${repair.key}`;
-
-        throw err;
-      }
-    } finally {
-      await session.close();
-    }
-
     transferEvent({
       action: 'Restore hex-encoded blob',
-      status: 'completed',
+      status: 'started',
       path: conn.database,
       key: repair.key,
       bytes: repair.decoded.length,
-      detail: `previousClass=text previousBytes=${repair.previous.length} restoredClass=blob restoredBytes=${repair.decoded.length}`,
     });
+
+    await session.exec('BEGIN IMMEDIATE;');
+
+    await session.exec(
+      "UPDATE cursorDiskKV SET value=? WHERE key=? AND typeof(value)='text' AND CAST(value AS BLOB)=?;",
+      [repair.decoded, repair.key, repair.previous],
+    );
+
+    const changed = Number((await session.exec('SELECT changes();')).trim());
+
+    const stored =
+      changed === 1 ? await readSessionKv(session, repair.key) : null;
+
+    const restored =
+      stored?.storageClass === 'blob' &&
+      sha256Hex(stored.bytes) === sha256Hex(repair.decoded);
+
+    await session.exec(restored ? 'COMMIT;' : 'ROLLBACK;');
+
+    if (!restored) {
+      const err = new TransferError(
+        'A required chat resource already exists with different data.',
+      );
+
+      err.code = 'RESOURCE_CONFLICT';
+      err.detail = `phase=preflight reason=content key=${repair.key}`;
+
+      throw err;
+    }
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await session.close();
   }
+
+  transferEvent({
+    action: 'Restore hex-encoded blob',
+    status: 'completed',
+    path: conn.database,
+    key: repair.key,
+    bytes: repair.decoded.length,
+    detail: `previousClass=text previousBytes=${repair.previous.length} restoredClass=blob restoredBytes=${repair.decoded.length}`,
+  });
 }
 
 /** Confirm written blob keys still match the bundle hashes. */

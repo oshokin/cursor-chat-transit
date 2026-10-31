@@ -7,6 +7,7 @@ import * as db from '../src/db';
 import { sqlText } from '../src/core';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { assertExportShape, readJsonFile } from '../src/format';
 import {
   selectionForFilename,
@@ -26,7 +27,7 @@ const B = '22222222-2222-4222-8222-222222222222';
 /** Shared bubble id in title fixtures. */
 const bubble = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable
@@ -72,10 +73,7 @@ async function fixture(
 
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
 
-  const ctx: TransferContext = {
-    executable: executable as string,
-    initFile: await sql.ensureInitFile(dir),
-  };
+  const ctx: TransferContext = {};
 
   const workspace: WorkspaceEntry = {
     storageRoot: dir,
@@ -113,10 +111,7 @@ ${headerTable}`,
 }
 
 /** Insert one titled chat into the global database. */
-async function seedChat(
-  gl: { executable: string; database: string; initFile: string },
-  header: ComposerHeader,
-) {
+async function seedChat(gl: { database: string }, header: ComposerHeader) {
   await sql.execSqlScript({
     ...gl,
     sql: db.kvInsertSql([

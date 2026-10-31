@@ -76,6 +76,8 @@ export function adjustFamilyPlan(
   if (dropOrdinals.size) {
     plan.create = plan.create.filter((ordinal) => !dropOrdinals.has(ordinal));
 
+    plan.repair = plan.repair.filter((item) => !dropOrdinals.has(item.ordinal));
+
     plan.newVersions = plan.newVersions.filter(
       (item) => !drop.has(item.composerId),
     );
@@ -109,8 +111,18 @@ export function adjustFamilyPlan(
   }
 
   if (promoted.size) {
+    const promotedOrdinals = new Set(
+      rows
+        .filter((row) => promoted.has(row.sourceId))
+        .map((row) => row.ordinal),
+    );
+
     plan.already = plan.already.filter(
       (item) => !promoted.has(item.composerId),
+    );
+
+    plan.repair = plan.repair.filter(
+      (item) => !promotedOrdinals.has(item.ordinal),
     );
   }
 

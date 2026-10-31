@@ -223,28 +223,6 @@ export async function packZip(
   }
 }
 
-/** Write one stored member with the ZIP64 extra field. */
-export async function packZip64(
-  destPath: string,
-  /** Absolute path of the file to pack. */
-  diskPath: string,
-  /** Archive member name. */
-  name: string,
-): Promise<void> {
-  const zip = new yazl.ZipFile();
-  const output = createWriteStream(destPath, { flags: 'wx', mode: 0o600 });
-  const done = pipeline(zip.outputStream, output);
-
-  zip.addFile(diskPath, name, {
-    compress: false,
-    forceZip64Format: true,
-    mtime: new Date(0),
-  });
-
-  zip.end();
-  await done;
-}
-
 /** Read ZIP entries one at a time into `destDir`. The archive is not buffered. */
 export async function extractZip(
   zipPath: string,

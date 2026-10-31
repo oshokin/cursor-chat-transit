@@ -6,11 +6,8 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { openReadTransaction } from '../src/read-transaction';
 import { SqliteSession } from '../src/sqlite-session';
-import {
-  ensureInitFile,
-  execSqlScript,
-  findSqliteExecutable,
-} from '../src/sqlite';
+import { execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import * as db from '../src/db';
 import { exportToFile } from '../src/export-transfer';
@@ -33,8 +30,6 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   });
 
   const ctx: TransferContext = {
-    executable,
-    initFile: await ensureInitFile(root),
     timeoutMs: 10000,
   };
 
@@ -49,7 +44,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
 
   const conn = { ...ctx, database: workspace.globalDbPath };
 
-  const writer = await SqliteSession.open(conn);
+  const writer = await SqliteSession.open({ ...conn, busyTimeoutMs: 0 });
 
   cleanup.writer = writer;
 
@@ -97,9 +92,7 @@ test(
     assert.equal(await db.readKvText(conn, 'k'), 'v2');
 
     assert.match(
-      (
-        await writer.exec('.timeout 0\nPRAGMA wal_checkpoint(TRUNCATE);')
-      ).trim(),
+      (await writer.exec('PRAGMA wal_checkpoint(TRUNCATE);')).trim(),
       /^0\|0\|0$/,
     );
   },
@@ -122,9 +115,7 @@ test(
     await view.close();
 
     assert.match(
-      (
-        await writer.exec('.timeout 0\nPRAGMA wal_checkpoint(TRUNCATE);')
-      ).trim(),
+      (await writer.exec('PRAGMA wal_checkpoint(TRUNCATE);')).trim(),
       /^0\|0\|0$/,
     );
   },
@@ -201,9 +192,7 @@ test(
             onPhase: (phase) => {
               assert.notEqual(phase as string, 'backup');
               if (phase === 'write')
-                checkpoint = writer.exec(
-                  '.timeout 0\nPRAGMA wal_checkpoint(TRUNCATE);',
-                );
+                checkpoint = writer.exec('PRAGMA wal_checkpoint(TRUNCATE);');
             },
           },
           workspace,
@@ -276,9 +265,7 @@ test(
     await writer.exec("INSERT INTO cursorDiskKV VALUES('after','error');");
 
     assert.match(
-      (
-        await writer.exec('.timeout 0\nPRAGMA wal_checkpoint(TRUNCATE);')
-      ).trim(),
+      (await writer.exec('PRAGMA wal_checkpoint(TRUNCATE);')).trim(),
       /^0\|0\|0$/,
     );
 
@@ -308,9 +295,7 @@ test(
     }
 
     assert.match(
-      (
-        await writer.exec('.timeout 0\nPRAGMA wal_checkpoint(TRUNCATE);')
-      ).trim(),
+      (await writer.exec('PRAGMA wal_checkpoint(TRUNCATE);')).trim(),
       /^0\|0\|0$/,
     );
   },

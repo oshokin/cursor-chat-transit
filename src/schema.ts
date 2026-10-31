@@ -193,6 +193,6 @@ export function bubbleKeySql(composerId: string): {
   return {
     lower,
     upper,
-    sql: `SELECT hex(key), hex(typeof(value)), hex(value) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)} ORDER BY key;`,
+    sql: `SELECT CAST(key AS BLOB), CAST(typeof(value) AS BLOB), CASE WHEN length(CAST(value AS BLOB)) <= 33554432 THEN CAST(value AS BLOB) ELSE NULL END, CAST(length(CAST(value AS BLOB)) AS BLOB) FROM cursorDiskKV WHERE key >= ${sqlText(lower)} AND key < ${sqlText(upper)} ORDER BY key;`,
   };
 }

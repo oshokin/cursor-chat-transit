@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import * as vscode from 'vscode';
 
 /** Activate the extension and exercise the public UI shell, not import/export. */
@@ -53,4 +54,42 @@ export async function run(): Promise<void> {
     ),
     true,
   );
+
+  const native = require(
+    path.join(extension.extensionPath, 'out/sqlite-session.js'),
+  ) as {
+    SqliteSession: {
+      open(options: { database: string }): Promise<{
+        exec(sql: string, parameters?: unknown[]): Promise<string>;
+        close(): Promise<void>;
+      }>;
+    };
+  };
+
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'cct-host-native-'));
+
+  try {
+    const session = await native.SqliteSession.open({
+      database: path.join(temporary, 'test.sqlite'),
+    });
+
+    try {
+      await session.exec('CREATE TABLE t(value);');
+      await session.exec('INSERT INTO t VALUES (?);', ['native host']);
+
+      assert.equal(
+        (await session.exec('SELECT value FROM t;')).trim(),
+        'native host',
+      );
+
+      assert.equal(
+        (await session.exec('SELECT sqlite_version();')).trim(),
+        '3.53.4',
+      );
+    } finally {
+      await session.close();
+    }
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 }

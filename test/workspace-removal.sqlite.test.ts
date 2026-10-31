@@ -26,12 +26,8 @@ import { countOwnershipReads } from '../src/deletion-ownership';
 import { withDirectoryRemoval } from '../src/workspace-removal';
 import { observeTransfer } from '../src/transfer-events';
 import { listWorkspaceEntries } from '../src/paths';
-import {
-  ensureInitFile,
-  execSql,
-  execSqlScript,
-  findSqliteExecutable,
-} from '../src/sqlite';
+import { execSql, execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
 
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
@@ -48,10 +44,7 @@ async function profile(): Promise<{
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cct-ws-remove-'));
 
-  const ctx: TransferContext = {
-    executable: executable!,
-    initFile: await ensureInitFile(root),
-  };
+  const ctx: TransferContext = {};
 
   const globalDir = path.join(root, 'User', 'globalStorage');
 
@@ -131,8 +124,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -145,8 +136,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -216,8 +205,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: empty }],
         workspaces: [one, empty, shared],
@@ -230,8 +217,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -298,8 +283,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: shared }],
         workspaces: [one, empty, shared, other],
@@ -332,8 +315,6 @@ test('chat-only deletion keeps the workspace directory', { skip }, async () => {
   try {
     const prepared = await prepareManagedDelete(ctx, {
       kind: 'prepare-managed-delete',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       userDataRoot: root,
       requests: [{ kind: 'chats', workspace: one, ids: [A] }],
       workspaces: [one, empty, shared],
@@ -345,8 +326,6 @@ test('chat-only deletion keeps the workspace directory', { skip }, async () => {
 
     const result = await executeManagedDelete(ctx, {
       kind: 'delete-managed-data',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       plan: prepared.plan,
       workspaces: [one, empty, shared],
       emptyWindow: true,
@@ -383,8 +362,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -417,8 +394,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -453,8 +428,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -472,8 +445,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -503,8 +474,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -531,8 +500,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -550,8 +517,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -585,8 +550,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -603,8 +566,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -634,8 +595,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -647,8 +606,6 @@ test(
 
       const removed = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -671,8 +628,6 @@ test(
 
       const again = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -722,8 +677,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -735,8 +688,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -773,8 +724,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -821,8 +770,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -837,8 +784,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [{ ...one, globalDbPath: elsewhere }, empty, shared],
         emptyWindow: true,
@@ -864,8 +809,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -879,8 +822,6 @@ test(
         { ...ctx, signal: abort.signal },
         {
           kind: 'delete-managed-data',
-          executable: ctx.executable,
-          initFile: ctx.initFile,
           plan: prepared.plan,
           workspaces: [one, empty, shared],
           emptyWindow: true,
@@ -907,8 +848,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -930,8 +869,6 @@ test(
             { ...ctx, signal: abort.signal },
             {
               kind: 'delete-managed-data',
-              executable: ctx.executable,
-              initFile: ctx.initFile,
               plan: prepared.plan,
               workspaces: [one, empty, shared],
               emptyWindow: true,
@@ -958,8 +895,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -982,8 +917,6 @@ test(
             { ...ctx, signal: abort.signal },
             {
               kind: 'delete-managed-data',
-              executable: ctx.executable,
-              initFile: ctx.initFile,
               plan: prepared.plan,
               workspaces: [one, empty, shared],
               emptyWindow: true,
@@ -1012,8 +945,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1035,8 +966,6 @@ test(
         () =>
           executeManagedDelete(ctx, {
             kind: 'delete-managed-data',
-            executable: ctx.executable,
-            initFile: ctx.initFile,
             plan: prepared.plan,
             workspaces: [one, empty, shared],
             emptyWindow: true,
@@ -1075,8 +1004,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1100,8 +1027,6 @@ test(
         () =>
           executeManagedDelete(ctx, {
             kind: 'delete-managed-data',
-            executable: ctx.executable,
-            initFile: ctx.initFile,
             plan: prepared.plan,
             workspaces: [one, empty, shared],
             emptyWindow: true,
@@ -1136,8 +1061,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1153,8 +1076,6 @@ test(
       const counted = await countOwnershipReads(() =>
         executeManagedDelete(ctx, {
           kind: 'delete-managed-data',
-          executable: ctx.executable,
-          initFile: ctx.initFile,
           plan: prepared.plan,
           workspaces: [one, empty, shared],
           emptyWindow: true,
@@ -1183,8 +1104,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1205,8 +1124,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -1235,8 +1152,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1254,8 +1169,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -1283,8 +1196,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1302,8 +1213,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -1332,8 +1241,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1355,8 +1262,6 @@ test(
         },
         {
           kind: 'delete-managed-data',
-          executable: ctx.executable,
-          initFile: ctx.initFile,
           plan: prepared.plan,
           workspaces: [one, empty, shared],
           emptyWindow: true,
@@ -1387,8 +1292,6 @@ test('a missing unselected database blocks the batch', { skip }, async () => {
   try {
     const prepared = await prepareManagedDelete(ctx, {
       kind: 'prepare-managed-delete',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       userDataRoot: root,
       requests: [
         { kind: 'workspace-data', workspace: one },
@@ -1408,8 +1311,6 @@ test('a missing unselected database blocks the batch', { skip }, async () => {
 
     const result = await executeManagedDelete(ctx, {
       kind: 'delete-managed-data',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       plan: prepared.plan,
       workspaces: [one, empty, shared],
       emptyWindow: true,
@@ -1449,8 +1350,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1494,8 +1393,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1514,8 +1411,6 @@ test(
 
       const refused = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1555,8 +1450,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'workspace-data', workspace: one }],
         workspaces: [one, empty, shared],
@@ -1579,8 +1472,6 @@ test('a directory replaced after SQL is not removed', { skip }, async () => {
   try {
     const prepared = await prepareManagedDelete(ctx, {
       kind: 'prepare-managed-delete',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       userDataRoot: root,
       requests: [{ kind: 'workspace-data', workspace: one }],
       workspaces: [one, empty, shared],
@@ -1604,8 +1495,6 @@ test('a directory replaced after SQL is not removed', { skip }, async () => {
       () =>
         executeManagedDelete(ctx, {
           kind: 'delete-managed-data',
-          executable: ctx.executable,
-          initFile: ctx.initFile,
           plan: prepared.plan,
           workspaces: [one, empty, shared],
           emptyWindow: true,
@@ -1630,8 +1519,6 @@ test('requireEmpty ignores an unrelated global write', { skip }, async () => {
   try {
     const prepared = await prepareManagedDelete(ctx, {
       kind: 'prepare-managed-delete',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       userDataRoot: root,
       requests: [
         { kind: 'workspace-data', workspace: empty, requireEmpty: true },
@@ -1651,8 +1538,6 @@ test('requireEmpty ignores an unrelated global write', { skip }, async () => {
 
     const deleted = await executeManagedDelete(ctx, {
       kind: 'delete-managed-data',
-      executable: ctx.executable,
-      initFile: ctx.initFile,
       plan: prepared.plan,
       workspaces: [one, empty, shared],
       emptyWindow: true,
@@ -1680,8 +1565,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: empty, requireEmpty: true },
@@ -1707,8 +1590,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -1736,8 +1617,6 @@ test(
 
       const scan = await findEmptyWorkspaces(ctx, {
         kind: 'find-empty-workspaces',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         workspaces: [one, empty, shared],
         emptyWindow: true,
@@ -1750,8 +1629,6 @@ test(
 
       const current = await findEmptyWorkspaces(ctx, {
         kind: 'find-empty-workspaces',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         workspaces: [one, empty, shared],
         database: empty.workspaceDbPath,
@@ -1778,8 +1655,6 @@ test(
     try {
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [
           { kind: 'workspace-data', workspace: one },
@@ -1815,8 +1690,6 @@ test(
         () =>
           executeManagedDelete(ctx, {
             kind: 'delete-managed-data',
-            executable: ctx.executable,
-            initFile: ctx.initFile,
             plan: prepared.plan,
             workspaces: [one, empty, shared],
             emptyWindow: true,
@@ -1908,8 +1781,6 @@ test(
 
       const prepared = await prepareManagedDelete(ctx, {
         kind: 'prepare-managed-delete',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         userDataRoot: root,
         requests: [{ kind: 'chats', workspace: one, ids: [A, B] }],
         workspaces: [one, empty, shared],
@@ -1921,8 +1792,6 @@ test(
 
       const result = await executeManagedDelete(ctx, {
         kind: 'delete-managed-data',
-        executable: ctx.executable,
-        initFile: ctx.initFile,
         plan: prepared.plan,
         workspaces: [one, empty, shared],
         emptyWindow: true,

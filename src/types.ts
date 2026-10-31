@@ -130,23 +130,21 @@ export interface WorkspaceEntry {
   opening?: WorkspaceOpening;
 }
 
-/** sqlite3 CLI invocation bound to one database file. */
+/** Native SQLite operation bound to one database file. */
 export interface SqliteConn {
-  /** Absolute path of the sqlite3 executable. */
-  executable: string;
   /** Owned persistent read session; never serialized to a worker. */
   session?: import('./sqlite-session').SqliteSession;
+  /** Writable Cursor files must already exist; private staging databases opt out. */
+  mustExist?: boolean;
   /** Database file this connection will open. */
   database: string;
-  /** sqlite3 `-init` file that sets timeouts and modes. */
-  initFile: string;
   /** When true, open the database read-only. */
   readOnly?: boolean;
   /** Cancellation for the child process. */
   signal?: AbortSignal;
-  /** Wall-clock limit for this sqlite3 invocation. */
+  /** Wall-clock limit for one SQLite request. */
   timeoutMs?: number;
-  /** SQLite busy timeout applied through the init file. */
+  /** Native SQLite busy timeout in milliseconds. */
   busyTimeoutMs?: number;
   /** Object-property budget for one JSON payload during this operation. */
   maxJsonProperties?: number;
@@ -198,20 +196,18 @@ export interface TransferPhaseMetrics {
   missing?: number;
 }
 
-/** Shared sqlite3, timeout, cancellation, and UI hooks for one transfer. */
+/** Shared native SQLite, timeout, cancellation, and UI hooks for one transfer. */
 export interface TransferContext {
   /** Preserve known preview fragments and labelled message gaps during export. */
   recoverText?: boolean;
-  /** Absolute path of the sqlite3 executable. */
-  executable: string;
-  /** sqlite3 `-init` file that sets timeouts and modes. */
-  initFile: string;
   /** Cancellation for the whole transfer. */
   signal?: AbortSignal;
-  /** Wall-clock limit for each sqlite3 invocation. */
+  /** Wall-clock limit for each SQLite request. */
   timeoutMs?: number;
-  /** SQLite busy timeout applied through the init file. */
+  /** Native SQLite busy timeout in milliseconds. */
   busyTimeoutMs?: number;
+  /** Destination model compatibility facts for imported composer bodies. */
+  modelImportPolicy?: import('./model-compatibility').ModelImportPolicy;
   /** Progress callback for named phases. */
   onPhase?: (
     phase: TransferPhase,
@@ -464,10 +460,10 @@ export interface ImportResult {
   skipped: number;
   /** Identical snapshots that were not written again. */
   alreadyImported: number;
-  /** Legacy already-present count kept for older callers. */
-  alreadyPresent: number;
   /** Changed snapshots added as extra copies. */
   newVersions: number;
+  /** Existing same-snapshot copies whose unavailable model was repaired. */
+  modelConfigsRepaired?: number;
   /** Incomplete outcomes in this run. */
   incomplete: number;
   /** Destination composer ids created in this run. */
@@ -496,10 +492,10 @@ export class TransferError extends Error {
   detail?: string;
 }
 
-/** sqlite3 CLI failure with exit code and truncated stderr. */
+/** Native SQLite failure with a stable code and bounded diagnostic detail. */
 export class SqliteError extends Error {
   /** Child exit code or errno. */
   code?: string | number;
-  /** Bounded stderr from sqlite3. */
+  /** Bounded driver or worker diagnostic detail. */
   stderr?: string;
 }

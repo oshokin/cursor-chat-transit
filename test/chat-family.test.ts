@@ -15,12 +15,8 @@ import {
 } from '../src/chat-family';
 import { headerUpsertSql } from '../src/db-write';
 import { remapValue } from '../src/import-bundle-publish';
-import {
-  ensureInitFile,
-  execSql,
-  execSqlScript,
-  findSqliteExecutable,
-} from '../src/sqlite';
+import { execSql, execSqlScript } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import type { ComposerHeader } from '../src/types';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -110,8 +106,6 @@ test('Best-of-N does not set the subagent column', async () => {
 
   try {
     const conn = {
-      executable,
-      initFile: await ensureInitFile(dir),
       database: path.join(dir, 'db.sqlite'),
     };
 

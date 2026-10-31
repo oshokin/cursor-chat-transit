@@ -171,7 +171,7 @@ export async function deleteSelectedChats(
             }
 
             // The writer is closed, so a listener can replace the directory.
-            // Windows refuses to remove a directory that sqlite3 still has open.
+            // Windows refuses to remove a directory while SQLite still has it open.
             for (const id of completed) {
               transferEvent({
                 action: 'Delete chat',

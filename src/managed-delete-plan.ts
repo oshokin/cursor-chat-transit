@@ -2,11 +2,9 @@ import type {
   ManagedDeletePlan,
   ManagedDeleteRequest,
   ManagedDeleteResult,
-  ManagedPlanTarget,
 } from './deletion-types';
 import type { ManagedNode } from './managed-node';
 import { groupManagedNodes } from './managed-selection';
-import { sameDatabaseToken } from './workspace-removal';
 
 /**
  * Keep workspace scope distinct from chat scope.
@@ -308,16 +306,4 @@ export function describeManagedResult(result: ManagedDeleteResult): string {
       : `Deleted data for ${deletedWorkspaces.length} workspaces. No chat records were deleted. Project files were kept.`;
 
   return `${skippedNote}Deleted data for ${deletedWorkspaces.length} workspace${deletedWorkspaces.length === 1 ? '' : 's'} and ${deletedChats} chat${deletedChats === 1 ? '' : 's'}. Project files were kept. Quit and reopen Cursor.`;
-}
-
-/** True when a freshly read target is still the confirmed one. */
-export function planTargetMatches(
-  confirmed: ManagedPlanTarget,
-  ids: string[],
-  token: string,
-): boolean {
-  const left = [...confirmed.ids].sort().join('\n');
-  const right = [...ids].sort().join('\n');
-
-  return left === right && sameDatabaseToken(confirmed.token, token);
 }

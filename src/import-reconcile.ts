@@ -17,11 +17,7 @@ import {
   type TargetFacts,
   type TargetProbeState,
 } from './import-policy';
-import {
-  completePendingImport,
-  type ImportJournal,
-  type PendingImportChat,
-} from './journal';
+import { type PendingImportChat } from './journal';
 import { planFilenamesFromChat, readPlanFile } from './plans';
 import { hashFile } from './hash-file';
 import { sha256Hex } from './resource-bytes';
@@ -217,59 +213,6 @@ export function expectedResourcesFromChat(
   }
 
   return out;
-}
-
-/** Drop a vanished pending batch, complete an exact one, or stop for inspection. */
-export async function reconcilePending(
-  /** Receipt database for this destination. */
-  journal: ImportJournal,
-  opts: {
-    /** Destination workspace whose databases are being reconciled. */
-    workspace: WorkspaceEntry;
-    connWs: SqliteConn;
-    connGl: SqliteConn;
-    /** Detected workspace schema. */
-    wsInfo: Layout;
-    /** Detected global schema. */
-    glInfo: Layout;
-    /** Directory that should still hold pending plan files. */
-    plansDir: string;
-    /** Directory that should still hold pending canvas files. */
-    canvasesDir: string | null;
-  },
-): Promise<ImportJournal> {
-  const pending = journal.pending;
-
-  if (!pending) return journal;
-  const states: Array<'missing' | 'exact' | 'changed'> = [];
-
-  for (const chat of pending.chats) {
-    states.push(await pendingChatMatch(chat, opts));
-  }
-
-  if (states.every((state) => state === 'missing')) {
-    return {
-      version: 1,
-      targetKey: journal.targetKey,
-      receipts: journal.receipts,
-    };
-  }
-
-  if (states.every((state) => state === 'exact')) {
-    return completePendingImport(journal);
-  }
-
-  const detail = pending.chats
-    .map(
-      (chat, index) =>
-        `pendingTarget=${chat.targetComposerId} match=${states[index]}`,
-    )
-    .join(' ');
-
-  throw needsAttention(
-    'The previous import needs checking. No new copies were created.',
-    `pending phase=${pending.phase} ${detail}`,
-  );
 }
 
 /** Compare one pending chat with the live databases and plan files. */

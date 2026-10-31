@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { SqliteSession } from '../src/sqlite-session';
-import { ensureInitFile, execSql, findSqliteExecutable } from '../src/sqlite';
+import { execSql } from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH)!;
 const skip = !executable;
@@ -16,9 +17,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
 
   const options = {
-    executable,
     database: path.join(dir, 'db.sqlite'),
-    initFile: await ensureInitFile(dir),
   };
 
   await execSql({
@@ -31,7 +30,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
 }
 
 test(
-  'session spawn failure rejects without an unhandled child error',
+  'native open failure rejects without an unhandled worker error',
   { skip },
   async (t) => {
     const options = await fixture(t);
@@ -40,9 +39,10 @@ test(
       () =>
         SqliteSession.open({
           ...options,
-          executable: path.join(options.database, 'missing'),
+          database: path.join(options.database, 'missing'),
+          readOnly: true,
         }),
-      /ENOENT|ENOTDIR/,
+      /exist|open/i,
     );
   },
 );
@@ -80,6 +80,37 @@ test(
       ).trim(),
       '2',
     );
+  },
+);
+
+test(
+  'repeated stop signals remain idempotent until the child closes',
+  { skip },
+  async (t) => {
+    const options = await fixture(t);
+    const controller = new AbortController();
+
+    const session = await SqliteSession.open({
+      ...options,
+      signal: controller.signal,
+    });
+
+    const query = session.exec(
+      'WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n;',
+    );
+
+    const rejected = assert.rejects(query, /cancel/i);
+
+    controller.abort(new Error('Cancelled'));
+    await session.close();
+    await rejected;
+
+    await execSql({
+      ...options,
+      readOnly: false,
+      busyTimeoutMs: 0,
+      sql: 'BEGIN IMMEDIATE; INSERT INTO t VALUES(3); COMMIT;',
+    });
   },
 );
 

@@ -277,6 +277,19 @@ async function main(): Promise<void> {
     'vendor/yauzl/fd-slicer.js',
     'vendor/buffer-crc32/index.js',
     'vendor/pend/index.js',
+    'vendor/better-sqlite3/package.json',
+    'vendor/better-sqlite3/lib/index.js',
+    'vendor/better-sqlite3/LICENSE',
+    ...[
+      'linux-x64',
+      'linux-arm64',
+      'linuxmusl-x64',
+      'linuxmusl-arm64',
+      'win32-x64',
+      'win32-arm64',
+      'darwin-x64',
+      'darwin-arm64',
+    ].map((target) => `vendor/better-sqlite3/prebuilds/${target}.node`),
   ]) {
     if (!foldedNames.has(`extension/${required}`.toLowerCase()))
       throw new Error(`VSIX missing ${required}`);

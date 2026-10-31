@@ -39,12 +39,9 @@ function localPath(key: string): string {
 export function config(): {
   /** Local Cursor user-data directory. */
   userDataDir: string;
-  /** Absolute path to the sqlite3 executable. */
-  sqlitePath: string;
 } {
   return {
     userDataDir: localPath('userDataDir'),
-    sqlitePath: localPath('sqlitePath'),
   };
 }
 

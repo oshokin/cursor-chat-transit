@@ -269,7 +269,6 @@ loader._load = function (id, parent, isMain) {
 
     if (id === './file-dialogs')
       return {
-        JSON_FILTER: { 'Cursor chat export': ['zip'] },
         ZIP_FILTER: { 'Cursor chat export': ['zip'] },
         importDialogOptions: () => ({}),
         localBundlePath: async () => {

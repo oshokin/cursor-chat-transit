@@ -5,7 +5,7 @@ import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
 /** On-demand search reads headers only, never whole conversations. */
 export type CatalogueJob = Pick<
   TransferContext,
-  'executable' | 'initFile' | 'timeoutMs' | 'busyTimeoutMs'
+  'timeoutMs' | 'busyTimeoutMs'
 > & {
   /** Worker task discriminator. */
   kind: 'workspace-catalogue';

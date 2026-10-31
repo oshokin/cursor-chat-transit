@@ -11,6 +11,7 @@ import { formatImportNotice } from '../src/operation-ui';
 import { observeTransfer, type TransferEvent } from '../src/transfer-events';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
+import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import { readJsonFile } from '../src/format';
 import { encodeSqliteBytes, encodeAttachment } from '../src/dependencies';
@@ -32,7 +33,7 @@ const D = '44444444-4444-4444-8444-444444444444';
 /** Image UUID referenced from a bubble. */
 const IMAGE = '01234567-89ab-4cde-8f01-23456789abcd';
 /** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = sql.findSqliteExecutable(process.env.SQLITE3_PATH);
+const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 
 /** Skip message when sqlite3 is not on PATH. */
 const skip = executable
@@ -101,8 +102,6 @@ async function fixture(
   await fs.mkdir(plansDir);
 
   const ctx: TransferContext = {
-    executable: executable as string,
-    initFile: await sql.ensureInitFile(root),
     plansDir,
   };
 
@@ -563,8 +562,11 @@ test(
     assert.equal(result.skipped, 0);
 
     assert.equal(
-      events.filter((event) => event.action === 'Restore hex-encoded blob')
-        .length,
+      events.filter(
+        (event) =>
+          event.action === 'Restore hex-encoded blob' &&
+          event.status === 'completed',
+      ).length,
       1,
     );
 
@@ -985,9 +987,7 @@ async function readImportedComposer(
 
   const body = await db.readKvText(
     {
-      executable: ctx.executable,
       database: workspace.globalDbPath,
-      initFile: ctx.initFile,
       readOnly: true,
     },
     `composerData:${id}`,
@@ -1004,9 +1004,7 @@ async function readImportedComposer(
 
   await db.forEachBubble(
     {
-      executable: ctx.executable,
       database: workspace.globalDbPath,
-      initFile: ctx.initFile,
       readOnly: true,
     },
     id,
@@ -1592,10 +1590,8 @@ test(
           event(event) {
             if (
               moment === 'before-update' &&
-              event.action === 'Write file' &&
-              event.status === 'completed' &&
-              event.path &&
-              path.basename(event.path) === 'decoded.bin'
+              event.action === 'Restore hex-encoded blob' &&
+              event.status === 'started'
             )
               mutate();
           },

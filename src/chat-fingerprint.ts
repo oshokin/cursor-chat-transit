@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bubbleRange, sqlText } from './core';
-import { execSql, execSqlHexRows } from './sqlite';
+import { execSql, execSqlByteRows } from './sqlite';
 import type { SqliteSession } from './sqlite-session';
 import type { TransferContext } from './types';
 
@@ -33,7 +33,7 @@ export async function chatSelectionFingerprint(
     session,
   };
 
-  try {
+  {
     const hasTable = (
       await execSql({
         ...conn,
@@ -42,10 +42,9 @@ export async function chatSelectionFingerprint(
     ).trim();
 
     if (hasTable === '1') {
-      await execSqlHexRows({
+      await execSqlByteRows({
         ...conn,
-        sql: `SELECT hex(composerId), hex(COALESCE(CAST(value AS BLOB), X'')) FROM composerHeaders WHERE composerId IN (${sorted.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
-        cols: 2,
+        sql: `SELECT CAST(composerId AS BLOB), CAST(COALESCE(CAST(value AS BLOB), X'') AS BLOB) FROM composerHeaders WHERE composerId IN (${sorted.map((id) => sqlText(id)).join(',')}) ORDER BY composerId;`,
         onRow: (fields) => {
           hash.update(fields[0]);
           hash.update(fields[1]);
@@ -66,10 +65,9 @@ export async function chatSelectionFingerprint(
         })
         .join(' OR ');
 
-      await execSqlHexRows({
+      await execSqlByteRows({
         ...conn,
-        sql: `SELECT hex(key), hex(COALESCE(CAST(value AS BLOB), X'')) FROM cursorDiskKV WHERE ${where} ORDER BY key;`,
-        cols: 2,
+        sql: `SELECT CAST(key AS BLOB), CAST(COALESCE(CAST(value AS BLOB), X'') AS BLOB) FROM cursorDiskKV WHERE ${where} ORDER BY key;`,
         onRow: (fields) => {
           hash.update(fields[0]);
           hash.update(fields[1]);
@@ -78,8 +76,5 @@ export async function chatSelectionFingerprint(
     }
 
     return hash.digest('hex');
-  } finally {
-    // Hex reads switch the session separator. Later deletion statements expect `|`.
-    if (session) await session.exec('.mode list\n.separator "|"');
   }
 }

@@ -9,7 +9,11 @@ import {
   recoveryPreview,
   resultFrom,
 } from './import-bundle-common';
-import { writeOne } from './import-bundle-publish';
+import {
+  projectImportedModel,
+  reconcilePendingProjection,
+  writeOne,
+} from './import-bundle-publish';
 import { reconcile } from './import-bundle-reconcile';
 import { isPreflightKvConflict } from './import-bundle-resources';
 import { scanAll } from './import-bundle-scan';
@@ -19,7 +23,6 @@ import { JournalStore } from './journal-db';
 import { acquireLock } from './lock';
 import { parseBoundedJson } from './record-json';
 import type { RecoveryPreview } from './recovery-preview';
-import { ensureInitFile, findSqliteExecutable } from './sqlite';
 import { SqliteSession } from './sqlite-session';
 import { readFile } from './trace-fs';
 import { canvasesDirOf, inspectPair, plansDirOf } from './transfer-context';
@@ -103,27 +106,21 @@ export async function runImport(
 ): Promise<ImportResult> {
   ctx.onPhase?.('read');
   const bundle = await openBundle(zipPath, ctx.signal, ctx.temporaryDirectory);
-  const executable = ctx.executable || findSqliteExecutable();
 
-  if (!executable) throw new Error('sqlite3 is required.');
   await mkdir(options.journalDir, { recursive: true });
-  const initFile = await ensureInitFile(options.journalDir);
 
   let work: SqliteSession | undefined;
   let journal: JournalStore | undefined;
 
   try {
     work = await SqliteSession.open({
-      executable,
       database: path.join(bundle.root, 'index.sqlite'),
-      initFile,
       signal: ctx.signal,
       timeoutMs: ctx.timeoutMs,
       busyTimeoutMs: ctx.busyTimeoutMs,
     });
 
     journal = await JournalStore.open({
-      executable,
       journalDir: options.journalDir,
       targetKey: options.targetKey,
       signal: ctx.signal,
@@ -144,7 +141,15 @@ CREATE TABLE bubble (
   source_id TEXT NOT NULL,
   target_id TEXT NOT NULL,
   component TEXT NOT NULL,
-  PRIMARY KEY (ordinal, source_id)
+  PRIMARY KEY (ordinal, source_id),
+  UNIQUE (ordinal, target_id)
+);
+CREATE TABLE bubble_root (
+  ordinal INTEGER NOT NULL,
+  source_id TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  PRIMARY KEY (ordinal, source_id),
+  UNIQUE (ordinal, target_id)
 );
 CREATE TABLE res (
   ordinal INTEGER NOT NULL,
@@ -184,6 +189,12 @@ CREATE TABLE dep (
       connGl: pair.connGl,
       wsInfo: pair.wsInfo.layout,
       glInfo: pair.glInfo.layout,
+    });
+
+    await reconcilePendingProjection({
+      ctx,
+      connGl: pair.connGl,
+      journal,
     });
 
     const finishReconciliation = await reconcile(journal, ctx, workspace, pair);
@@ -231,7 +242,30 @@ CREATE TABLE dep (
 
     ctx.signal?.throwIfAborted();
     await finishReconciliation();
-    if (!plan.create.length) return resultFrom(plan, [], []);
+    let modelConfigsRepaired = 0;
+
+    for (const item of plan.repair) {
+      ctx.signal?.throwIfAborted();
+
+      const row = await oneChat(work, item.ordinal);
+
+      const outcome = await projectImportedModel({
+        ctx,
+        connGl: pair.connGl,
+        workspace,
+        root: bundle.root,
+        ordinal: item.ordinal,
+        targetComposerId: item.targetComposerId,
+        snapshotHash: row.hash,
+        row,
+        journal,
+      });
+
+      if (outcome === 'applied') modelConfigsRepaired++;
+    }
+
+    if (!plan.create.length)
+      return resultFrom(plan, [], [], modelConfigsRepaired);
     const operationId = randomUUID();
 
     await journal.beginPending({ operationId, phase: 'prepared' });
@@ -340,7 +374,7 @@ CREATE TABLE dep (
       throw wrapped;
     }
 
-    return resultFrom(plan, written, historyOnlyIds);
+    return resultFrom(plan, written, historyOnlyIds, modelConfigsRepaired);
   } finally {
     await work?.close().catch(() => undefined);
     await journal?.close().catch(() => undefined);
