@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   buildFamily,
   exportFamilyIds,
+  familyRecordIds,
   familyImportAdjustments,
   keptParentNote,
   narrowDeletion,
@@ -236,6 +237,120 @@ test('family references use the destination composer map', async () => {
       ).parentComposerId,
     'dest',
   );
+});
+
+test('TASK_V2 result links support string and object payloads', () => {
+  const ids = new Map([
+    [A, 'new-root'],
+    [B, 'new-child'],
+  ]);
+
+  const stringResult = remapFamilyRecord(
+    {
+      toolFormerData: {
+        result: JSON.stringify({
+          agentId: B,
+          isBackground: true,
+          nested: { keep: A },
+        }),
+        additionalData: {
+          subagentComposerId: A,
+          label: 'keep',
+        },
+      },
+    },
+    ids,
+  ).toolFormerData as {
+    result: string;
+    additionalData: Record<string, unknown>;
+  };
+
+  assert.deepEqual(JSON.parse(stringResult.result), {
+    agentId: 'new-child',
+    isBackground: true,
+    nested: { keep: A },
+  });
+
+  assert.deepEqual(stringResult.additionalData, {
+    subagentComposerId: 'new-child',
+    label: 'keep',
+  });
+
+  const objectResult = remapFamilyRecord(
+    {
+      toolFormerData: {
+        result: { agentId: B, status: 'completed' },
+      },
+    },
+    ids,
+  ).toolFormerData as {
+    result: Record<string, unknown>;
+    additionalData: Record<string, unknown>;
+  };
+
+  assert.deepEqual(objectResult.result, {
+    agentId: 'new-child',
+    status: 'completed',
+  });
+
+  assert.deepEqual(objectResult.additionalData, {
+    subagentComposerId: 'new-child',
+  });
+});
+
+test('TASK_V2 result links fail closed without corrupting unknown data', () => {
+  const cases: unknown[] = [
+    undefined,
+    null,
+    7,
+    ['not-an-object'],
+    '{"agentId":',
+    JSON.stringify({ agentId: 'unknown', keep: true }),
+    JSON.stringify({ agentId: 7, keep: true }),
+  ];
+
+  for (const result of cases) {
+    const toolFormerData = {
+      result,
+      additionalData: { label: 'keep' },
+    };
+
+    const remapped = remapFamilyRecord(
+      { toolFormerData },
+      new Map([[B, 'new-child']]),
+    );
+
+    assert.deepEqual(remapped.toolFormerData, toolFormerData);
+  }
+});
+
+test('family ID discovery includes valid TASK_V2 results only', () => {
+  assert.deepEqual(
+    [...familyRecordIds({ toolFormerData: { result: { agentId: A } } })],
+    [A],
+  );
+
+  assert.deepEqual(
+    [
+      ...familyRecordIds({
+        toolFormerData: {
+          result: JSON.stringify({ agentId: B, metadata: A }),
+        },
+      }),
+    ],
+    [B],
+  );
+
+  for (const result of [
+    undefined,
+    null,
+    1,
+    [],
+    '{"agentId":',
+    JSON.stringify({ agentId: 1 }),
+    JSON.stringify({ unrelated: A }),
+  ])
+    assert.deepEqual([...familyRecordIds({ toolFormerData: { result } })], []);
 });
 
 test('a parent stays when a subagent is not selected', () => {
