@@ -19,6 +19,7 @@
 - Read selected resources in byte-bounded native batches. Reuse warm standalone workers that do not keep database handles. Insert prepared message and resource rows.
 - Identify chat snapshots with `cct-snapshot-v2`. Record import side effects in the private journal (schema 2) and keep interrupted-import recovery.
 - Treat a complete local transfer as preserved bytes, not as proof that Cursor can continue the Agent.
+- Require a desktop host with VS Code API 1.128 or later.
 
 ### Fixed
 

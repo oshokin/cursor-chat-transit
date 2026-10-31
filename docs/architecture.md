@@ -360,7 +360,7 @@ The transfer scope owns cancellation subscriptions and timers. Terminal results 
 
 `artifact-support.ts` marks images, plans, and canvases as supported filesystem artifacts. Structured visualization references are recognized, and their HTML is not restored. Terminal files and transcript files have no supported chat-owned artifact reference. A chunked header log is conversation metadata, not that transcript artifact. `artifact-source.ts` reads an allowlisted file twice and accepts it only when device, inode, size, and timestamps still match.
 
-`host-snapshots.ts` accepts a committed session whose manifest version is 1 or 2, whose `ItemTable` schema is `key TEXT, value BLOB`, and whose root blob is present. Publication renames a private staging directory onto `sessions/<sessionId>` only when that directory does not already exist. `journal-db.ts` schema 2 records `db`, `file`, and `session` effects. A host restore is a `session` effect, not an edit of both authorities.
+`host-snapshots.ts` accepts a committed session only when `meta.json` has `schemaVersion` 1 and an origin of `migrated-from-renderer-cas` or `host-native`, the database `user_version` is 1, and both `ItemTable` and `cursorDiskKV` are `key TEXT, value BLOB`. The `agentHost:sessionManifest` value must have `manifestVersion` 1 or 2, and its root blob must be present and equal to `latestRootBlobIdHex`. Publication copies the snapshot into a private `sessions/.cct-…` directory and renames that directory onto `sessions/<sessionId>` only when the destination does not already exist. `journal-db.ts` schema 2 records `db`, `file`, and `session` effects. A host restore is a `session` effect, not an edit of both authorities.
 
 ## Bundled native SQLite
 
