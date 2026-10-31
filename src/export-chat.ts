@@ -86,7 +86,13 @@ export async function readChatForExport(opts: {
     throw new TransferError(`Chat ${id} composer row is not a JSON object.`);
   }
 
-  const split = splitConversation(parsed as Record<string, unknown>);
+  const hydrated = await hydrateChunkedHeaders(
+    opts.conn,
+    id,
+    parsed as Record<string, unknown>,
+  );
+
+  const split = splitConversation(hydrated);
   const layout = split.state === 'present' ? 'ndjson' : split.state;
 
   const recovery = opts.onRecoveryCandidate
@@ -250,6 +256,68 @@ export async function readChatForExport(opts: {
   }
 
   return true;
+}
+
+/** Materialize Cursor's external header log into the portable conversation array. */
+async function hydrateChunkedHeaders(
+  conn: SqliteConn,
+  composerId: string,
+  body: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const log = body.headerLog;
+
+  if (!log || typeof log !== 'object' || Array.isArray(log)) return body;
+  const record = log as Record<string, unknown>;
+  const chunkSize = record.chunkSize;
+  const chunkCount = record.chunkCount;
+  const count = record.count;
+
+  if (
+    !Number.isInteger(chunkSize) ||
+    Number(chunkSize) < 1 ||
+    Number(chunkSize) > 1_000_000 ||
+    !Number.isInteger(chunkCount) ||
+    Number(chunkCount) < 0 ||
+    Number(chunkCount) > 65_536 ||
+    !Number.isInteger(count) ||
+    Number(count) < 0 ||
+    Number(count) > Number(chunkSize) * Number(chunkCount)
+  ) {
+    throw new TransferError(`Chat ${composerId} has an invalid header log.`);
+  }
+
+  const headers: unknown[] = [];
+
+  for (let index = 0; index < Number(chunkCount); index++) {
+    const key = `composerConvHeaders:${composerId}:${String(index).padStart(6, '0')}`;
+    const raw = await db.reads.readKvText(conn, key);
+
+    if (raw === null)
+      throw new TransferError(
+        `Chat ${composerId} is missing header chunk ${index}.`,
+      );
+
+    const chunk = parseBoundedJson(
+      Buffer.from(raw, 'utf8'),
+      `conversation header chunk ${index}`,
+      conn.maxJsonProperties,
+    );
+
+    if (!Array.isArray(chunk))
+      throw new TransferError(
+        `Chat ${composerId} has an invalid header chunk.`,
+      );
+    headers.push(...chunk);
+  }
+
+  if (headers.length < Number(count))
+    throw new TransferError(`Chat ${composerId} has an incomplete header log.`);
+
+  return {
+    ...body,
+    headerLog: undefined,
+    fullConversationHeadersOnly: headers.slice(0, Number(count)),
+  };
 }
 
 /** Byte length of a cursorDiskKV value, or -1 when the key is absent. */

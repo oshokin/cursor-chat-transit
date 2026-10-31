@@ -290,6 +290,103 @@ test(
 );
 
 test(
+  'export hydrates Cursor header-log chunks into a portable ordered conversation',
+  { skip },
+  async (t) => {
+    const { root, ctx, workspace, writer } = await fixture(t);
+    const id = '33333333-3333-4333-8333-333333333333';
+
+    const header = {
+      composerId: id,
+      name: 'Chunked child',
+      workspaceIdentifier: { id: 'fixture' },
+    };
+
+    const ids = ['turn/s:0', 'turn/t:call', 'turn/t2:call'];
+
+    const body = {
+      _v: 18,
+      composerId: id,
+      headerLog: {
+        chunkSize: 2,
+        chunkCount: 2,
+        count: ids.length,
+        generation: 'source-generation',
+      },
+      conversationState: '~',
+    };
+
+    await writer.exec(`
+      INSERT INTO ItemTable VALUES('composer.composerHeaders',${sqlText(JSON.stringify({ allComposers: [header] }))});
+      INSERT INTO cursorDiskKV VALUES('composerData:${id}',${sqlText(JSON.stringify(body))});
+      INSERT INTO cursorDiskKV VALUES('composerConvHeaders:${id}:000000',${sqlText(JSON.stringify(ids.slice(0, 2).map((bubbleId) => ({ bubbleId, type: 2 }))))});
+      INSERT INTO cursorDiskKV VALUES('composerConvHeaders:${id}:000001',${sqlText(JSON.stringify(ids.slice(2).map((bubbleId) => ({ bubbleId, type: 2 }))))});
+      ${ids.map((bubbleId) => `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${bubbleId}`)},${sqlText(JSON.stringify({ bubbleId, type: 2, text: bubbleId }))});`).join('\n')}
+    `);
+
+    const destination = path.join(root, 'chunked-export.zip');
+
+    const summary = await exportToFile(ctx, workspace, destination, [id]);
+
+    assert.equal('skipped' in summary, false);
+    const exported = await readBundleObject(destination);
+
+    const composer = JSON.parse(exported.composers[id]) as {
+      headerLog?: unknown;
+      fullConversationHeadersOnly: Array<{ bubbleId: string }>;
+    };
+
+    assert.equal(composer.headerLog, undefined);
+
+    assert.deepEqual(
+      composer.fullConversationHeadersOnly.map((item) => item.bubbleId),
+      ids,
+    );
+
+    assert.deepEqual(
+      exported.bubbles![id].map((item) => item.bubbleId),
+      [...ids].sort(),
+    );
+  },
+);
+
+test(
+  'export rejects a chunked header log with a missing chunk instead of creating an empty chat',
+  { skip },
+  async (t) => {
+    const { root, ctx, workspace, writer } = await fixture(t);
+    const id = '44444444-4444-4444-8444-444444444444';
+
+    const header = {
+      composerId: id,
+      name: 'Damaged child',
+      workspaceIdentifier: { id: 'fixture' },
+    };
+
+    await writer.exec(`
+      INSERT INTO ItemTable VALUES('composer.composerHeaders',${sqlText(JSON.stringify({ allComposers: [header] }))});
+      INSERT INTO cursorDiskKV VALUES('composerData:${id}',${sqlText(
+        JSON.stringify({
+          _v: 18,
+          composerId: id,
+          headerLog: {
+            chunkSize: 256,
+            chunkCount: 1,
+            count: 1,
+            generation: 'damaged',
+          },
+        }),
+      )});
+    `);
+
+    await assert.rejects(
+      exportToFile(ctx, workspace, path.join(root, 'damaged-export.zip'), [id]),
+      /missing header chunk/i,
+    );
+  },
+);
+
+test(
   'export failure closes all source sessions and leaves an existing destination intact',
   { skip },
   async (t) => {
