@@ -7,7 +7,6 @@ import * as db from '../src/db';
 import { sqlText } from '../src/core';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 import { assertExportShape, readJsonFile } from '../src/format';
 import {
   selectionForFilename,
@@ -26,13 +25,6 @@ const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 /** Shared bubble id in title fixtures. */
 const bubble = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-/** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
-
-/** Skip message when sqlite3 is not on PATH. */
-const skip = executable
-  ? false
-  : 'sqlite3 CLI is required for title regressions';
 
 /** Synthetic local workspace identity. */
 const identity: WorkspaceIdentity = {
@@ -127,160 +119,144 @@ async function seedChat(gl: { database: string }, header: ComposerHeader) {
   });
 }
 
-test(
-  'SQLite table header without name keeps the workspace title in the export file',
-  { skip },
-  async (t) => {
-    const title = 'Починить SSH ✨';
+test('SQLite table header without name keeps the workspace title in the export file', async (t) => {
+  const title = 'Починить SSH ✨';
 
-    const { dir, ctx, workspace, gl, ws } = await fixture(t, {
-      headers: true,
-    });
+  const { dir, ctx, workspace, gl, ws } = await fixture(t, {
+    headers: true,
+  });
 
-    await seedChat(gl, { composerId: A, name: title });
+  await seedChat(gl, { composerId: A, name: title });
 
-    await sql.execSqlScript({
-      ...ws,
-      sql: `${db.itemReplaceSql('composer.composerData', {
-        allComposers: [{ composerId: A, name: title, createdAt: 7 }],
-      })}
+  await sql.execSqlScript({
+    ...ws,
+    sql: `${db.itemReplaceSql('composer.composerData', {
+      allComposers: [{ composerId: A, name: title, createdAt: 7 }],
+    })}
 INSERT INTO composerHeaders(composerId,workspaceId,value) VALUES(
   ${sqlText(A)},
   ${sqlText('fixture')},
   ${sqlText(JSON.stringify({ composerId: A, lastUpdatedAt: 9 }))}
 );`,
-    });
+  });
 
-    const dest = path.join(dir, 'export.json');
+  const dest = path.join(dir, 'export.json');
 
-    await transfer.exportToFile(ctx, workspace, dest);
-    const exported = assertExportShape(await readJsonFile(dest));
+  await transfer.exportToFile(ctx, workspace, dest);
+  const exported = assertExportShape(await readJsonFile(dest));
 
-    assert.equal(exported.allComposers[0].name, title);
-    assert.equal(exported.allComposers[0].lastUpdatedAt, 9);
-    assert.equal(exported.allComposers[0].createdAt, undefined);
-    assert.equal(JSON.parse(exported.composers[A] as string).name, title);
-  },
-);
+  assert.equal(exported.allComposers[0].name, title);
+  assert.equal(exported.allComposers[0].lastUpdatedAt, 9);
+  assert.equal(exported.allComposers[0].createdAt, undefined);
+  assert.equal(JSON.parse(exported.composers[A] as string).name, title);
+});
 
-test(
-  'unicode title round-trips through export and import without rewriting',
-  { skip },
-  async (t) => {
-    const title = '  Починить SSH ✨  ';
-    const src = await fixture(t);
+test('unicode title round-trips through export and import without rewriting', async (t) => {
+  const title = '  Починить SSH ✨  ';
+  const src = await fixture(t);
 
-    await seedChat(src.gl, { composerId: A, name: title, createdAt: 7 });
+  await seedChat(src.gl, { composerId: A, name: title, createdAt: 7 });
 
-    await sql.execSqlScript({
-      ...src.ws,
-      sql: db.itemReplaceSql('composer.composerData', {
-        allComposers: [
-          {
-            composerId: A,
-            name: title,
-            createdAt: 7,
-            lastUpdatedAt: 9,
-          },
-        ],
-      }),
-    });
+  await sql.execSqlScript({
+    ...src.ws,
+    sql: db.itemReplaceSql('composer.composerData', {
+      allComposers: [
+        {
+          composerId: A,
+          name: title,
+          createdAt: 7,
+          lastUpdatedAt: 9,
+        },
+      ],
+    }),
+  });
 
-    const destPath = path.join(src.dir, 'unicode.json');
+  const destPath = path.join(src.dir, 'unicode.json');
 
-    await transfer.exportToFile(src.ctx, src.workspace, destPath);
-    const exported = assertExportShape(await readJsonFile(destPath));
+  await transfer.exportToFile(src.ctx, src.workspace, destPath);
+  const exported = assertExportShape(await readJsonFile(destPath));
 
-    assert.equal(exported.allComposers[0].name, title);
+  assert.equal(exported.allComposers[0].name, title);
 
-    const dest = await fixture(t);
+  const dest = await fixture(t);
 
-    const result = await transfer.importFromObject(
-      dest.ctx,
-      exported,
-      dest.workspace,
-    );
+  const result = await transfer.importFromObject(
+    dest.ctx,
+    exported,
+    dest.workspace,
+  );
 
-    assert.equal(result.imported, 1);
-    const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
+  assert.equal(result.imported, 1);
+  const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
 
-    assert.equal(listed.allComposers.length, 1);
-    assert.notEqual(listed.allComposers[0].composerId, A);
-    assert.equal(listed.allComposers[0].name, title);
-    assert.equal(listed.allComposers[0].createdAt, 7);
-    assert.equal(listed.allComposers[0].lastUpdatedAt, 9);
-    assert.equal(listed.allComposers[0].workspaceIdentifier?.id, 'fixture');
-  },
-);
+  assert.equal(listed.allComposers.length, 1);
+  assert.notEqual(listed.allComposers[0].composerId, A);
+  assert.equal(listed.allComposers[0].name, title);
+  assert.equal(listed.allComposers[0].createdAt, 7);
+  assert.equal(listed.allComposers[0].lastUpdatedAt, 9);
+  assert.equal(listed.allComposers[0].workspaceIdentifier?.id, 'fixture');
+});
 
-test(
-  'a numeric chat title is preserved and is not turned into a date',
-  { skip },
-  async (t) => {
-    const title = '1790418430150';
-    const src = await fixture(t);
+test('a numeric chat title is preserved and is not turned into a date', async (t) => {
+  const title = '1790418430150';
+  const src = await fixture(t);
 
-    await seedChat(src.gl, { composerId: A, name: title });
+  await seedChat(src.gl, { composerId: A, name: title });
 
-    await sql.execSqlScript({
-      ...src.ws,
-      sql: db.itemReplaceSql('composer.composerData', {
-        allComposers: [{ composerId: A, name: title }],
-      }),
-    });
+  await sql.execSqlScript({
+    ...src.ws,
+    sql: db.itemReplaceSql('composer.composerData', {
+      allComposers: [{ composerId: A, name: title }],
+    }),
+  });
 
-    const destPath = path.join(src.dir, 'numeric.json');
+  const destPath = path.join(src.dir, 'numeric.json');
 
-    await transfer.exportToFile(src.ctx, src.workspace, destPath);
-    const exported = assertExportShape(await readJsonFile(destPath));
+  await transfer.exportToFile(src.ctx, src.workspace, destPath);
+  const exported = assertExportShape(await readJsonFile(destPath));
 
-    assert.equal(exported.allComposers[0].name, title);
-    const dest = await fixture(t);
+  assert.equal(exported.allComposers[0].name, title);
+  const dest = await fixture(t);
 
-    await transfer.importFromObject(dest.ctx, exported, dest.workspace);
-    const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
+  await transfer.importFromObject(dest.ctx, exported, dest.workspace);
+  const listed = await transfer.listWorkspaceChats(dest.ctx, dest.workspace);
 
-    assert.equal(listed.allComposers[0].name, title);
-    assert.doesNotMatch(String(listed.allComposers[0].name), /2026/);
-  },
-);
+  assert.equal(listed.allComposers[0].name, title);
+  assert.doesNotMatch(String(listed.allComposers[0].name), /2026/);
+});
 
-test(
-  'selecting one of two same-titled chats exports that chat and names the file from it',
-  { skip },
-  async (t) => {
-    const title = 'Same title';
-    const { dir, ctx, workspace, gl, ws } = await fixture(t);
+test('selecting one of two same-titled chats exports that chat and names the file from it', async (t) => {
+  const title = 'Same title';
+  const { dir, ctx, workspace, gl, ws } = await fixture(t);
 
-    await seedChat(gl, { composerId: A, name: title });
-    await seedChat(gl, { composerId: B, name: title });
+  await seedChat(gl, { composerId: A, name: title });
+  await seedChat(gl, { composerId: B, name: title });
 
-    await sql.execSqlScript({
-      ...ws,
-      sql: db.itemReplaceSql('composer.composerData', {
-        allComposers: [
-          { composerId: A, name: title },
-          { composerId: B, name: title },
-        ],
-      }),
-    });
+  await sql.execSqlScript({
+    ...ws,
+    sql: db.itemReplaceSql('composer.composerData', {
+      allComposers: [
+        { composerId: A, name: title },
+        { composerId: B, name: title },
+      ],
+    }),
+  });
 
-    const dest = path.join(dir, 'one.json');
+  const dest = path.join(dir, 'one.json');
 
-    await transfer.exportToFile(ctx, workspace, dest, [B]);
-    const exported = assertExportShape(await readJsonFile(dest));
+  await transfer.exportToFile(ctx, workspace, dest, [B]);
+  const exported = assertExportShape(await readJsonFile(dest));
 
-    assert.equal(exported.allComposers.length, 1);
-    assert.equal(exported.allComposers[0].composerId, B);
-    assert.equal(exported.allComposers[0].name, title);
+  assert.equal(exported.allComposers.length, 1);
+  assert.equal(exported.allComposers[0].composerId, B);
+  assert.equal(exported.allComposers[0].name, title);
 
-    const filename = suggestExportFilename({
-      workspaceName: 'synthetic',
-      selection: selectionForFilename('selected', exported.allComposers),
-      now: new Date('2026-09-27T13:42:45.123Z'),
-    });
+  const filename = suggestExportFilename({
+    workspaceName: 'synthetic',
+    selection: selectionForFilename('selected', exported.allComposers),
+    now: new Date('2026-09-27T13:42:45.123Z'),
+  });
 
-    assert.match(filename, /Same-title/);
-    assert.doesNotMatch(filename, /2-chats/);
-  },
-);
+  assert.match(filename, /Same-title/);
+  assert.doesNotMatch(filename, /2-chats/);
+});

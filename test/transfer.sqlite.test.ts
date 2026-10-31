@@ -6,7 +6,6 @@ import path from 'node:path';
 import * as db from '../src/db';
 import * as transfer from '../src/transfer';
 import * as sql from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 import type {
   TransferContext,
   WorkspaceEntry,
@@ -21,10 +20,6 @@ const A = '11111111-1111-4111-8111-111111111111';
 const X = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 /** Nested bubble id Y. */
 const Y = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-/** sqlite3 CLI used by these tests; undefined skips the suite. */
-const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
-/** Skip message when sqlite3 is not on PATH. */
-const skip = executable ? false : 'sqlite3 CLI is required for transfer tests';
 
 /** SSH workspace identity used as the transfer target. */
 const identity: WorkspaceIdentity = {
@@ -128,443 +123,394 @@ ${opts.globalExtra || ''}`,
   return { dir, ctx, workspace, gl, ws };
 }
 
-test(
-  'combined export writes selected chats from same-profile workspace scopes once',
-  { skip },
-  async (t) => {
-    const { dir, ctx, workspace, gl } = await fixture(t);
+test('combined export writes selected chats from same-profile workspace scopes once', async (t) => {
+  const { dir, ctx, workspace, gl } = await fixture(t);
 
-    const second: WorkspaceEntry = {
-      ...workspace,
-      storageId: 'second',
-      key: 'second',
-      workspaceDbPath: path.join(dir, 'workspace-second.vscdb'),
-      identity: {
-        ...identity,
-        uri: { ...identity.uri, path: '/repo-two' },
-      },
-    };
+  const second: WorkspaceEntry = {
+    ...workspace,
+    storageId: 'second',
+    key: 'second',
+    workspaceDbPath: path.join(dir, 'workspace-second.vscdb'),
+    identity: {
+      ...identity,
+      uri: { ...identity.uri, path: '/repo-two' },
+    },
+  };
 
-    const secondWs = { ...ctx, database: second.workspaceDbPath };
-    const B = '22222222-2222-4222-8222-222222222222';
+  const secondWs = { ...ctx, database: second.workspaceDbPath };
+  const B = '22222222-2222-4222-8222-222222222222';
 
-    const firstHeader = {
-      ...header,
-      workspaceIdentifier: { id: workspace.storageId, uri: identity.uri },
-    };
+  const firstHeader = {
+    ...header,
+    workspaceIdentifier: { id: workspace.storageId, uri: identity.uri },
+  };
 
-    const secondHeader = {
-      composerId: B,
-      name: 'Second',
-      workspaceIdentifier: {
-        id: second.storageId,
-        uri: second.identity!.uri,
-      },
-    };
+  const secondHeader = {
+    composerId: B,
+    name: 'Second',
+    workspaceIdentifier: {
+      id: second.storageId,
+      uri: second.identity!.uri,
+    },
+  };
 
-    await sql.execSqlScript({
-      ...secondWs,
-      sql: 'PRAGMA journal_mode=WAL; CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
-    });
+  await sql.execSqlScript({
+    ...secondWs,
+    sql: 'PRAGMA journal_mode=WAL; CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+  });
 
-    await sql.execSqlScript({
-      ...gl,
-      sql: `UPDATE ItemTable SET value=${sqlText(
-        JSON.stringify({ allComposers: [firstHeader, secondHeader] }),
-      )} WHERE key='composer.composerHeaders';
+  await sql.execSqlScript({
+    ...gl,
+    sql: `UPDATE ItemTable SET value=${sqlText(
+      JSON.stringify({ allComposers: [firstHeader, secondHeader] }),
+    )} WHERE key='composer.composerHeaders';
 INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${A}`)},${sqlText(
-        JSON.stringify({ composerId: A, conversation: [] }),
-      )});
+      JSON.stringify({ composerId: A, conversation: [] }),
+    )});
 INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${B}`)},${sqlText(
-        JSON.stringify({ composerId: B, conversation: [] }),
-      )});`,
+      JSON.stringify({ composerId: B, conversation: [] }),
+    )});`,
+  });
+
+  const file = path.join(dir, 'combined.cursor-chat.zip');
+
+  const summary = await transfer.exportManyToFile(
+    ctx,
+    [
+      { workspace, selectedIds: [A] },
+      { workspace: second, selectedIds: [B] },
+    ],
+    file,
+  );
+
+  assert.equal('skipped' in summary, false);
+  if ('skipped' in summary) return;
+  assert.equal(summary.selected, 2);
+  assert.equal(summary.exported, 2);
+
+  const bundle = await openBundle(file);
+
+  try {
+    assert.equal(bundle.manifest.formatVersion, 5);
+    assert.equal(bundle.manifest.counts.chats, 2);
+
+    assert.deepEqual(bundle.manifest.source, {
+      schema: 'multi-workspace',
+      workspaceCount: 2,
     });
+  } finally {
+    await bundle.close();
+  }
+});
 
-    const file = path.join(dir, 'combined.cursor-chat.zip');
+test('combined export rejects mixed Cursor profiles before creating an archive', async (t) => {
+  const { dir, ctx, workspace } = await fixture(t);
+  const file = path.join(dir, 'mixed.cursor-chat.zip');
 
-    const summary = await transfer.exportManyToFile(
+  await assert.rejects(
+    transfer.exportManyToFile(
       ctx,
       [
-        { workspace, selectedIds: [A] },
-        { workspace: second, selectedIds: [B] },
+        { workspace },
+        {
+          workspace: {
+            ...workspace,
+            storageId: 'foreign',
+            globalDbPath: path.join(dir, 'foreign-global.vscdb'),
+          },
+        },
       ],
       file,
-    );
+    ),
+    /different Cursor profiles/,
+  );
 
-    assert.equal('skipped' in summary, false);
-    if ('skipped' in summary) return;
-    assert.equal(summary.selected, 2);
-    assert.equal(summary.exported, 2);
+  await assert.rejects(fs.stat(file));
+});
 
-    const bundle = await openBundle(file);
+test('unsupported workspace constraint is rejected before global writes', async (t) => {
+  const { ctx, workspace, gl } = await fixture(t, {
+    workspaceSchema:
+      'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB,requiredExtra TEXT NOT NULL);',
+  });
 
-    try {
-      assert.equal(bundle.manifest.formatVersion, 5);
-      assert.equal(bundle.manifest.counts.chats, 2);
+  await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
 
-      assert.deepEqual(bundle.manifest.source, {
-        schema: 'multi-workspace',
-        workspaceCount: 2,
+  const count = await sql.execSql({
+    ...gl,
+    sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
+  });
+
+  assert.equal(count.trim(), '0');
+});
+
+test('malformed bubble JSON is rejected instead of imported as success', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const obj = payload();
+
+  obj.bubbles[A][0].value = '{"broken"';
+  await assert.rejects(transfer.importFromObject(ctx, obj, workspace));
+});
+
+test('concurrent workspace metadata update is preserved', async (t) => {
+  const { ctx, workspace, ws } = await fixture(t);
+
+  await sql.execSqlScript({
+    ...ws,
+    sql: db.itemReplaceSql('composer.composerData', {
+      selectedComposerIds: [],
+    }),
+  });
+
+  const original = db.readItemTextImpl;
+  let injected = false;
+
+  db.testHooks.readItemText = async (conn, key) => {
+    const old = await original(conn, key);
+
+    if (
+      !injected &&
+      conn.database === ws.database &&
+      key === 'composer.composerData'
+    ) {
+      injected = true;
+      const parsed = old ? JSON.parse(old) : {};
+
+      await sql.execSqlScript({
+        ...ws,
+        sql: db.itemReplaceSql(key, { ...parsed, concurrentMarker: true }),
       });
-    } finally {
-      await bundle.close();
     }
-  },
-);
 
-test(
-  'combined export rejects mixed Cursor profiles before creating an archive',
-  { skip },
-  async (t) => {
-    const { dir, ctx, workspace } = await fixture(t);
-    const file = path.join(dir, 'mixed.cursor-chat.zip');
+    return old;
+  };
 
-    await assert.rejects(
-      transfer.exportManyToFile(
-        ctx,
-        [
-          { workspace },
-          {
-            workspace: {
-              ...workspace,
-              storageId: 'foreign',
-              globalDbPath: path.join(dir, 'foreign-global.vscdb'),
-            },
-          },
-        ],
-        file,
-      ),
-      /different Cursor profiles/,
+  try {
+    await transfer.importFromObject(ctx, payload(), workspace);
+  } finally {
+    delete db.testHooks.readItemText;
+  }
+
+  const stored = JSON.parse(
+    (await original(ws, 'composer.composerData')) || '{}',
+  ) as { concurrentMarker?: boolean };
+
+  assert.equal(stored.concurrentMarker, true);
+});
+
+test('missing body during export must not produce complete=true', async (t) => {
+  const { dir, ctx, workspace, gl, ws } = await fixture(t);
+
+  await sql.execSqlScript({
+    ...gl,
+    sql: db.kvInsertSql([
+      { key: `composerData:${A}`, value: JSON.stringify({ composerId: A }) },
+    ]),
+  });
+
+  await sql.execSqlScript({
+    ...ws,
+    sql: db.itemReplaceSql('composer.composerData', {
+      allComposers: [header],
+    }),
+  });
+
+  const original = db.readKvTextImpl;
+  let injected = false;
+
+  db.testHooks.readKvText = async (conn, key) => {
+    const body = await original(conn, key);
+
+    if (body !== null && !injected && key.startsWith('composerData:')) {
+      injected = true;
+      await sql.execSqlScript({ ...gl, sql: 'DELETE FROM cursorDiskKV;' });
+
+      return null;
+    }
+
+    return body;
+  };
+
+  let result:
+    { skipped: true; reason: string } | { complete: boolean } | undefined;
+
+  try {
+    result = await transfer.exportToFile(
+      ctx,
+      workspace,
+      path.join(dir, 'export.json'),
     );
+  } catch {
+    return;
+  } finally {
+    delete db.testHooks.readKvText;
+  }
 
-    await assert.rejects(fs.stat(file));
-  },
-);
+  assert.equal(result && 'complete' in result && result.complete, false);
+});
 
-test(
-  'unsupported workspace constraint is rejected before global writes',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, gl } = await fixture(t, {
-      workspaceSchema:
-        'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB,requiredExtra TEXT NOT NULL);',
-    });
+test('a successful legacy import is discoverable through its own resolver', async (t) => {
+  const { ctx, workspace, gl, ws } = await fixture(t);
+  const result = await transfer.importFromObject(ctx, payload(), workspace);
 
-    await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
+  assert.equal(result.imported, 1);
+  const glInfo = await db.inspectDatabase(gl);
+  const wsInfo = await db.inspectDatabase(ws);
 
-    const count = await sql.execSql({
-      ...gl,
-      sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
-    });
+  const headers = await db.resolveComposers(ws, gl, {
+    storageId: workspace.storageId,
+    identity,
+    layoutWs: wsInfo.layout,
+    layoutGl: glInfo.layout,
+  });
 
-    assert.equal(count.trim(), '0');
-  },
-);
+  assert.equal(headers.length, 1);
+});
 
-test(
-  'malformed bubble JSON is rejected instead of imported as success',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const obj = payload();
+test('unsupported header constraints must not leave committed composer bodies', async (t) => {
+  const { ctx, workspace, gl } = await fixture(t, {
+    globalExtra:
+      'CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY,workspaceId TEXT,value BLOB,mustFill TEXT NOT NULL);',
+  });
 
-    obj.bubbles[A][0].value = '{"broken"';
-    await assert.rejects(transfer.importFromObject(ctx, obj, workspace));
-  },
-);
+  await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
 
-test(
-  'concurrent workspace metadata update is preserved',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, ws } = await fixture(t);
+  const count = await sql.execSql({
+    ...gl,
+    sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
+  });
 
-    await sql.execSqlScript({
-      ...ws,
-      sql: db.itemReplaceSql('composer.composerData', {
-        selectedComposerIds: [],
+  assert.equal(count.trim(), '0');
+});
+
+test('an unsupported workspace is rejected before global mutation', async (t) => {
+  const { ctx, workspace } = await fixture(t, {
+    workspaceSchema: 'CREATE TABLE UnknownWorkspace(foo TEXT);',
+  });
+
+  await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
+});
+
+test('imported ordered headers resolve to stored bubbles', async (t) => {
+  const { ctx, workspace, gl } = await fixture(t);
+
+  const obj = {
+    formatVersion: 2,
+    allComposers: [{ composerId: A, name: 'Fixture' }],
+    composers: {
+      [A]: JSON.stringify({
+        _v: 18,
+        composerId: A,
+        name: 'Fixture',
+        fullConversationHeadersOnly: [
+          { bubbleId: X, type: 1, serverBubbleId: X },
+        ],
       }),
-    });
-
-    const original = db.readItemTextImpl;
-    let injected = false;
-
-    db.testHooks.readItemText = async (conn, key) => {
-      const old = await original(conn, key);
-
-      if (
-        !injected &&
-        conn.database === ws.database &&
-        key === 'composer.composerData'
-      ) {
-        injected = true;
-        const parsed = old ? JSON.parse(old) : {};
-
-        await sql.execSqlScript({
-          ...ws,
-          sql: db.itemReplaceSql(key, { ...parsed, concurrentMarker: true }),
-        });
-      }
-
-      return old;
-    };
-
-    try {
-      await transfer.importFromObject(ctx, payload(), workspace);
-    } finally {
-      delete db.testHooks.readItemText;
-    }
-
-    const stored = JSON.parse(
-      (await original(ws, 'composer.composerData')) || '{}',
-    ) as { concurrentMarker?: boolean };
-
-    assert.equal(stored.concurrentMarker, true);
-  },
-);
-
-test(
-  'missing body during export must not produce complete=true',
-  { skip },
-  async (t) => {
-    const { dir, ctx, workspace, gl, ws } = await fixture(t);
-
-    await sql.execSqlScript({
-      ...gl,
-      sql: db.kvInsertSql([
-        { key: `composerData:${A}`, value: JSON.stringify({ composerId: A }) },
-      ]),
-    });
-
-    await sql.execSqlScript({
-      ...ws,
-      sql: db.itemReplaceSql('composer.composerData', {
-        allComposers: [header],
-      }),
-    });
-
-    const original = db.readKvTextImpl;
-    let injected = false;
-
-    db.testHooks.readKvText = async (conn, key) => {
-      const body = await original(conn, key);
-
-      if (body !== null && !injected && key.startsWith('composerData:')) {
-        injected = true;
-        await sql.execSqlScript({ ...gl, sql: 'DELETE FROM cursorDiskKV;' });
-
-        return null;
-      }
-
-      return body;
-    };
-
-    let result:
-      { skipped: true; reason: string } | { complete: boolean } | undefined;
-
-    try {
-      result = await transfer.exportToFile(
-        ctx,
-        workspace,
-        path.join(dir, 'export.json'),
-      );
-    } catch {
-      return;
-    } finally {
-      delete db.testHooks.readKvText;
-    }
-
-    assert.equal(result && 'complete' in result && result.complete, false);
-  },
-);
-
-test(
-  'a successful legacy import is discoverable through its own resolver',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, gl, ws } = await fixture(t);
-    const result = await transfer.importFromObject(ctx, payload(), workspace);
-
-    assert.equal(result.imported, 1);
-    const glInfo = await db.inspectDatabase(gl);
-    const wsInfo = await db.inspectDatabase(ws);
-
-    const headers = await db.resolveComposers(ws, gl, {
-      storageId: workspace.storageId,
-      identity,
-      layoutWs: wsInfo.layout,
-      layoutGl: glInfo.layout,
-    });
-
-    assert.equal(headers.length, 1);
-  },
-);
-
-test(
-  'unsupported header constraints must not leave committed composer bodies',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, gl } = await fixture(t, {
-      globalExtra:
-        'CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY,workspaceId TEXT,value BLOB,mustFill TEXT NOT NULL);',
-    });
-
-    await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
-
-    const count = await sql.execSql({
-      ...gl,
-      sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
-    });
-
-    assert.equal(count.trim(), '0');
-  },
-);
-
-test(
-  'an unsupported workspace is rejected before global mutation',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t, {
-      workspaceSchema: 'CREATE TABLE UnknownWorkspace(foo TEXT);',
-    });
-
-    await assert.rejects(transfer.importFromObject(ctx, payload(), workspace));
-  },
-);
-
-test(
-  'imported ordered headers resolve to stored bubbles',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, gl } = await fixture(t);
-
-    const obj = {
-      formatVersion: 2,
-      allComposers: [{ composerId: A, name: 'Fixture' }],
-      composers: {
-        [A]: JSON.stringify({
-          _v: 18,
-          composerId: A,
-          name: 'Fixture',
-          fullConversationHeadersOnly: [
-            { bubbleId: X, type: 1, serverBubbleId: X },
-          ],
-        }),
-      },
-      bubbles: {
-        [A]: [
-          {
-            key: `bubbleId:${A}:${X}`,
+    },
+    bubbles: {
+      [A]: [
+        {
+          key: `bubbleId:${A}:${X}`,
+          bubbleId: X,
+          value: JSON.stringify({
+            _v: 3,
             bubbleId: X,
-            value: JSON.stringify({
-              _v: 3,
-              bubbleId: X,
-              text: 'hello',
-              serverBubbleId: X,
-            }),
-          },
-        ],
-      },
-    };
-
-    const result = await transfer.importFromObject(ctx, obj, workspace);
-    const newId = result.composerIds[0];
-    const conn = { ...gl, readOnly: true };
-
-    const body = JSON.parse(
-      (await db.readKvText(conn, `composerData:${newId}`)) || '{}',
-    ) as {
-      name?: string;
-      fullConversationHeadersOnly: Array<{
-        bubbleId: string;
-        serverBubbleId: string;
-      }>;
-    };
-
-    const ids = await db.listBubbleIds(conn, newId);
-
-    assert.equal(
-      body.fullConversationHeadersOnly.filter((h) => !ids.has(h.bubbleId))
-        .length,
-      0,
-    );
-
-    assert.equal(body.fullConversationHeadersOnly[0].serverBubbleId, X);
-    assert.equal(body.name, 'Fixture');
-  },
-);
-
-test(
-  'exhausted global CAS keeps a partially staged chat unpublished',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, gl } = await fixture(t);
-    const original = db.readItemTextImpl;
-    let injected = 0;
-
-    db.testHooks.readItemText = async (conn, key) => {
-      const raw = await original(conn, key);
-
-      if (conn.database === gl.database && key === 'composer.composerHeaders') {
-        injected++;
-
-        await sql.execSqlScript({
-          ...gl,
-          sql: db.itemReplaceSql(key, {
-            ...JSON.parse(raw || '{}'),
-            concurrentMarker: injected,
+            text: 'hello',
+            serverBubbleId: X,
           }),
-        });
-      }
+        },
+      ],
+    },
+  };
 
-      return raw;
-    };
+  const result = await transfer.importFromObject(ctx, obj, workspace);
+  const newId = result.composerIds[0];
+  const conn = { ...gl, readOnly: true };
 
-    try {
-      await assert.rejects(
-        transfer.importFromObject(ctx, payload(), workspace),
-        (error: unknown) =>
-          Boolean(
-            error &&
-            typeof error === 'object' &&
-            'code' in error &&
-            error.code === 'PARTIAL',
-          ),
-      );
-    } finally {
-      delete db.testHooks.readItemText;
+  const body = JSON.parse(
+    (await db.readKvText(conn, `composerData:${newId}`)) || '{}',
+  ) as {
+    name?: string;
+    fullConversationHeadersOnly: Array<{
+      bubbleId: string;
+      serverBubbleId: string;
+    }>;
+  };
+
+  const ids = await db.listBubbleIds(conn, newId);
+
+  assert.equal(
+    body.fullConversationHeadersOnly.filter((h) => !ids.has(h.bubbleId)).length,
+    0,
+  );
+
+  assert.equal(body.fullConversationHeadersOnly[0].serverBubbleId, X);
+  assert.equal(body.name, 'Fixture');
+});
+
+test('exhausted global CAS keeps a partially staged chat unpublished', async (t) => {
+  const { ctx, workspace, gl } = await fixture(t);
+  const original = db.readItemTextImpl;
+  let injected = 0;
+
+  db.testHooks.readItemText = async (conn, key) => {
+    const raw = await original(conn, key);
+
+    if (conn.database === gl.database && key === 'composer.composerHeaders') {
+      injected++;
+
+      await sql.execSqlScript({
+        ...gl,
+        sql: db.itemReplaceSql(key, {
+          ...JSON.parse(raw || '{}'),
+          concurrentMarker: injected,
+        }),
+      });
     }
 
-    assert.equal(injected, 5);
+    return raw;
+  };
 
-    const count = await sql.execSql({
-      ...gl,
-      sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
-    });
+  try {
+    await assert.rejects(
+      transfer.importFromObject(ctx, payload(), workspace),
+      (error: unknown) =>
+        Boolean(
+          error &&
+          typeof error === 'object' &&
+          'code' in error &&
+          error.code === 'PARTIAL',
+        ),
+    );
+  } finally {
+    delete db.testHooks.readItemText;
+  }
 
-    assert.equal(count.trim(), '0');
-    const retry = await transfer.importFromObject(ctx, payload(), workspace);
+  assert.equal(injected, 5);
 
-    assert.equal(retry.imported, 1);
-  },
-);
+  const count = await sql.execSql({
+    ...gl,
+    sql: "SELECT count(*) FROM cursorDiskKV WHERE key GLOB 'composerData:*';",
+  });
 
-test(
-  'partial recovery skips scalar bubble JSON without losing a valid chat',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const brokenId = '22222222-2222-4222-8222-222222222222';
-    const obj = payload([A, brokenId]);
+  assert.equal(count.trim(), '0');
+  const retry = await transfer.importFromObject(ctx, payload(), workspace);
 
-    obj.bubbles[brokenId]![0]!.value = 'null';
+  assert.equal(retry.imported, 1);
+});
 
-    const result = await transfer.importFromObject(ctx, obj, workspace, {
-      allowPartial: true,
-    });
+test('partial recovery skips scalar bubble JSON without losing a valid chat', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const brokenId = '22222222-2222-4222-8222-222222222222';
+  const obj = payload([A, brokenId]);
 
-    assert.equal(result.imported, 1);
-    assert.equal(result.skipped, 1);
-    assert.equal(result.skippedChats[0]?.composerId, brokenId);
-  },
-);
+  obj.bubbles[brokenId]![0]!.value = 'null';
+
+  const result = await transfer.importFromObject(ctx, obj, workspace, {
+    allowPartial: true,
+  });
+
+  assert.equal(result.imported, 1);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.skippedChats[0]?.composerId, brokenId);
+});

@@ -6,7 +6,6 @@ import os from 'node:os';
 import { SqliteSession } from '../src/sqlite-session';
 import { readSessionKv } from '../src/kv-session';
 import { execSql } from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 
 /** Fixture cleanup policy for delayed sqlite file-handle release. */
 const cleanupMaxRetries = 5;
@@ -61,129 +60,111 @@ async function openReadSession(
   }
 }
 
-const executable = findSqliteExecutable(process.env.SQLITE3_PATH)!;
-
-test(
-  'bounded KV reader preserves multi-chunk blobs, text with NUL and missing/empty values',
-  { skip: !executable },
-  async (t) => {
-    const session = await openReadSession(
-      t,
-      'cct-kv-session-',
-      `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value);
+test('bounded KV reader preserves multi-chunk blobs, text with NUL and missing/empty values', async (t) => {
+  const session = await openReadSession(
+    t,
+    'cct-kv-session-',
+    `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value);
     INSERT INTO cursorDiskKV VALUES ('large', zeroblob(3145735)), ('text', CAST(X'610062' AS TEXT)), ('empty', X'');`,
-    );
+  );
 
-    const large = await readSessionKv(session, 'large');
+  const large = await readSessionKv(session, 'large');
 
-    assert.equal(large?.storageClass, 'blob');
-    assert.deepEqual(large?.bytes, Buffer.alloc(3145735));
+  assert.equal(large?.storageClass, 'blob');
+  assert.deepEqual(large?.bytes, Buffer.alloc(3145735));
 
-    assert.deepEqual(await readSessionKv(session, 'text'), {
-      storageClass: 'text',
-      bytes: Buffer.from([97, 0, 98]),
-    });
+  assert.deepEqual(await readSessionKv(session, 'text'), {
+    storageClass: 'text',
+    bytes: Buffer.from([97, 0, 98]),
+  });
 
-    assert.deepEqual(await readSessionKv(session, 'empty'), {
-      storageClass: 'blob',
-      bytes: Buffer.alloc(0),
-    });
+  assert.deepEqual(await readSessionKv(session, 'empty'), {
+    storageClass: 'blob',
+    bytes: Buffer.alloc(0),
+  });
 
-    assert.equal(await readSessionKv(session, 'missing'), null);
-    await assert.rejects(() => session.exec('DELETE FROM cursorDiskKV;'));
-  },
-);
+  assert.equal(await readSessionKv(session, 'missing'), null);
+  await assert.rejects(() => session.exec('DELETE FROM cursorDiskKV;'));
+});
 
-test(
-  'KV reader rejects an oversized value before emitting its payload',
-  { skip: !executable },
-  async (t) => {
-    const session = await openReadSession(
-      t,
-      'cct-kv-large-',
-      "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value); INSERT INTO cursorDiskKV VALUES ('too-large', zeroblob(33554433));",
-    );
+test('KV reader rejects an oversized value before emitting its payload', async (t) => {
+  const session = await openReadSession(
+    t,
+    'cct-kv-large-',
+    "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value); INSERT INTO cursorDiskKV VALUES ('too-large', zeroblob(33554433));",
+  );
 
-    await assert.rejects(
-      () => readSessionKv(session, 'too-large'),
-      /exceeds 33554432 bytes/,
-    );
-  },
-);
+  await assert.rejects(
+    () => readSessionKv(session, 'too-large'),
+    /exceeds 33554432 bytes/,
+  );
+});
 
-test(
-  'batch KV reads preserve order, null/empty/text/blob values and bound total payload',
-  { skip: !executable },
-  async (t) => {
-    const { readSessionKvBatch, KV_BATCH_BYTES } =
-      await import('../src/kv-session');
+test('batch KV reads preserve order, null/empty/text/blob values and bound total payload', async (t) => {
+  const { readSessionKvBatch, KV_BATCH_BYTES } =
+    await import('../src/kv-session');
 
-    const session = await openReadSession(
-      t,
-      'cct-kv-batch-',
-      `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES ('text',CAST(X'610062' AS TEXT)),('empty',X''),('small',zeroblob(1024)),('large',zeroblob(${KV_BATCH_BYTES + 1})),('last',X'FF');`,
-    );
+  const session = await openReadSession(
+    t,
+    'cct-kv-batch-',
+    `CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES ('text',CAST(X'610062' AS TEXT)),('empty',X''),('small',zeroblob(1024)),('large',zeroblob(${KV_BATCH_BYTES + 1})),('last',X'FF');`,
+  );
 
-    await session.exec('BEGIN;');
-    const keys = ['missing', 'text', 'empty', 'small', 'large', 'last'];
-    const first = await readSessionKvBatch(session, keys);
+  await session.exec('BEGIN;');
+  const keys = ['missing', 'text', 'empty', 'small', 'large', 'last'];
+  const first = await readSessionKvBatch(session, keys);
 
-    assert.deepEqual([...first.keys()], keys.slice(0, 4));
-    assert.equal(first.get('missing'), null);
+  assert.deepEqual([...first.keys()], keys.slice(0, 4));
+  assert.equal(first.get('missing'), null);
 
-    assert.deepEqual(first.get('text'), {
-      storageClass: 'text',
-      bytes: Buffer.from([97, 0, 98]),
-    });
+  assert.deepEqual(first.get('text'), {
+    storageClass: 'text',
+    bytes: Buffer.from([97, 0, 98]),
+  });
 
-    assert.equal(first.get('empty')?.bytes.length, 0);
-    assert.equal(first.get('small')?.bytes.length, 1024);
-    const second = await readSessionKvBatch(session, keys.slice(4));
+  assert.equal(first.get('empty')?.bytes.length, 0);
+  assert.equal(first.get('small')?.bytes.length, 1024);
+  const second = await readSessionKvBatch(session, keys.slice(4));
 
-    assert.deepEqual([...second.keys()], ['large']);
+  assert.deepEqual([...second.keys()], ['large']);
 
-    const largeBytes = second.get('large')?.bytes;
+  const largeBytes = second.get('large')?.bytes;
 
-    assert.equal(largeBytes?.length, KV_BATCH_BYTES + 1);
-    assert.equal(largeBytes?.includes(1), false);
+  assert.equal(largeBytes?.length, KV_BATCH_BYTES + 1);
+  assert.equal(largeBytes?.includes(1), false);
 
-    assert.deepEqual(
-      (await readSessionKvBatch(session, ['last'])).get('last')?.bytes,
-      Buffer.from([255]),
-    );
-  },
-);
+  assert.deepEqual(
+    (await readSessionKvBatch(session, ['last'])).get('last')?.bytes,
+    Buffer.from([255]),
+  );
+});
 
-test(
-  'batch KV reader rejects oversized and unsupported records before allocating payloads',
-  { skip: !executable },
-  async (t) => {
-    const { readSessionKvBatch } = await import('../src/kv-session');
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-batch-bad-'));
+test('batch KV reader rejects oversized and unsupported records before allocating payloads', async (t) => {
+  const { readSessionKvBatch } = await import('../src/kv-session');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-kv-batch-bad-'));
 
-    t.after(() => removeFixture(undefined, root));
+  t.after(() => removeFixture(undefined, root));
 
-    const options = {
-      database: path.join(root, 'kv.sqlite'),
-    };
+  const options = {
+    database: path.join(root, 'kv.sqlite'),
+  };
 
-    await execSql({
-      ...options,
-      readOnly: false,
-      sql: "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES('big',zeroblob(33554433)),('integer',42);",
-    });
+  await execSql({
+    ...options,
+    readOnly: false,
+    sql: "CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value); INSERT INTO cursorDiskKV VALUES('big',zeroblob(33554433)),('integer',42);",
+  });
 
-    for (const [key, error] of [
-      ['big', /exceeds/],
-      ['integer', /storage class/],
-    ] as const) {
-      const session = await SqliteSession.open({ ...options, readOnly: true });
+  for (const [key, error] of [
+    ['big', /exceeds/],
+    ['integer', /storage class/],
+  ] as const) {
+    const session = await SqliteSession.open({ ...options, readOnly: true });
 
-      try {
-        await assert.rejects(readSessionKvBatch(session, [key]), error);
-      } finally {
-        await session.close();
-      }
+    try {
+      await assert.rejects(readSessionKvBatch(session, [key]), error);
+    } finally {
+      await session.close();
     }
-  },
-);
+  }
+});

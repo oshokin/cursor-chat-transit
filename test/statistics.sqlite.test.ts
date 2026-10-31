@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execSqlScript } from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import {
   runStatistics,
@@ -15,9 +14,6 @@ import {
 import { runTransfer } from '../src/transfer-process';
 import { observeTransfer, type TransferEvent } from '../src/transfer-events';
 import type { WorkspaceEntry } from '../src/types';
-
-const executable = findSqliteExecutable(process.env.SQLITE3_PATH)!;
-const skip = !executable;
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-statistics-'));
@@ -81,122 +77,109 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   return { root, ctx, workspace, headers };
 }
 
-test(
-  'worker analyzes supplied format patterns, excludes unrelated data, and never writes databases',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, headers } = await fixture(t);
+test('worker analyzes supplied format patterns, excludes unrelated data, and never writes databases', async (t) => {
+  const { ctx, workspace, headers } = await fixture(t);
 
-    await execSqlScript({
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES ('agentKv:blob:unrelated',zeroblob(8388608));`,
+  });
+
+  const hash = async (file: string) =>
+    createHash('sha256')
+      .update(await fs.readFile(file))
+      .digest('hex');
+
+  const before = await hash(workspace.globalDbPath);
+  const rows: StatisticsUpdate[] = [];
+
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `INSERT INTO cursorDiskKV VALUES ('agentKv:blob:unrelated',zeroblob(8388608));`,
-    });
+      kind: 'chat-statistics',
+      workspace,
+      chats: [...headers, { composerId: 'missing' }],
+    },
+    { onStatistics: (row) => rows.push(row) },
+  );
 
-    const hash = async (file: string) =>
-      createHash('sha256')
-        .update(await fs.readFile(file))
-        .digest('hex');
+  assert.equal(result.failed, 0);
+  assert.match(rows[0].detail, /^3 user messages · Legacy/);
+  assert.match(rows[1].detail, /^0 user messages · Legacy/);
+  assert.match(rows[2].detail, /^2 user messages · Agent/);
+  assert.equal(rows[3].failed, undefined);
+  assert.equal(rows[3].health, 'missing');
+  assert.match(rows[3].detail, /No stored chat data/);
+  assert.equal(await hash(workspace.globalDbPath), before);
+  assert.equal(JSON.stringify(rows).includes('conversationState'), false);
+});
 
-    const before = await hash(workspace.globalDbPath);
-    const rows: StatisticsUpdate[] = [];
+test('workspace scan reuses global metadata, reports corrupt metadata instead of zero, and continues', async (t) => {
+  const { ctx, workspace } = await fixture(t);
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        workspace,
-        chats: [...headers, { composerId: 'missing' }],
+  const bad = {
+    ...workspace,
+    storageId: 'bad',
+    workspaceDbPath: path.join(workspace.storageRoot, 'bad.vscdb'),
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: bad.workspaceDbPath,
+    sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData','{broken');`,
+  });
+
+  const rows: StatisticsUpdate[] = [];
+  const events: TransferEvent[] = [];
+
+  const job: StatisticsJob = {
+    ...ctx,
+    kind: 'workspace-statistics',
+    workspaces: [bad, workspace],
+  };
+
+  const result = await observeTransfer({ event: (e) => events.push(e) }, () =>
+    runStatistics(job, new AbortController().signal, (r) => rows.push(r)),
+  );
+
+  assert.equal(result.failed, 1);
+  assert.equal(rows[0].failed, true);
+  assert.equal(rows[1].detail, '2 titled · 1 untitled');
+
+  assert.equal(
+    events.filter(
+      (e) => e.action === 'Read global chat headers' && e.status === 'started',
+    ).length,
+    1,
+  );
+});
+
+test('cancellation stops before the next chat and releases the read transaction', async (t) => {
+  const { ctx, workspace, headers } = await fixture(t);
+  const abort = new AbortController();
+  const rows: StatisticsUpdate[] = [];
+
+  await assert.rejects(
+    runStatistics(
+      { ...ctx, kind: 'chat-statistics', workspace, chats: headers },
+      abort.signal,
+      (r) => {
+        rows.push(r);
+        abort.abort();
       },
-      { onStatistics: (row) => rows.push(row) },
-    );
+    ),
+    /abort/i,
+  );
 
-    assert.equal(result.failed, 0);
-    assert.match(rows[0].detail, /^3 user messages · Legacy/);
-    assert.match(rows[1].detail, /^0 user messages · Legacy/);
-    assert.match(rows[2].detail, /^2 user messages · Agent/);
-    assert.equal(rows[3].failed, undefined);
-    assert.equal(rows[3].health, 'missing');
-    assert.match(rows[3].detail, /No stored chat data/);
-    assert.equal(await hash(workspace.globalDbPath), before);
-    assert.equal(JSON.stringify(rows).includes('conversationState'), false);
-  },
-);
+  assert.equal(rows.length, 1);
 
-test(
-  'workspace scan reuses global metadata, reports corrupt metadata instead of zero, and continues',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-
-    const bad = {
-      ...workspace,
-      storageId: 'bad',
-      workspaceDbPath: path.join(workspace.storageRoot, 'bad.vscdb'),
-    };
-
-    await execSqlScript({
-      ...ctx,
-      database: bad.workspaceDbPath,
-      sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData','{broken');`,
-    });
-
-    const rows: StatisticsUpdate[] = [];
-    const events: TransferEvent[] = [];
-
-    const job: StatisticsJob = {
-      ...ctx,
-      kind: 'workspace-statistics',
-      workspaces: [bad, workspace],
-    };
-
-    const result = await observeTransfer({ event: (e) => events.push(e) }, () =>
-      runStatistics(job, new AbortController().signal, (r) => rows.push(r)),
-    );
-
-    assert.equal(result.failed, 1);
-    assert.equal(rows[0].failed, true);
-    assert.equal(rows[1].detail, '2 titled · 1 untitled');
-
-    assert.equal(
-      events.filter(
-        (e) =>
-          e.action === 'Read global chat headers' && e.status === 'started',
-      ).length,
-      1,
-    );
-  },
-);
-
-test(
-  'cancellation stops before the next chat and releases the read transaction',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, headers } = await fixture(t);
-    const abort = new AbortController();
-    const rows: StatisticsUpdate[] = [];
-
-    await assert.rejects(
-      runStatistics(
-        { ...ctx, kind: 'chat-statistics', workspace, chats: headers },
-        abort.signal,
-        (r) => {
-          rows.push(r);
-          abort.abort();
-        },
-      ),
-      /abort/i,
-    );
-
-    assert.equal(rows.length, 1);
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: 'BEGIN EXCLUSIVE; COMMIT;',
-    });
-  },
-);
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'BEGIN EXCLUSIVE; COMMIT;',
+  });
+});
 
 /** Stable UUIDs exercise the same key-range validation as real Cursor chats. */
 function healthId(name: string): string {
@@ -217,196 +200,185 @@ function conversationState(...ids: string[]): string {
   ).toString('base64')}`;
 }
 
-test(
-  'deep checks distinguish complete legacy history, empty chats, missing messages and lost bodies',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
+test('deep checks distinguish complete legacy history, empty chats, missing messages and lost bodies', async (t) => {
+  const { ctx, workspace } = await fixture(t);
 
-    const bodies: Record<string, unknown> = {
-      [healthId('good')]: {
-        _v: 17,
-        isNAL: false,
-        conversationState: '~',
-        fullConversationHeadersOnly: [{ bubbleId: 'msg', type: 1 }],
-      },
-      [healthId('empty')]: {
-        _v: 10,
-        isNAL: false,
-        fullConversationHeadersOnly: [],
-      },
-      [healthId('broken')]: {
-        fullConversationHeadersOnly: [{ bubbleId: 'lost', type: 1 }],
-      },
-      [healthId('orphan')]: { fullConversationHeadersOnly: [] },
-      [healthId('state-backed')]: {
-        _v: 18,
-        isNAL: true,
-        conversationState: conversationState(
-          healthId('state-backed'),
-          healthId('state-backed-root'),
-        ),
-        fullConversationHeadersOnly: [],
-      },
-    };
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; ${Object.entries(bodies)
-        .map(
-          ([id, body]) =>
-            `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))});`,
-        )
-        .join(
-          '\n',
-        )} INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('good')}:msg','{"bubbleId":"msg","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('orphan')}:msg','{"type":2,"text":"Keep uncertain history"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}','{"bubbleId":"${healthId('state-backed-root')}","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}/s:1','{"bubbleId":"${healthId('state-backed-root')}","type":2,"text":"stream"}');`,
-    });
-
-    const before = await fs.readFile(workspace.globalDbPath);
-    const rows: StatisticsUpdate[] = [];
-
-    await runTransfer(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: Object.keys(bodies).map((composerId) => ({ composerId })),
-      },
-      { onStatistics: (r) => rows.push(r) },
-    );
-
-    assert.equal(rows[0].eligible, true);
-    assert.match(rows[0].detail, /Legacy format/);
-    assert.equal(rows[1].eligible, false);
-    assert.equal(rows[2].eligible, false);
-    assert.match(rows[2].detail, /Incomplete/);
-    assert.equal(rows[3].eligible, false);
-    assert.match(rows[3].detail, /unknown/);
-    assert.equal(rows[4].eligible, true);
-    assert.match(rows[4].detail, /^1 user message · Agent format/);
-    assert.deepEqual(await fs.readFile(workspace.globalDbPath), before);
-
-    assert.equal(
-      (await fs.readdir(workspace.storageRoot)).some((n) =>
-        /zip|staging|export/.test(n),
+  const bodies: Record<string, unknown> = {
+    [healthId('good')]: {
+      _v: 17,
+      isNAL: false,
+      conversationState: '~',
+      fullConversationHeadersOnly: [{ bubbleId: 'msg', type: 1 }],
+    },
+    [healthId('empty')]: {
+      _v: 10,
+      isNAL: false,
+      fullConversationHeadersOnly: [],
+    },
+    [healthId('broken')]: {
+      fullConversationHeadersOnly: [{ bubbleId: 'lost', type: 1 }],
+    },
+    [healthId('orphan')]: { fullConversationHeadersOnly: [] },
+    [healthId('state-backed')]: {
+      _v: 18,
+      isNAL: true,
+      conversationState: conversationState(
+        healthId('state-backed'),
+        healthId('state-backed-root'),
       ),
-      false,
-    );
-  },
-);
+      fullConversationHeadersOnly: [],
+    },
+  };
 
-test(
-  'a header without a composer body is missing data, and a blank v11 state stays incomplete',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const missing = healthId('header-only');
-    const blank = healthId('blank-v11');
-    const stored = healthId('blank-v11-stored');
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; ${Object.entries(bodies)
+      .map(
+        ([id, body]) =>
+          `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))});`,
+      )
+      .join(
+        '\n',
+      )} INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('good')}:msg','{"bubbleId":"msg","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('orphan')}:msg','{"type":2,"text":"Keep uncertain history"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}','{"bubbleId":"${healthId('state-backed-root')}","type":1,"text":"Hello"}'); INSERT INTO cursorDiskKV VALUES('bubbleId:${healthId('state-backed')}:${healthId('state-backed-root')}/s:1','{"bubbleId":"${healthId('state-backed-root')}","type":2,"text":"stream"}');`,
+  });
 
-    await execSqlScript({
+  const before = await fs.readFile(workspace.globalDbPath);
+  const rows: StatisticsUpdate[] = [];
+
+  await runTransfer(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV;
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: Object.keys(bodies).map((composerId) => ({ composerId })),
+    },
+    { onStatistics: (r) => rows.push(r) },
+  );
+
+  assert.equal(rows[0].eligible, true);
+  assert.match(rows[0].detail, /Legacy format/);
+  assert.equal(rows[1].eligible, false);
+  assert.equal(rows[2].eligible, false);
+  assert.match(rows[2].detail, /Incomplete/);
+  assert.equal(rows[3].eligible, false);
+  assert.match(rows[3].detail, /unknown/);
+  assert.equal(rows[4].eligible, true);
+  assert.match(rows[4].detail, /^1 user message · Agent format/);
+  assert.deepEqual(await fs.readFile(workspace.globalDbPath), before);
+
+  assert.equal(
+    (await fs.readdir(workspace.storageRoot)).some((n) =>
+      /zip|staging|export/.test(n),
+    ),
+    false,
+  );
+});
+
+test('a header without a composer body is missing data, and a blank v11 state stays incomplete', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const missing = healthId('header-only');
+  const blank = healthId('blank-v11');
+  const stored = healthId('blank-v11-stored');
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV;
 INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + blank)},${sqlText(
-        JSON.stringify({
-          _v: 11,
-          conversationState: '',
-          fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
-        }),
-      )});
+      JSON.stringify({
+        _v: 11,
+        conversationState: '',
+        fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
+      }),
+    )});
 INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + stored)},${sqlText(
-        JSON.stringify({
-          _v: 11,
-          conversationState: '',
-          fullConversationHeadersOnly: [{ bubbleId: 'kept', type: 1 }],
-        }),
-      )});
+      JSON.stringify({
+        _v: 11,
+        conversationState: '',
+        fullConversationHeadersOnly: [{ bubbleId: 'kept', type: 1 }],
+      }),
+    )});
 INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + stored + ':kept')},${sqlText(
-        '{"bubbleId":"kept","type":1,"text":"still here"}',
-      )});`,
-    });
+      '{"bubbleId":"kept","type":1,"text":"still here"}',
+    )});`,
+  });
 
-    const rows: StatisticsUpdate[] = [];
-    const notes: string[] = [];
+  const rows: StatisticsUpdate[] = [];
+  const notes: string[] = [];
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [
-          { composerId: missing, name: 'Header only' },
-          { composerId: blank, name: 'Blank state' },
-          { composerId: stored, name: 'Stored shell' },
-        ],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onNote: (note) => notes.push(note),
-      },
-    );
-
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0].failed, undefined);
-    assert.equal(rows[0].health, 'missing');
-    assert.match(rows[0].detail, /No stored chat data/);
-    assert.equal(rows[1].health, 'incomplete');
-    assert.match(rows[1].detail, /Incomplete chat data/);
-    assert.equal(rows[1].failed, undefined);
-    assert.equal(rows[2].health, 'ready');
-    assert.match(rows[2].detail, /Transfer checks passed/);
-
-    assert.equal(
-      notes.some(
-        (note) =>
-          note.includes('name="Blank state"') &&
-          note.includes('referenced message bodies are missing') &&
-          note.includes('first missing message=gone'),
-      ),
-      true,
-    );
-  },
-);
-
-test(
-  'deep checks preserve opaque state and accept standalone nested rows',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const healthy = healthId('healthy-v18');
-    const healthyRoot = healthId('healthy-v18-root');
-    const stale = healthId('stale-v18');
-    const staleRoot = healthId('stale-v18-root');
-    const sourceId = healthId('old-source-v18');
-    const orphan = healthId('orphan-nested-v18');
-    const orphanRoot = healthId('orphan-nested-v18-root');
-    const family = healthId('missing-family-v18');
-    const familyRoot = healthId('missing-family-v18-root');
-    const missingChild = healthId('missing-child-v18');
-
-    const composer = (id: string, state: string, extra = {}) =>
-      `INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${id}`)},${sqlText(
-        JSON.stringify({
-          _v: 18,
-          conversationState: state,
-          fullConversationHeadersOnly: [],
-          ...extra,
-        }),
-      )});`;
-
-    const bubble = (id: string, bubbleId: string, payloadBubbleId = bubbleId) =>
-      `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${bubbleId}`)},${sqlText(
-        JSON.stringify({ bubbleId: payloadBubbleId, type: 1, text: 'kept' }),
-      )});`;
-
-    await execSqlScript({
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV;
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [
+        { composerId: missing, name: 'Header only' },
+        { composerId: blank, name: 'Blank state' },
+        { composerId: stored, name: 'Stored shell' },
+      ],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onNote: (note) => notes.push(note),
+    },
+  );
+
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0].failed, undefined);
+  assert.equal(rows[0].health, 'missing');
+  assert.match(rows[0].detail, /No stored chat data/);
+  assert.equal(rows[1].health, 'incomplete');
+  assert.match(rows[1].detail, /Incomplete chat data/);
+  assert.equal(rows[1].failed, undefined);
+  assert.equal(rows[2].health, 'ready');
+  assert.match(rows[2].detail, /Transfer checks passed/);
+
+  assert.equal(
+    notes.some(
+      (note) =>
+        note.includes('name="Blank state"') &&
+        note.includes('referenced message bodies are missing') &&
+        note.includes('first missing message=gone'),
+    ),
+    true,
+  );
+});
+
+test('deep checks preserve opaque state and accept standalone nested rows', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const healthy = healthId('healthy-v18');
+  const healthyRoot = healthId('healthy-v18-root');
+  const stale = healthId('stale-v18');
+  const staleRoot = healthId('stale-v18-root');
+  const sourceId = healthId('old-source-v18');
+  const orphan = healthId('orphan-nested-v18');
+  const orphanRoot = healthId('orphan-nested-v18-root');
+  const family = healthId('missing-family-v18');
+  const familyRoot = healthId('missing-family-v18-root');
+  const missingChild = healthId('missing-child-v18');
+
+  const composer = (id: string, state: string, extra = {}) =>
+    `INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${id}`)},${sqlText(
+      JSON.stringify({
+        _v: 18,
+        conversationState: state,
+        fullConversationHeadersOnly: [],
+        ...extra,
+      }),
+    )});`;
+
+  const bubble = (id: string, bubbleId: string, payloadBubbleId = bubbleId) =>
+    `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${bubbleId}`)},${sqlText(
+      JSON.stringify({ bubbleId: payloadBubbleId, type: 1, text: 'kept' }),
+    )});`;
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV;
 ${composer(healthy, conversationState(healthy, healthyRoot))}
 ${bubble(healthy, healthyRoot)}
 ${composer(stale, conversationState(sourceId, staleRoot))}
@@ -418,297 +390,276 @@ ${composer(family, conversationState(family, familyRoot), {
   subagentComposerIds: [missingChild],
 })}
 ${bubble(family, familyRoot)}`,
-    });
+  });
 
-    const rows: StatisticsUpdate[] = [];
-    const notes: string[] = [];
+  const rows: StatisticsUpdate[] = [];
+  const notes: string[] = [];
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [
-          { composerId: healthy, name: 'Healthy v18' },
-          { composerId: stale, name: 'Stale v18' },
-          { composerId: orphan, name: 'State-backed nested v18' },
-          { composerId: family, name: 'Missing family v18' },
-        ],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onNote: (note) => notes.push(note),
-      },
-    );
-
-    assert.equal(result.failed, 0);
-
-    assert.deepEqual(
-      rows.map((row) => row.health),
-      ['ready', 'ready', 'unknown', 'incomplete'],
-    );
-
-    assert.equal(
-      notes.some((note) => note.includes(missingChild)),
-      true,
-    );
-  },
-);
-
-test(
-  'a listed header with no composer row names the chat in the operation log',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('named-header-only');
-    const notes: string[] = [];
-    const rows: StatisticsUpdate[] = [];
-
-    await execSqlScript({
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: 'DELETE FROM cursorDiskKV;',
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [
+        { composerId: healthy, name: 'Healthy v18' },
+        { composerId: stale, name: 'Stale v18' },
+        { composerId: orphan, name: 'State-backed nested v18' },
+        { composerId: family, name: 'Missing family v18' },
+      ],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onNote: (note) => notes.push(note),
+    },
+  );
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id, name: 'Header only' }],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onNote: (note) => notes.push(note),
-      },
-    );
+  assert.equal(result.failed, 0);
 
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0].health, 'missing');
-    assert.equal(rows[0].detail, 'No stored chat data');
-    assert.equal(rows[0].eligible, false);
-    assert.equal(rows[0].failed, undefined);
+  assert.deepEqual(
+    rows.map((row) => row.health),
+    ['ready', 'ready', 'unknown', 'incomplete'],
+  );
 
-    assert.equal(
-      notes.some(
-        (note) =>
-          note.includes(`id=${id}`) &&
-          note.includes('name="Header only"') &&
-          note.includes('reason=missing-body'),
-      ),
-      true,
-    );
-  },
-);
+  assert.equal(
+    notes.some((note) => note.includes(missingChild)),
+    true,
+  );
+});
 
-test(
-  'orphan bubbles without a composer row stay incomplete',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('orphan-header');
-    const rows: StatisticsUpdate[] = [];
+test('a listed header with no composer row names the chat in the operation log', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('named-header-only');
+  const notes: string[] = [];
+  const rows: StatisticsUpdate[] = [];
 
-    await execSqlScript({
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'DELETE FROM cursorDiskKV;',
+  });
+
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `bubbleId:${id}:kept`,
-      )},${sqlText('{"bubbleId":"kept","type":1,"text":"orphan"}')});`,
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id, name: 'Header only' }],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onNote: (note) => notes.push(note),
+    },
+  );
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id, name: 'Orphan bubbles' }],
-      },
-      { onStatistics: (row) => rows.push(row) },
-    );
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0].health, 'missing');
+  assert.equal(rows[0].detail, 'No stored chat data');
+  assert.equal(rows[0].eligible, false);
+  assert.equal(rows[0].failed, undefined);
 
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0].failed, undefined);
-    assert.equal(rows[0].health, 'incomplete');
-    assert.equal(rows[0].detail, 'Incomplete chat data');
-    assert.equal(rows[0].detail.includes('Statistics unavailable'), false);
-  },
-);
+  assert.equal(
+    notes.some(
+      (note) =>
+        note.includes(`id=${id}`) &&
+        note.includes('name="Header only"') &&
+        note.includes('reason=missing-body'),
+    ),
+    true,
+  );
+});
 
-test(
-  'whitespace conversation state does not abort the check',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('whitespace-state');
-    const rows: StatisticsUpdate[] = [];
-    const notes: string[] = [];
+test('orphan bubbles without a composer row stay incomplete', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('orphan-header');
+  const rows: StatisticsUpdate[] = [];
 
-    await execSqlScript({
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `bubbleId:${id}:kept`,
+    )},${sqlText('{"bubbleId":"kept","type":1,"text":"orphan"}')});`,
+  });
+
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `composerData:${id}`,
-      )},${sqlText(
-        JSON.stringify({
-          _v: 11,
-          isNAL: true,
-          conversationState: '   ',
-          fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
-        }),
-      )});`,
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id, name: 'Orphan bubbles' }],
+    },
+    { onStatistics: (row) => rows.push(row) },
+  );
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id, name: 'Whitespace state' }],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onNote: (note) => notes.push(note),
-      },
-    );
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0].failed, undefined);
+  assert.equal(rows[0].health, 'incomplete');
+  assert.equal(rows[0].detail, 'Incomplete chat data');
+  assert.equal(rows[0].detail.includes('Statistics unavailable'), false);
+});
 
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0].failed, undefined);
-    assert.equal(rows[0].health, 'incomplete');
-    assert.match(rows[0].detail, /1 user message · Agent format · Incomplete/);
+test('whitespace conversation state does not abort the check', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('whitespace-state');
+  const rows: StatisticsUpdate[] = [];
+  const notes: string[] = [];
 
-    assert.equal(
-      notes.some((note) => note.includes('name="Whitespace state"')),
-      true,
-    );
-  },
-);
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `composerData:${id}`,
+    )},${sqlText(
+      JSON.stringify({
+        _v: 11,
+        isNAL: true,
+        conversationState: '   ',
+        fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
+      }),
+    )});`,
+  });
 
-test(
-  'an unreadable conversation state still fails the check',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const future = healthId('future-messages');
-    const unknown = healthId('unknown-version');
-    const rows: StatisticsUpdate[] = [];
-    const events: TransferEvent[] = [];
-
-    await execSqlScript({
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `composerData:${future}`,
-      )},${sqlText(
-        JSON.stringify({
-          _v: 11,
-          conversationState: 'not-a-walked-state',
-          fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
-        }),
-      )}); INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `composerData:${unknown}`,
-      )},${sqlText(
-        JSON.stringify({
-          _v: 99,
-          conversationState: '~',
-          fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
-        }),
-      )});`,
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id, name: 'Whitespace state' }],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onNote: (note) => notes.push(note),
+    },
+  );
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [
-          { composerId: future, name: 'Future messages' },
-          { composerId: unknown, name: 'Unknown version' },
-        ],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onEvent: (event) => events.push(event),
-      },
-    );
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0].failed, undefined);
+  assert.equal(rows[0].health, 'incomplete');
+  assert.match(rows[0].detail, /1 user message · Agent format · Incomplete/);
 
-    assert.equal(result.failed, 2);
-    assert.equal(rows[0].failed, true);
-    assert.equal(rows[1].failed, true);
-    assert.equal(rows[0].detail, 'Statistics unavailable — see operation log');
-    assert.equal(rows[1].detail, 'Statistics unavailable — see operation log');
+  assert.equal(
+    notes.some((note) => note.includes('name="Whitespace state"')),
+    true,
+  );
+});
 
-    assert.deepEqual(
-      events
-        .filter((event) => event.action === 'Statistics unavailable')
-        .map((event) => event.errorCode),
-      ['UNSUPPORTED_STATE', 'UNSUPPORTED_STATE'],
-    );
-  },
-);
+test('an unreadable conversation state still fails the check', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const future = healthId('future-messages');
+  const unknown = healthId('unknown-version');
+  const rows: StatisticsUpdate[] = [];
+  const events: TransferEvent[] = [];
 
-test(
-  'a stored bubble whose role disagrees with the index is incomplete',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('role-mismatch');
-    const rows: StatisticsUpdate[] = [];
-    const notes: string[] = [];
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `composerData:${future}`,
+    )},${sqlText(
+      JSON.stringify({
+        _v: 11,
+        conversationState: 'not-a-walked-state',
+        fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
+      }),
+    )}); INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `composerData:${unknown}`,
+    )},${sqlText(
+      JSON.stringify({
+        _v: 99,
+        conversationState: '~',
+        fullConversationHeadersOnly: [{ bubbleId: 'gone', type: 1 }],
+      }),
+    )});`,
+  });
 
-    await execSqlScript({
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `composerData:${id}`,
-      )},${sqlText(
-        JSON.stringify({
-          _v: 11,
-          conversationState: '',
-          isNAL: true,
-          fullConversationHeadersOnly: [{ bubbleId: 'msg', type: 1 }],
-        }),
-      )}); INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `bubbleId:${id}:msg`,
-      )},${sqlText('{"bubbleId":"msg","type":2,"text":"stored"}')});`,
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [
+        { composerId: future, name: 'Future messages' },
+        { composerId: unknown, name: 'Unknown version' },
+      ],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onEvent: (event) => events.push(event),
+    },
+  );
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id, name: 'Role mismatch' }],
-      },
-      {
-        onStatistics: (row) => rows.push(row),
-        onNote: (note) => notes.push(note),
-      },
-    );
+  assert.equal(result.failed, 2);
+  assert.equal(rows[0].failed, true);
+  assert.equal(rows[1].failed, true);
+  assert.equal(rows[0].detail, 'Statistics unavailable — see operation log');
+  assert.equal(rows[1].detail, 'Statistics unavailable — see operation log');
 
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0].failed, undefined);
-    assert.equal(rows[0].health, 'incomplete');
-    assert.match(rows[0].detail, /Incomplete chat data/);
+  assert.deepEqual(
+    events
+      .filter((event) => event.action === 'Statistics unavailable')
+      .map((event) => event.errorCode),
+    ['UNSUPPORTED_STATE', 'UNSUPPORTED_STATE'],
+  );
+});
 
-    assert.equal(
-      notes.some(
-        (note) =>
-          note.includes('Role mismatch') &&
-          note.includes('message role does not match the stored record'),
-      ),
-      true,
-    );
-  },
-);
+test('a stored bubble whose role disagrees with the index is incomplete', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('role-mismatch');
+  const rows: StatisticsUpdate[] = [];
+  const notes: string[] = [];
 
-test('corrupt composer JSON still fails the check', { skip }, async (t) => {
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `composerData:${id}`,
+    )},${sqlText(
+      JSON.stringify({
+        _v: 11,
+        conversationState: '',
+        isNAL: true,
+        fullConversationHeadersOnly: [{ bubbleId: 'msg', type: 1 }],
+      }),
+    )}); INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `bubbleId:${id}:msg`,
+    )},${sqlText('{"bubbleId":"msg","type":2,"text":"stored"}')});`,
+  });
+
+  const result = await runTransfer<{ failed: number }>(
+    {
+      ...ctx,
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id, name: 'Role mismatch' }],
+    },
+    {
+      onStatistics: (row) => rows.push(row),
+      onNote: (note) => notes.push(note),
+    },
+  );
+
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0].failed, undefined);
+  assert.equal(rows[0].health, 'incomplete');
+  assert.match(rows[0].detail, /Incomplete chat data/);
+
+  assert.equal(
+    notes.some(
+      (note) =>
+        note.includes('Role mismatch') &&
+        note.includes('message role does not match the stored record'),
+    ),
+    true,
+  );
+});
+
+test('corrupt composer JSON still fails the check', async (t) => {
   const { ctx, workspace } = await fixture(t);
   const id = healthId('corrupt-json');
   const rows: StatisticsUpdate[] = [];
@@ -748,655 +699,608 @@ test('corrupt composer JSON still fails the check', { skip }, async (t) => {
   );
 });
 
-test(
-  'a conversation index past 100,000 properties still passes the deep check',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('long');
-    const extra: Record<string, number> = {};
+test('a conversation index past 100,000 properties still passes the deep check', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('long');
+  const extra: Record<string, number> = {};
 
-    for (let index = 0; index < 1001; index++) extra[`p${index}`] = 1;
+  for (let index = 0; index < 1001; index++) extra[`p${index}`] = 1;
 
-    const headers = Array.from({ length: 100 }, (_item, index) => ({
-      bubbleId: `m${index}`,
-      type: 1,
-      extra,
-    }));
+  const headers = Array.from({ length: 100 }, (_item, index) => ({
+    bubbleId: `m${index}`,
+    type: 1,
+    extra,
+  }));
 
-    const slow = { ...ctx, timeoutMs: 60_000 };
+  const slow = { ...ctx, timeoutMs: 60_000 };
 
-    await execSqlScript({
+  await execSqlScript({
+    ...slow,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
+      `composerData:${id}`,
+    )},${sqlText(
+      JSON.stringify({
+        _v: 18,
+        isNAL: true,
+        conversationState: '~',
+        fullConversationHeadersOnly: headers,
+      }),
+    )}); ${headers
+      .map(
+        (header) =>
+          `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${header.bubbleId}`)},${sqlText(
+            JSON.stringify({ bubbleId: header.bubbleId, type: 1 }),
+          )});`,
+      )
+      .join('\n')}`,
+  });
+
+  const rows: StatisticsUpdate[] = [];
+
+  const result = await runTransfer<{ failed: number }>(
+    {
       ...slow,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES(${sqlText(
-        `composerData:${id}`,
-      )},${sqlText(
-        JSON.stringify({
-          _v: 18,
-          isNAL: true,
-          conversationState: '~',
-          fullConversationHeadersOnly: headers,
-        }),
-      )}); ${headers
-        .map(
-          (header) =>
-            `INSERT INTO cursorDiskKV VALUES(${sqlText(`bubbleId:${id}:${header.bubbleId}`)},${sqlText(
-              JSON.stringify({ bubbleId: header.bubbleId, type: 1 }),
-            )});`,
-        )
-        .join('\n')}`,
-    });
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id, name: 'Long transcript' }],
+    },
+    { onStatistics: (row) => rows.push(row) },
+  );
 
-    const rows: StatisticsUpdate[] = [];
+  assert.equal(result.failed, 0);
+  assert.equal(rows[0]?.eligible, true);
 
-    const result = await runTransfer<{ failed: number }>(
-      {
-        ...slow,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id, name: 'Long transcript' }],
-      },
-      { onStatistics: (row) => rows.push(row) },
-    );
+  assert.match(
+    rows[0]?.detail || '',
+    /100 user messages · Agent format · Transfer checks passed/,
+  );
+});
 
-    assert.equal(result.failed, 0);
-    assert.equal(rows[0]?.eligible, true);
+test('workspace cleanup keeps legacy, incomplete and unknown history; hides only empty or absent data', async (t) => {
+  const { ctx, workspace } = await fixture(t);
 
-    assert.match(
-      rows[0]?.detail || '',
-      /100 user messages · Agent format · Transfer checks passed/,
-    );
-  },
-);
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES('composerData:${healthId('empty')}','{"fullConversationHeadersOnly":[]}'); INSERT INTO cursorDiskKV VALUES('composerData:${healthId('broken')}','{"fullConversationHeadersOnly":[{"bubbleId":"lost","type":1}]}');`,
+  });
 
-test(
-  'workspace cleanup keeps legacy, incomplete and unknown history; hides only empty or absent data',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
+  const workspaces: WorkspaceEntry[] = [];
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV; INSERT INTO cursorDiskKV VALUES('composerData:${healthId('empty')}','{"fullConversationHeadersOnly":[]}'); INSERT INTO cursorDiskKV VALUES('composerData:${healthId('broken')}','{"fullConversationHeadersOnly":[{"bubbleId":"lost","type":1}]}');`,
-    });
-
-    const workspaces: WorkspaceEntry[] = [];
-
-    for (const id of ['empty', 'missing', 'broken']) {
-      const entry = {
-        ...workspace,
-        storageId: id,
-        workspaceDbPath: path.join(workspace.storageRoot, id + '.vscdb'),
-      };
-
-      await execSqlScript({
-        ...ctx,
-        database: entry.workspaceDbPath,
-        sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: healthId(id) }] }))});`,
-      });
-
-      workspaces.push(entry);
-    }
-
-    const rows: StatisticsUpdate[] = [];
-
-    await runStatistics(
-      { ...ctx, kind: 'workspace-statistics', deepCheck: true, workspaces },
-      new AbortController().signal,
-      (r) => rows.push(r),
-    );
-
-    assert.deepEqual(
-      rows.map((r) => r.hide),
-      [true, true, false],
-    );
-  },
-);
-
-test(
-  'deep selection excludes a chat with a missing image and rejects unknown state without hiding history',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const imageId = healthId('image');
-    const unknownId = healthId('future');
-
-    const body = {
-      _v: 17,
-      fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
-      conversationState: '~',
+  for (const id of ['empty', 'missing', 'broken']) {
+    const entry = {
+      ...workspace,
+      storageId: id,
+      workspaceDbPath: path.join(workspace.storageRoot, id + '.vscdb'),
     };
 
     await execSqlScript({
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `DELETE FROM cursorDiskKV;
+      database: entry.workspaceDbPath,
+      sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: healthId(id) }] }))});`,
+    });
+
+    workspaces.push(entry);
+  }
+
+  const rows: StatisticsUpdate[] = [];
+
+  await runStatistics(
+    { ...ctx, kind: 'workspace-statistics', deepCheck: true, workspaces },
+    new AbortController().signal,
+    (r) => rows.push(r),
+  );
+
+  assert.deepEqual(
+    rows.map((r) => r.hide),
+    [true, true, false],
+  );
+});
+
+test('deep selection excludes a chat with a missing image and rejects unknown state without hiding history', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const imageId = healthId('image');
+  const unknownId = healthId('future');
+
+  const body = {
+    _v: 17,
+    fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
+    conversationState: '~',
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `DELETE FROM cursorDiskKV;
   INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + imageId)},${sqlText(JSON.stringify(body))});
   INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + imageId + ':m')},${sqlText(JSON.stringify({ type: 1, images: [{ uuid: healthId('missing-image') }] }))});
   INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + unknownId)},${sqlText(JSON.stringify({ ...body, _v: 99 }))});
   INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + unknownId + ':m')},'{"type":1}');`,
-    });
+  });
 
-    const rows: StatisticsUpdate[] = [];
+  const rows: StatisticsUpdate[] = [];
 
-    await runStatistics(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: imageId }, { composerId: unknownId }],
-      },
-      new AbortController().signal,
-      (r) => rows.push(r),
-    );
-
-    assert.equal(rows[0].eligible, false);
-    assert.match(rows[0].detail, /Incomplete/);
-    assert.equal(rows[1].failed, true);
-    assert.notEqual(rows[1].eligible, true);
-  },
-);
-
-test(
-  'a referenced canvas without a workspace canvas directory is incomplete',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('canvas');
-
-    const body = {
-      fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
-      canvas: { path: '/source/canvases/chart.canvas.tsx' },
-    };
-
-    await execSqlScript({
+  await runStatistics(
+    {
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))}); INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + id + ':m')},'{"type":1}');`,
-    });
-
-    const rows: StatisticsUpdate[] = [];
-
-    await runStatistics(
-      {
-        ...ctx,
-        kind: 'chat-statistics',
-        deepCheck: true,
-        workspace,
-        chats: [{ composerId: id }],
-      },
-      new AbortController().signal,
-      (r) => rows.push(r),
-    );
-
-    assert.equal(rows[0].eligible, false);
-    assert.match(rows[0].detail, /Incomplete/);
-  },
-);
-
-test(
-  'workspace filtering checks presence without traversing blobs or reading oversized messages',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const id = healthId('large-presence');
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: id, name: 'Large chat' }] }))};`,
-    });
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${id}:message',zeroblob(33554433)); INSERT INTO cursorDiskKV VALUES('composerData:${id}','{broken');`,
-    });
-
-    const events: TransferEvent[] = [],
-      rows: StatisticsUpdate[] = [];
-
-    await observeTransfer({ event: (e) => events.push(e) }, () =>
-      runStatistics(
-        {
-          ...ctx,
-          kind: 'workspace-statistics',
-          deepCheck: true,
-          workspaces: [workspace],
-        },
-        new AbortController().signal,
-        (row) => rows.push(row),
-      ),
-    );
-
-    assert.equal(rows[0].hide, false);
-    assert.equal(rows[0].failed, undefined);
-
-    assert.equal(
-      events.some((e) => /dependency|checksum|attachment/i.test(e.action)),
-      false,
-    );
-
-    assert.ok(
-      events.some(
-        (e) => e.action === 'Stored chat history found; keep workspace',
-      ),
-    );
-  },
-);
-
-test(
-  'presence checks retain uncertain state/resources and hide only proven empty or absent history',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const { inspectChatPresence } = await import('../src/chat-presence');
-    const { openReadTransaction } = await import('../src/read-transaction');
-
-    const cases: Array<[string, unknown, string]> = [
-      ['empty', { fullConversationHeadersOnly: [] }, 'empty'],
-      ['absent', undefined, 'missing'],
-      [
-        'future',
-        { _v: 99, conversationState: '~', fullConversationHeadersOnly: [] },
-        'unknown',
-      ],
-      [
-        'invalid-state',
-        { _v: 17, conversationState: 'bad', fullConversationHeadersOnly: [] },
-        'unknown',
-      ],
-      [
-        'references',
-        { fullConversationHeadersOnly: [{ bubbleId: 'missing', type: 1 }] },
-        'present',
-      ],
-      ['no-layout', {}, 'unknown'],
-      [
-        'wrong-id',
-        { composerId: 'other', fullConversationHeadersOnly: [] },
-        'unknown',
-      ],
-      [
-        'canvas',
-        {
-          canvas: { path: '/source/canvases/chart.canvas.tsx' },
-          fullConversationHeadersOnly: [],
-        },
-        'unknown',
-      ],
-    ];
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: cases
-        .filter(([, body]) => body !== undefined)
-        .map(
-          ([name, body]) =>
-            `INSERT INTO cursorDiskKV VALUES('composerData:${healthId(name)}',${sqlText(JSON.stringify(body))});`,
-        )
-        .join('\n'),
-    });
-
-    const view = await openReadTransaction({
-      ...ctx,
-      database: workspace.globalDbPath,
-    });
-
-    try {
-      for (const [name, , expected] of cases)
-        assert.equal(
-          await inspectChatPresence(view.conn, healthId(name)),
-          expected,
-          name,
-        );
-    } finally {
-      await view.close();
-    }
-  },
-);
-
-test(
-  'workspace presence scan releases each 32-chat read view and cancellation drains it',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-
-    const headers = Array.from({ length: 65 }, (_, i) => ({
-      composerId: healthId(`batch-${i}`),
-    }));
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
-    });
-
-    const events: TransferEvent[] = [];
-
-    const job: StatisticsJob = {
-      ...ctx,
-      kind: 'workspace-statistics',
+      kind: 'chat-statistics',
       deepCheck: true,
-      workspaces: [workspace],
-    };
+      workspace,
+      chats: [{ composerId: imageId }, { composerId: unknownId }],
+    },
+    new AbortController().signal,
+    (r) => rows.push(r),
+  );
 
-    await observeTransfer({ event: (e) => events.push(e) }, () =>
-      runStatistics(job, new AbortController().signal, () => {}),
-    );
+  assert.equal(rows[0].eligible, false);
+  assert.match(rows[0].detail, /Incomplete/);
+  assert.equal(rows[1].failed, true);
+  assert.notEqual(rows[1].eligible, true);
+});
 
-    assert.equal(
-      events.filter(
-        (e) =>
-          e.action === 'Open database read transaction' &&
-          e.status === 'started' &&
-          e.path === workspace.globalDbPath,
-      ).length,
-      4,
-    ); // Header view + three presence batches.
+test('a referenced canvas without a workspace canvas directory is incomplete', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('canvas');
 
-    assert.equal(
-      events.filter(
-        (e) =>
-          e.action === 'Check chat history presence' &&
-          e.status === 'completed',
-      ).length,
-      65,
-    );
+  const body = {
+    fullConversationHeadersOnly: [{ bubbleId: 'm', type: 1 }],
+    canvas: { path: '/source/canvases/chart.canvas.tsx' },
+  };
 
-    const abort = new AbortController();
-    let completed = 0;
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + id)},${sqlText(JSON.stringify(body))}); INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + id + ':m')},'{"type":1}');`,
+  });
 
-    await assert.rejects(
-      observeTransfer(
-        {
-          event: (e) => {
-            if (
-              e.action === 'Check chat history presence' &&
-              e.status === 'completed' &&
-              ++completed === 2
-            )
-              abort.abort();
-          },
+  const rows: StatisticsUpdate[] = [];
+
+  await runStatistics(
+    {
+      ...ctx,
+      kind: 'chat-statistics',
+      deepCheck: true,
+      workspace,
+      chats: [{ composerId: id }],
+    },
+    new AbortController().signal,
+    (r) => rows.push(r),
+  );
+
+  assert.equal(rows[0].eligible, false);
+  assert.match(rows[0].detail, /Incomplete/);
+});
+
+test('workspace filtering checks presence without traversing blobs or reading oversized messages', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const id = healthId('large-presence');
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: id, name: 'Large chat' }] }))};`,
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${id}:message',zeroblob(33554433)); INSERT INTO cursorDiskKV VALUES('composerData:${id}','{broken');`,
+  });
+
+  const events: TransferEvent[] = [],
+    rows: StatisticsUpdate[] = [];
+
+  await observeTransfer({ event: (e) => events.push(e) }, () =>
+    runStatistics(
+      {
+        ...ctx,
+        kind: 'workspace-statistics',
+        deepCheck: true,
+        workspaces: [workspace],
+      },
+      new AbortController().signal,
+      (row) => rows.push(row),
+    ),
+  );
+
+  assert.equal(rows[0].hide, false);
+  assert.equal(rows[0].failed, undefined);
+
+  assert.equal(
+    events.some((e) => /dependency|checksum|attachment/i.test(e.action)),
+    false,
+  );
+
+  assert.ok(
+    events.some(
+      (e) => e.action === 'Stored chat history found; keep workspace',
+    ),
+  );
+});
+
+test('presence checks retain uncertain state/resources and hide only proven empty or absent history', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const { inspectChatPresence } = await import('../src/chat-presence');
+  const { openReadTransaction } = await import('../src/read-transaction');
+
+  const cases: Array<[string, unknown, string]> = [
+    ['empty', { fullConversationHeadersOnly: [] }, 'empty'],
+    ['absent', undefined, 'missing'],
+    [
+      'future',
+      { _v: 99, conversationState: '~', fullConversationHeadersOnly: [] },
+      'unknown',
+    ],
+    [
+      'invalid-state',
+      { _v: 17, conversationState: 'bad', fullConversationHeadersOnly: [] },
+      'unknown',
+    ],
+    [
+      'references',
+      { fullConversationHeadersOnly: [{ bubbleId: 'missing', type: 1 }] },
+      'present',
+    ],
+    ['no-layout', {}, 'unknown'],
+    [
+      'wrong-id',
+      { composerId: 'other', fullConversationHeadersOnly: [] },
+      'unknown',
+    ],
+    [
+      'canvas',
+      {
+        canvas: { path: '/source/canvases/chart.canvas.tsx' },
+        fullConversationHeadersOnly: [],
+      },
+      'unknown',
+    ],
+  ];
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: cases
+      .filter(([, body]) => body !== undefined)
+      .map(
+        ([name, body]) =>
+          `INSERT INTO cursorDiskKV VALUES('composerData:${healthId(name)}',${sqlText(JSON.stringify(body))});`,
+      )
+      .join('\n'),
+  });
+
+  const view = await openReadTransaction({
+    ...ctx,
+    database: workspace.globalDbPath,
+  });
+
+  try {
+    for (const [name, , expected] of cases)
+      assert.equal(
+        await inspectChatPresence(view.conn, healthId(name)),
+        expected,
+        name,
+      );
+  } finally {
+    await view.close();
+  }
+});
+
+test('workspace presence scan releases each 32-chat read view and cancellation drains it', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+
+  const headers = Array.from({ length: 65 }, (_, i) => ({
+    composerId: healthId(`batch-${i}`),
+  }));
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
+  });
+
+  const events: TransferEvent[] = [];
+
+  const job: StatisticsJob = {
+    ...ctx,
+    kind: 'workspace-statistics',
+    deepCheck: true,
+    workspaces: [workspace],
+  };
+
+  await observeTransfer({ event: (e) => events.push(e) }, () =>
+    runStatistics(job, new AbortController().signal, () => {}),
+  );
+
+  assert.equal(
+    events.filter(
+      (e) =>
+        e.action === 'Open database read transaction' &&
+        e.status === 'started' &&
+        e.path === workspace.globalDbPath,
+    ).length,
+    4,
+  ); // Header view + three presence batches.
+
+  assert.equal(
+    events.filter(
+      (e) =>
+        e.action === 'Check chat history presence' && e.status === 'completed',
+    ).length,
+    65,
+  );
+
+  const abort = new AbortController();
+  let completed = 0;
+
+  await assert.rejects(
+    observeTransfer(
+      {
+        event: (e) => {
+          if (
+            e.action === 'Check chat history presence' &&
+            e.status === 'completed' &&
+            ++completed === 2
+          )
+            abort.abort();
         },
-        () =>
-          runStatistics(job, abort.signal, () =>
-            assert.fail('Cancelled scan must not publish a row'),
-          ),
-      ),
-      /abort/i,
-    );
+      },
+      () =>
+        runStatistics(job, abort.signal, () =>
+          assert.fail('Cancelled scan must not publish a row'),
+        ),
+    ),
+    /abort/i,
+  );
 
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'BEGIN EXCLUSIVE; COMMIT;',
+  });
+});
+
+test('global headers with explicit storage ids do not leak into another generation of the same project', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const { identityFromWorkspaceJson } = await import('../src/core');
+
+  const { resolveComposers, readGlobalHeaderSources } =
+    await import('../src/db-headers');
+
+  const { inspectDatabase } = await import('../src/db');
+
+  const identity = identityFromWorkspaceJson({
+    folder: 'file:///repo/ordermanager',
+  });
+
+  const entries = ['old', 'new'].map((storageId) => ({
+    ...workspace,
+    identity,
+    storageId,
+    workspaceDbPath: path.join(workspace.storageRoot, `${storageId}.vscdb`),
+  }));
+
+  for (const entry of entries)
     await execSqlScript({
       ...ctx,
-      database: workspace.globalDbPath,
-      sql: 'BEGIN EXCLUSIVE; COMMIT;',
-    });
-  },
-);
-
-test(
-  'global headers with explicit storage ids do not leak into another generation of the same project',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const { identityFromWorkspaceJson } = await import('../src/core');
-
-    const { resolveComposers, readGlobalHeaderSources } =
-      await import('../src/db-headers');
-
-    const { inspectDatabase } = await import('../src/db');
-
-    const identity = identityFromWorkspaceJson({
-      folder: 'file:///repo/ordermanager',
+      database: entry.workspaceDbPath,
+      sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
     });
 
-    const entries = ['old', 'new'].map((storageId) => ({
-      ...workspace,
-      identity,
-      storageId,
-      workspaceDbPath: path.join(workspace.storageRoot, `${storageId}.vscdb`),
-    }));
+  const allComposers = [
+    {
+      composerId: 'old-chat',
+      name: 'Old',
+      workspaceIdentifier: { id: 'old', uri: identity.uri },
+    },
+    {
+      composerId: 'new-chat',
+      name: 'New',
+      workspaceIdentifier: { id: 'new', uri: identity.uri },
+    },
+    { composerId: 'legacy-uri', workspaceIdentifier: { uri: identity.uri } },
+  ];
 
-    for (const entry of entries)
-      await execSqlScript({
-        ...ctx,
-        database: entry.workspaceDbPath,
-        sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO ItemTable VALUES ('composer.composerHeaders',${sqlText(JSON.stringify({ allComposers }))});`,
+  });
+
+  const global = { ...ctx, database: workspace.globalDbPath, readOnly: true };
+  const { layout: layoutGl } = await inspectDatabase(global);
+
+  for (const entry of entries) {
+    const local = { ...ctx, database: entry.workspaceDbPath, readOnly: true };
+    const { layout: layoutWs } = await inspectDatabase(local);
+
+    for (const cached of [false, true]) {
+      const headers = await resolveComposers(local, global, {
+        storageId: entry.storageId,
+        identity,
+        layoutWs,
+        layoutGl,
+        ...(cached
+          ? { globalSources: await readGlobalHeaderSources(global, layoutGl) }
+          : {}),
       });
 
-    const allComposers = [
-      {
-        composerId: 'old-chat',
-        name: 'Old',
-        workspaceIdentifier: { id: 'old', uri: identity.uri },
-      },
-      {
-        composerId: 'new-chat',
-        name: 'New',
-        workspaceIdentifier: { id: 'new', uri: identity.uri },
-      },
-      { composerId: 'legacy-uri', workspaceIdentifier: { uri: identity.uri } },
-    ];
-
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: `INSERT INTO ItemTable VALUES ('composer.composerHeaders',${sqlText(JSON.stringify({ allComposers }))});`,
-    });
-
-    const global = { ...ctx, database: workspace.globalDbPath, readOnly: true };
-    const { layout: layoutGl } = await inspectDatabase(global);
-
-    for (const entry of entries) {
-      const local = { ...ctx, database: entry.workspaceDbPath, readOnly: true };
-      const { layout: layoutWs } = await inspectDatabase(local);
-
-      for (const cached of [false, true]) {
-        const headers = await resolveComposers(local, global, {
-          storageId: entry.storageId,
-          identity,
-          layoutWs,
-          layoutGl,
-          ...(cached
-            ? { globalSources: await readGlobalHeaderSources(global, layoutGl) }
-            : {}),
-        });
-
-        assert.deepEqual(
-          headers.map((h) => h.composerId).sort(),
-          [`${entry.storageId}-chat`, 'legacy-uri'].sort(),
-        );
-      }
+      assert.deepEqual(
+        headers.map((h) => h.composerId).sort(),
+        [`${entry.storageId}-chat`, 'legacy-uri'].sort(),
+      );
     }
-  },
-);
+  }
+});
 
-test(
-  'workspace filter stops at the first retained chat and releases its read view',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const retained = healthId('retained');
+test('workspace filter stops at the first retained chat and releases its read view', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const retained = healthId('retained');
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${retained}:one','{}');`,
-    });
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES ('bubbleId:${retained}:one','{}');`,
+  });
 
-    const headers = [
-      { composerId: retained },
-      ...Array.from({ length: 64 }, (_, i) => ({ composerId: `unused-${i}` })),
-    ];
+  const headers = [
+    { composerId: retained },
+    ...Array.from({ length: 64 }, (_, i) => ({ composerId: `unused-${i}` })),
+  ];
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
-    });
+  await execSqlScript({
+    ...ctx,
+    database: workspace.workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: headers }))};`,
+  });
 
-    const events: TransferEvent[] = [];
-    const rows: StatisticsUpdate[] = [];
+  const events: TransferEvent[] = [];
+  const rows: StatisticsUpdate[] = [];
 
-    await observeTransfer({ event: (e) => events.push(e) }, () =>
-      runStatistics(
-        {
-          ...ctx,
-          kind: 'workspace-statistics',
-          deepCheck: true,
-          workspaces: [workspace],
-        },
-        new AbortController().signal,
-        (row) => rows.push(row),
-      ),
-    );
+  await observeTransfer({ event: (e) => events.push(e) }, () =>
+    runStatistics(
+      {
+        ...ctx,
+        kind: 'workspace-statistics',
+        deepCheck: true,
+        workspaces: [workspace],
+      },
+      new AbortController().signal,
+      (row) => rows.push(row),
+    ),
+  );
 
-    assert.equal(rows[0].hide, false);
+  assert.equal(rows[0].hide, false);
 
-    assert.equal(
-      events.filter(
-        (e) =>
-          e.action === 'Check chat history presence' &&
-          e.status === 'completed',
-      ).length,
-      1,
-    );
+  assert.equal(
+    events.filter(
+      (e) =>
+        e.action === 'Check chat history presence' && e.status === 'completed',
+    ).length,
+    1,
+  );
 
-    assert.match(rows[0].detail, /65/);
+  assert.match(rows[0].detail, /65/);
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: 'BEGIN EXCLUSIVE; COMMIT;',
-    });
-  },
-);
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'BEGIN EXCLUSIVE; COMMIT;',
+  });
+});
 
-test(
-  'search catalogue shares global headers across physical workspaces and never reads message bodies',
-  { skip },
-  async (t) => {
-    const { ctx, workspace, headers, root } = await fixture(t);
+test('search catalogue shares global headers across physical workspaces and never reads message bodies', async (t) => {
+  const { ctx, workspace, headers, root } = await fixture(t);
 
-    const other = {
-      ...workspace,
-      storageId: 'other',
-      workspaceDbPath: path.join(root, 'other.vscdb'),
-    };
+  const other = {
+    ...workspace,
+    storageId: 'other',
+    workspaceDbPath: path.join(root, 'other.vscdb'),
+  };
 
-    await execSqlScript({
-      ...ctx,
-      database: other.workspaceDbPath,
-      sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: 'other-chat', name: 'Other workspace' }] }))});`,
-    });
+  await execSqlScript({
+    ...ctx,
+    database: other.workspaceDbPath,
+    sql: `CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); INSERT INTO ItemTable VALUES('composer.composerData',${sqlText(JSON.stringify({ allComposers: [{ composerId: 'other-chat', name: 'Other workspace' }] }))});`,
+  });
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: "INSERT INTO cursorDiskKV VALUES('bubbleId:unrelated:huge',zeroblob(33554433));",
-    });
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: "INSERT INTO cursorDiskKV VALUES('bubbleId:unrelated:huge',zeroblob(33554433));",
+  });
 
-    const events: TransferEvent[] = [];
-    const updates: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
-    const { runCatalogue } = await import('../src/workspace-catalogue');
+  const events: TransferEvent[] = [];
+  const updates: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
+  const { runCatalogue } = await import('../src/workspace-catalogue');
 
-    const missing = {
-      ...workspace,
-      storageId: 'missing',
-      workspaceDbPath: path.join(root, 'missing.vscdb'),
-    };
+  const missing = {
+    ...workspace,
+    storageId: 'missing',
+    workspaceDbPath: path.join(root, 'missing.vscdb'),
+  };
 
-    const result = await observeTransfer(
-      { event: (event) => events.push(event) },
-      () =>
-        runCatalogue(
-          {
-            ...ctx,
-            kind: 'workspace-catalogue',
-            workspaces: [workspace, other, missing],
-          },
-          new AbortController().signal,
-          (row) => updates.push(row),
-        ),
-    );
-
-    assert.equal(result.failed, 1);
-
-    assert.deepEqual(
-      updates[0].headers?.map((h) => h.composerId).sort(),
-      headers.map((h) => h.composerId).sort(),
-    );
-
-    assert.deepEqual(
-      updates[1].headers?.map((h) => h.composerId),
-      ['other-chat'],
-    );
-
-    assert.ok(updates[2].error);
-
-    assert.equal(
-      events.filter(
-        (e) =>
-          e.action === 'Read global chat headers' && e.status === 'started',
-      ).length,
-      1,
-    );
-
-    assert.equal(
-      events.some((e) => /bubble|resource|chat data/i.test(e.action)),
-      false,
-    );
-
-    await assert.rejects(fs.stat(missing.workspaceDbPath), { code: 'ENOENT' });
-    const ipc: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
-
-    await runTransfer(
-      { ...ctx, kind: 'workspace-catalogue', workspaces: [workspace] },
-      { onCatalogue: (row) => ipc.push(row) },
-    );
-
-    assert.equal(ipc.length, 1);
-    assert.equal(ipc[0].headers?.length, headers.length);
-  },
-);
-
-test(
-  'search catalogue cancellation stops before the next workspace and releases read connections',
-  { skip },
-  async (t) => {
-    const { ctx, workspace } = await fixture(t);
-    const { runCatalogue } = await import('../src/workspace-catalogue');
-    const abort = new AbortController();
-    let updates = 0;
-
-    await assert.rejects(
+  const result = await observeTransfer(
+    { event: (event) => events.push(event) },
+    () =>
       runCatalogue(
         {
           ...ctx,
           kind: 'workspace-catalogue',
-          workspaces: [workspace, workspace],
+          workspaces: [workspace, other, missing],
         },
-        abort.signal,
-        () => {
-          updates++;
-          abort.abort();
-        },
+        new AbortController().signal,
+        (row) => updates.push(row),
       ),
-      /abort/i,
-    );
+  );
 
-    assert.equal(updates, 1);
+  assert.equal(result.failed, 1);
 
-    await execSqlScript({
-      ...ctx,
-      database: workspace.globalDbPath,
-      sql: 'BEGIN EXCLUSIVE; COMMIT;',
-    });
-  },
-);
+  assert.deepEqual(
+    updates[0].headers?.map((h) => h.composerId).sort(),
+    headers.map((h) => h.composerId).sort(),
+  );
+
+  assert.deepEqual(
+    updates[1].headers?.map((h) => h.composerId),
+    ['other-chat'],
+  );
+
+  assert.ok(updates[2].error);
+
+  assert.equal(
+    events.filter(
+      (e) => e.action === 'Read global chat headers' && e.status === 'started',
+    ).length,
+    1,
+  );
+
+  assert.equal(
+    events.some((e) => /bubble|resource|chat data/i.test(e.action)),
+    false,
+  );
+
+  await assert.rejects(fs.stat(missing.workspaceDbPath), { code: 'ENOENT' });
+  const ipc: import('../src/workspace-catalogue').CatalogueUpdate[] = [];
+
+  await runTransfer(
+    { ...ctx, kind: 'workspace-catalogue', workspaces: [workspace] },
+    { onCatalogue: (row) => ipc.push(row) },
+  );
+
+  assert.equal(ipc.length, 1);
+  assert.equal(ipc[0].headers?.length, headers.length);
+});
+
+test('search catalogue cancellation stops before the next workspace and releases read connections', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const { runCatalogue } = await import('../src/workspace-catalogue');
+  const abort = new AbortController();
+  let updates = 0;
+
+  await assert.rejects(
+    runCatalogue(
+      {
+        ...ctx,
+        kind: 'workspace-catalogue',
+        workspaces: [workspace, workspace],
+      },
+      abort.signal,
+      () => {
+        updates++;
+        abort.abort();
+      },
+    ),
+    /abort/i,
+  );
+
+  assert.equal(updates, 1);
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'BEGIN EXCLUSIVE; COMMIT;',
+  });
+});

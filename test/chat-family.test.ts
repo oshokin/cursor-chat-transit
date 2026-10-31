@@ -17,7 +17,6 @@ import {
 import { headerUpsertSql } from '../src/db-write';
 import { remapValue } from '../src/import-bundle-publish';
 import { execSql, execSqlScript } from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 import type { ComposerHeader } from '../src/types';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -107,9 +106,6 @@ test('a cycle and a missing parent stay unresolved', () => {
 });
 
 test('Best-of-N does not set the subagent column', async () => {
-  const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
-
-  if (!executable) return;
   const dir = await mkdtemp(path.join(os.tmpdir(), 'cct-subagent-flag-'));
 
   try {

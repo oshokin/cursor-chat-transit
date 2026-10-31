@@ -9,14 +9,9 @@ import { MAX_SQLITE_VALUE_BYTES } from '../src/bundle-limits';
 import { deleteSelectedChats } from '../src/chat-deletion';
 import { deleteHeaderReferences, deleteMessageRows } from '../src/deletion-sql';
 import { execSql, execSqlScript } from '../src/sqlite';
-import { findSqliteExecutable } from './support/sqlite-cli';
 import { sqlText } from '../src/core';
 import type { Layout, WorkspaceEntry, TransferContext } from '../src/types';
 
-/** Real SQLite fixtures never point at user storage. */
-const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
-/** Integration tests require the same CLI used by production. */
-const skip = executable ? false : 'sqlite3 required';
 /** Fixture cleanup retry policy for transient Windows filesystem locks. */
 const cleanupDeadlineMs = 2_000;
 const cleanupInitialDelayMs = 50;
@@ -378,119 +373,106 @@ ${kvRows.length ? `INSERT INTO cursorDiskKV VALUES ${kvRows.join(',')};` : ''}`,
   return { ctx, entries, globalDbPath, read };
 }
 
-test(
-  'ordinary deletion worker removes exclusive history, preserves shared data, and is repeatable',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-    const targets = [{ workspace: entries[0], ids: [A, A, B] }];
+test('ordinary deletion worker removes exclusive history, preserves shared data, and is repeatable', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+  const targets = [{ workspace: entries[0], ids: [A, A, B] }];
 
-    const result = await runTransfer<
-      import('../src/deletion-types').DeleteResult
-    >(
-      {
-        kind: 'delete-chats',
-        workspaces: entries,
-        targets,
-      },
-      {},
-    );
+  const result = await runTransfer<
+    import('../src/deletion-types').DeleteResult
+  >(
+    {
+      kind: 'delete-chats',
+      workspaces: entries,
+      targets,
+    },
+    {},
+  );
 
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 1);
-    assert.equal(result.skipped.length, 1);
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+  assert.equal(result.skipped.length, 1);
 
-    const remaining = await read(
-      globalDbPath,
-      'SELECT key FROM cursorDiskKV ORDER BY key;',
-    );
+  const remaining = await read(
+    globalDbPath,
+    'SELECT key FROM cursorDiskKV ORDER BY key;',
+  );
 
-    assert.ok(!remaining.includes(A));
-    assert.ok(remaining.includes(B) && remaining.includes(C));
-    assert.match(remaining, /agentKv/);
+  assert.ok(!remaining.includes(A));
+  assert.ok(remaining.includes(B) && remaining.includes(C));
+  assert.match(remaining, /agentKv/);
 
-    const state = await read(
-      entries[0].workspaceDbPath,
-      'SELECT value FROM ItemTable;',
-    );
+  const state = await read(
+    entries[0].workspaceDbPath,
+    'SELECT value FROM ItemTable;',
+  );
 
-    assert.ok(!state.includes(A) && state.includes(B));
-    assert.match(state, /KEEP/);
-    const repeat = await deleteSelectedChats(ctx, entries, targets);
+  assert.ok(!state.includes(A) && state.includes(B));
+  assert.match(state, /KEEP/);
+  const repeat = await deleteSelectedChats(ctx, entries, targets);
 
-    assert.equal(repeat.deleted.length, 0);
-    assert.equal(repeat.skipped.length, 2);
-  },
-);
+  assert.equal(repeat.deleted.length, 0);
+  assert.equal(repeat.skipped.length, 2);
+});
 
-test(
-  'a symlinked parent still deletes a regular database file',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read, root } = await setup(t);
-    const alias = path.join(path.dirname(root), `${path.basename(root)}-link`);
+test('a symlinked parent still deletes a regular database file', async (t) => {
+  const { ctx, entries, globalDbPath, read, root } = await setup(t);
+  const alias = path.join(path.dirname(root), `${path.basename(root)}-link`);
 
-    await fs.symlink(root, alias);
-    t.after(() => fs.rm(alias, { force: true }));
+  await fs.symlink(root, alias);
+  t.after(() => fs.rm(alias, { force: true }));
 
-    const through = (file: string) =>
-      path.join(alias, path.relative(root, file));
+  const through = (file: string) => path.join(alias, path.relative(root, file));
 
-    const linked = entries.map((entry) => ({
-      ...entry,
-      globalDbPath: through(globalDbPath),
-      workspaceDbPath: through(entry.workspaceDbPath),
-    }));
+  const linked = entries.map((entry) => ({
+    ...entry,
+    globalDbPath: through(globalDbPath),
+    workspaceDbPath: through(entry.workspaceDbPath),
+  }));
 
-    const result = await deleteSelectedChats(ctx, linked, [
-      { workspace: linked[0], ids: [A] },
-    ]);
+  const result = await deleteSelectedChats(ctx, linked, [
+    { workspace: linked[0], ids: [A] },
+  ]);
 
-    assert.equal(result.error, undefined);
-    assert.deepEqual(result.deleted, [`${linked[0].workspaceDbPath}: ${A}`]);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.deleted, [`${linked[0].workspaceDbPath}: ${A}`]);
 
-    const remaining = await read(
-      globalDbPath,
-      'SELECT key FROM cursorDiskKV ORDER BY key;',
-    );
+  const remaining = await read(
+    globalDbPath,
+    'SELECT key FROM cursorDiskKV ORDER BY key;',
+  );
 
-    assert.ok(!remaining.includes(A));
-    assert.ok(remaining.includes(B));
-  },
-);
+  assert.ok(!remaining.includes(A));
+  assert.ok(remaining.includes(B));
+});
 
-test(
-  'cancellation after deleting rows rolls back both databases',
-  { skip },
-  async (t) => {
-    const { ctx, entries, dump } = await setup(t);
-    const before = await dump();
-    const abort = new AbortController();
-    const exec = SqliteSession.prototype.exec;
+test('cancellation after deleting rows rolls back both databases', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+  const before = await dump();
+  const abort = new AbortController();
+  const exec = SqliteSession.prototype.exec;
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
 
-    SqliteSession.prototype.exec = async function (sql) {
-      const result = await exec.call(this, sql);
+  SqliteSession.prototype.exec = async function (sql) {
+    const result = await exec.call(this, sql);
 
-      if (sql.startsWith('DELETE FROM main.cursorDiskKV')) abort.abort();
+    if (sql.startsWith('DELETE FROM main.cursorDiskKV')) abort.abort();
 
-      return result;
-    };
+    return result;
+  };
 
-    const result = await deleteSelectedChats(
-      { ...ctx, signal: abort.signal },
-      entries,
-      [{ workspace: entries[0], ids: [A] }],
-    );
+  const result = await deleteSelectedChats(
+    { ...ctx, signal: abort.signal },
+    entries,
+    [{ workspace: entries[0], ids: [A] }],
+  );
 
-    assert.equal(result.cancelled, true);
-    assert.equal(result.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-  },
-);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+});
 
 for (const scenario of [
   'broken metadata',
@@ -498,627 +480,523 @@ for (const scenario of [
   'foreign key',
   'unknown schema',
 ])
-  test(
-    `deletion refuses ${scenario} before committing`,
-    { skip },
-    async (t) => {
-      const { ctx, entries, globalDbPath, dump } = await setup(t);
-
-      if (scenario === 'broken metadata')
-        await execSqlScript({
-          ...ctx,
-          database: entries[1].workspaceDbPath,
-          sql: "UPDATE ItemTable SET value='{broken' WHERE key='composer.composerData';",
-        });
-      if (scenario === 'trigger')
-        await execSqlScript({
-          ...ctx,
-          database: globalDbPath,
-          sql: 'CREATE TRIGGER destructive AFTER DELETE ON cursorDiskKV BEGIN DELETE FROM ItemTable; END;',
-        });
-      if (scenario === 'foreign key')
-        await execSqlScript({
-          ...ctx,
-          database: globalDbPath,
-          sql: 'CREATE TABLE unrelated(parent TEXT REFERENCES cursorDiskKV(key) ON DELETE CASCADE);',
-        });
-      if (scenario === 'unknown schema')
-        await execSqlScript({
-          ...ctx,
-          database: entries[0].workspaceDbPath,
-          sql: 'CREATE TABLE composerHeaders(unknown TEXT);',
-        });
-      const before = await dump();
-
-      const result = await deleteSelectedChats(ctx, entries, [
-        { workspace: entries[0], ids: [A] },
-      ]);
-
-      assert.ok(result.error);
-      assert.equal(result.deleted.length, 0);
-      assert.deepEqual(await dump(), before);
-    },
-  );
-
-test(
-  'unresolved global ownership retains locally referenced history',
-  { skip },
-  async (t) => {
+  test(`deletion refuses ${scenario} before committing`, async (t) => {
     const { ctx, entries, globalDbPath, dump } = await setup(t);
 
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A, workspaceIdentifier: { id: 'missing-storage' } }] }))} WHERE key='composer.composerHeaders';`,
-    });
-
+    if (scenario === 'broken metadata')
+      await execSqlScript({
+        ...ctx,
+        database: entries[1].workspaceDbPath,
+        sql: "UPDATE ItemTable SET value='{broken' WHERE key='composer.composerData';",
+      });
+    if (scenario === 'trigger')
+      await execSqlScript({
+        ...ctx,
+        database: globalDbPath,
+        sql: 'CREATE TRIGGER destructive AFTER DELETE ON cursorDiskKV BEGIN DELETE FROM ItemTable; END;',
+      });
+    if (scenario === 'foreign key')
+      await execSqlScript({
+        ...ctx,
+        database: globalDbPath,
+        sql: 'CREATE TABLE unrelated(parent TEXT REFERENCES cursorDiskKV(key) ON DELETE CASCADE);',
+      });
+    if (scenario === 'unknown schema')
+      await execSqlScript({
+        ...ctx,
+        database: entries[0].workspaceDbPath,
+        sql: 'CREATE TABLE composerHeaders(unknown TEXT);',
+      });
     const before = await dump();
 
     const result = await deleteSelectedChats(ctx, entries, [
       { workspace: entries[0], ids: [A] },
     ]);
 
+    assert.ok(result.error);
     assert.equal(result.deleted.length, 0);
-    assert.equal(result.skipped.length, 1);
     assert.deepEqual(await dump(), before);
-  },
-);
+  });
 
-test(
-  'a changed selected index aborts before mutation and preserves the concurrent change',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-    const exec = SqliteSession.prototype.exec;
+test('unresolved global ownership retains locally referenced history', async (t) => {
+  const { ctx, entries, globalDbPath, dump } = await setup(t);
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A, workspaceIdentifier: { id: 'missing-storage' } }] }))} WHERE key='composer.composerHeaders';`,
+  });
 
-    let changed = false;
+  const before = await dump();
 
-    SqliteSession.prototype.exec = async function (sql) {
-      if (sql === 'BEGIN IMMEDIATE;' && !changed) {
-        changed = true;
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
 
-        await execSqlScript({
-          ...ctx,
-          database: globalDbPath,
-          sql: `UPDATE ItemTable SET value=json_set(value,'$.allComposers[0].name','Changed concurrently') WHERE key='composer.composerHeaders';`,
-        });
-      }
+  assert.equal(result.deleted.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.deepEqual(await dump(), before);
+});
 
-      return exec.call(this, sql);
-    };
+test('a changed selected index aborts before mutation and preserves the concurrent change', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+  const exec = SqliteSession.prototype.exec;
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
 
-    assert.match(result.error!, /indices changed/);
-    assert.equal(result.deleted.length, 0);
+  let changed = false;
 
-    assert.match(
-      await read(
-        globalDbPath,
-        "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
-      ),
-      /Changed concurrently/,
-    );
+  SqliteSession.prototype.exec = async function (sql) {
+    if (sql === 'BEGIN IMMEDIATE;' && !changed) {
+      changed = true;
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
-
-test(
-  'a busy writer respects the configured wait and leaves all records intact',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, dump } = await setup(t);
-    const before = await dump();
-    const writer = await SqliteSession.open({ ...ctx, database: globalDbPath });
-
-    try {
-      await writer.exec('BEGIN IMMEDIATE;');
-
-      const result = await deleteSelectedChats(
-        { ...ctx, busyTimeoutMs: 0 },
-        entries,
-        [{ workspace: entries[0], ids: [A] }],
-      );
-
-      assert.ok(result.error);
-      assert.equal(result.deleted.length, 0);
-    } finally {
-      await writer.close();
+      await execSqlScript({
+        ...ctx,
+        database: globalDbPath,
+        sql: `UPDATE ItemTable SET value=json_set(value,'$.allComposers[0].name','Changed concurrently') WHERE key='composer.composerHeaders';`,
+      });
     }
 
-    assert.deepEqual(await dump(), before);
-  },
-);
+    return exec.call(this, sql);
+  };
 
-test(
-  'cancellation between workspaces reports prior commits and leaves later chats intact',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-    const abort = new AbortController();
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error!, /indices changed/);
+  assert.equal(result.deleted.length, 0);
+
+  assert.match(
+    await read(
+      globalDbPath,
+      "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
+    ),
+    /Changed concurrently/,
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+test('a busy writer respects the configured wait and leaves all records intact', async (t) => {
+  const { ctx, entries, globalDbPath, dump } = await setup(t);
+  const before = await dump();
+  const writer = await SqliteSession.open({ ...ctx, database: globalDbPath });
+
+  try {
+    await writer.exec('BEGIN IMMEDIATE;');
 
     const result = await deleteSelectedChats(
-      { ...ctx, signal: abort.signal, onPhase: () => abort.abort() },
+      { ...ctx, busyTimeoutMs: 0 },
       entries,
-      [
-        { workspace: entries[0], ids: [A] },
-        { workspace: entries[1], ids: [C] },
-      ],
+      [{ workspace: entries[0], ids: [A] }],
     );
 
-    assert.equal(result.cancelled, true);
-    assert.equal(result.deleted.length, 1);
+    assert.ok(result.error);
+    assert.equal(result.deleted.length, 0);
+  } finally {
+    await writer.close();
+  }
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${C}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
+  assert.deepEqual(await dump(), before);
+});
 
-test(
-  'multi-workspace deletion rechecks each selection without invalidating later unrelated targets',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+test('cancellation between workspaces reports prior commits and leaves later chats intact', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+  const abort = new AbortController();
 
-    const result = await deleteSelectedChats(ctx, entries, [
+  const result = await deleteSelectedChats(
+    { ...ctx, signal: abort.signal, onPhase: () => abort.abort() },
+    entries,
+    [
       { workspace: entries[0], ids: [A] },
       { workspace: entries[1], ids: [C] },
-    ]);
+    ],
+  );
 
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 2);
+  assert.equal(result.cancelled, true);
+  assert.equal(result.deleted.length, 1);
 
-    assert.ok(
-      (await read(globalDbPath, 'SELECT key FROM cursorDiskKV;')).includes(B),
-    );
-  },
-);
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${C}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
 
-test(
-  'large selections use bounded SQL requests and preserve unrelated records',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+test('multi-workspace deletion rechecks each selection without invalidating later unrelated targets', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
 
-    const ids = Array.from(
-      { length: 130 },
-      (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`,
-    );
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+    { workspace: entries[1], ids: [C] },
+  ]);
 
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `BEGIN; ${ids.map((id) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${id}`)},'{}'),(${sqlText(`bubbleId:${id}:message`)},'{}');`).join('\n')} COMMIT;`,
-    });
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 2);
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [...ids, A, B].map((composerId) => ({ composerId })) }))} WHERE key='composer.composerData';`,
-    });
+  assert.ok(
+    (await read(globalDbPath, 'SELECT key FROM cursorDiskKV;')).includes(B),
+  );
+});
 
-    const exec = SqliteSession.prototype.exec;
-    let insertRequests = 0;
-    let deleteRequests = 0;
+test('large selections use bounded SQL requests and preserve unrelated records', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  const ids = Array.from(
+    { length: 130 },
+    (_, i) => `aaaaaaaa-aaaa-4aaa-8aaa-${String(i).padStart(12, '0')}`,
+  );
 
-    SqliteSession.prototype.exec = function (sql) {
-      if (sql.startsWith('INSERT INTO selected')) insertRequests++;
-      if (sql.startsWith('DELETE FROM main.cursorDiskKV')) deleteRequests++;
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `BEGIN; ${ids.map((id) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${id}`)},'{}'),(${sqlText(`bubbleId:${id}:message`)},'{}');`).join('\n')} COMMIT;`,
+  });
 
-      return exec.call(this, sql);
-    };
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [...ids, A, B].map((composerId) => ({ composerId })) }))} WHERE key='composer.composerData';`,
+  });
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids },
-    ]);
+  const exec = SqliteSession.prototype.exec;
+  let insertRequests = 0;
+  let deleteRequests = 0;
 
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 130);
-    assert.equal(insertRequests, 3);
-    assert.equal(deleteRequests, 3);
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          "SELECT count(*) FROM cursorDiskKV WHERE key LIKE 'composerData:aaaaaaaa%';",
-        )
-      ).trim(),
-      '0',
-    );
+  SqliteSession.prototype.exec = function (sql) {
+    if (sql.startsWith('INSERT INTO selected')) insertRequests++;
+    if (sql.startsWith('DELETE FROM main.cursorDiskKV')) deleteRequests++;
 
-    assert.ok(
-      (await read(globalDbPath, 'SELECT key FROM cursorDiskKV;')).includes(A),
-    );
-  },
-);
+    return exec.call(this, sql);
+  };
 
-test(
-  'lost COMMIT acknowledgement is reported as uncertain rather than as a clean rollback',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-    const exec = SqliteSession.prototype.exec;
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids },
+  ]);
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 130);
+  assert.equal(insertRequests, 3);
+  assert.equal(deleteRequests, 3);
 
-    SqliteSession.prototype.exec = async function (sql) {
-      const output = await exec.call(this, sql);
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        "SELECT count(*) FROM cursorDiskKV WHERE key LIKE 'composerData:aaaaaaaa%';",
+      )
+    ).trim(),
+    '0',
+  );
 
-      if (sql === 'COMMIT;') throw new Error('Commit acknowledgement lost');
+  assert.ok(
+    (await read(globalDbPath, 'SELECT key FROM cursorDiskKV;')).includes(A),
+  );
+});
 
-      return output;
-    };
+test('lost COMMIT acknowledgement is reported as uncertain rather than as a clean rollback', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+  const exec = SqliteSession.prototype.exec;
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
 
-    assert.equal(result.uncertain, true);
-    assert.equal(result.deleted.length, 0);
+  SqliteSession.prototype.exec = async function (sql) {
+    const output = await exec.call(this, sql);
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '0',
-    );
-  },
-);
+    if (sql === 'COMMIT;') throw new Error('Commit acknowledgement lost');
 
-test(
-  'migrated workspace lists without allComposers still delete indexed history',
-  { skip },
-  async (t) => {
-    const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), 'cct-delete-migrated-'),
-    );
+    return output;
+  };
 
-    t.after(() => removeTemp(root));
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
 
-    const ctx: TransferContext = {};
+  assert.equal(result.uncertain, true);
+  assert.equal(result.deleted.length, 0);
 
-    const globalDbPath = path.join(root, 'global.vscdb');
-    const directory = path.join(root, 'workspaceStorage', 'migrated');
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+});
 
-    await fs.mkdir(directory, { recursive: true });
-    const workspaceDbPath = path.join(directory, 'state.vscdb');
+test('migrated workspace lists without allComposers still delete indexed history', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-delete-migrated-'));
 
-    const entry: WorkspaceEntry = {
-      storageRoot: root,
-      storageId: 'migrated',
-      key: 'migrated',
-      mtime: 0,
-      globalDbPath,
-      workspaceDbPath,
-      identity: {
-        kind: 'folder',
-        uri: { scheme: 'file', authority: '', path: '/migrated' },
-      },
-    };
+  t.after(() => removeTemp(root));
 
-    const header = {
-      composerId: A,
-      name: 'Migrated',
-      workspaceIdentifier: { id: 'migrated' },
-    };
+  const ctx: TransferContext = {};
 
-    const workspaceList = {
-      hasMigratedComposerData: true,
-      hasMigratedMultipleComposers: true,
-      selectedComposerIds: [A, B],
-      lastFocusedComposerIds: [A],
-    };
+  const globalDbPath = path.join(root, 'global.vscdb');
+  const directory = path.join(root, 'workspaceStorage', 'migrated');
 
-    await execSqlScript({
-      ...ctx,
-      database: workspaceDbPath,
-      sql: `PRAGMA journal_mode=WAL;
+  await fs.mkdir(directory, { recursive: true });
+  const workspaceDbPath = path.join(directory, 'state.vscdb');
+
+  const entry: WorkspaceEntry = {
+    storageRoot: root,
+    storageId: 'migrated',
+    key: 'migrated',
+    mtime: 0,
+    globalDbPath,
+    workspaceDbPath,
+    identity: {
+      kind: 'folder',
+      uri: { scheme: 'file', authority: '', path: '/migrated' },
+    },
+  };
+
+  const header = {
+    composerId: A,
+    name: 'Migrated',
+    workspaceIdentifier: { id: 'migrated' },
+  };
+
+  const workspaceList = {
+    hasMigratedComposerData: true,
+    hasMigratedMultipleComposers: true,
+    selectedComposerIds: [A, B],
+    lastFocusedComposerIds: [A],
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: workspaceDbPath,
+    sql: `PRAGMA journal_mode=WAL;
 CREATE TABLE ItemTable(key TEXT PRIMARY KEY, value BLOB);
 CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, workspaceId TEXT, value BLOB);
 INSERT INTO ItemTable VALUES ('composer.composerData',${sqlText(JSON.stringify(workspaceList))}),('unrelated','KEEP');`,
-    });
+  });
 
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `PRAGMA journal_mode=WAL;
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `PRAGMA journal_mode=WAL;
 CREATE TABLE ItemTable(key TEXT PRIMARY KEY, value BLOB);
 CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY, value BLOB);
 CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, workspaceId TEXT, value BLOB);
 INSERT INTO composerHeaders(composerId, workspaceId, value) VALUES (${sqlText(A)}, 'migrated', ${sqlText(JSON.stringify(header))});
 INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${A}`)},'{}'),(${sqlText(`bubbleId:${A}:message`)},'{}'),(${sqlText(`composerData:${B}`)},'{}');`,
-    });
+  });
 
-    const result = await deleteSelectedChats(
-      ctx,
-      [entry],
-      [{ workspace: entry, ids: [A] }],
-    );
+  const result = await deleteSelectedChats(
+    ctx,
+    [entry],
+    [{ workspace: entry, ids: [A] }],
+  );
 
-    assert.equal(result.error, undefined);
-    assert.deepEqual(result.deleted, [`${workspaceDbPath}: ${A}`]);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.deleted, [`${workspaceDbPath}: ${A}`]);
 
-    const stored = JSON.parse(
-      (
-        await execSql({
-          ...ctx,
-          database: workspaceDbPath,
-          sql: "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-        })
-      ).trim(),
-    ) as {
-      hasMigratedComposerData?: boolean;
-      allComposers?: unknown;
-      selectedComposerIds?: string[];
-      lastFocusedComposerIds?: string[];
-    };
+  const stored = JSON.parse(
+    (
+      await execSql({
+        ...ctx,
+        database: workspaceDbPath,
+        sql: "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+      })
+    ).trim(),
+  ) as {
+    hasMigratedComposerData?: boolean;
+    allComposers?: unknown;
+    selectedComposerIds?: string[];
+    lastFocusedComposerIds?: string[];
+  };
 
-    assert.equal(stored.hasMigratedComposerData, true);
-    assert.equal(stored.allComposers, undefined);
-    assert.deepEqual(stored.selectedComposerIds, [B]);
-    assert.deepEqual(stored.lastFocusedComposerIds, []);
+  assert.equal(stored.hasMigratedComposerData, true);
+  assert.equal(stored.allComposers, undefined);
+  assert.deepEqual(stored.selectedComposerIds, [B]);
+  assert.deepEqual(stored.lastFocusedComposerIds, []);
 
-    assert.equal(
-      (
-        await execSql({
-          ...ctx,
-          database: globalDbPath,
-          sql: `SELECT count(*) FROM composerHeaders WHERE composerId=${sqlText(A)};`,
-        })
-      ).trim(),
-      '0',
-    );
+  assert.equal(
+    (
+      await execSql({
+        ...ctx,
+        database: globalDbPath,
+        sql: `SELECT count(*) FROM composerHeaders WHERE composerId=${sqlText(A)};`,
+      })
+    ).trim(),
+    '0',
+  );
 
-    assert.equal(
-      (
-        await execSql({
-          ...ctx,
-          database: globalDbPath,
-          sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        })
-      ).trim(),
-      '0',
-    );
+  assert.equal(
+    (
+      await execSql({
+        ...ctx,
+        database: globalDbPath,
+        sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      })
+    ).trim(),
+    '0',
+  );
 
-    assert.equal(
-      (
-        await execSql({
-          ...ctx,
-          database: globalDbPath,
-          sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${B}`)};`,
-        })
-      ).trim(),
-      '1',
-    );
+  assert.equal(
+    (
+      await execSql({
+        ...ctx,
+        database: globalDbPath,
+        sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${B}`)};`,
+      })
+    ).trim(),
+    '1',
+  );
 
-    const kept = await execSql({
-      ...ctx,
-      database: workspaceDbPath,
-      sql: "SELECT value FROM ItemTable WHERE key='unrelated';",
-    });
+  const kept = await execSql({
+    ...ctx,
+    database: workspaceDbPath,
+    sql: "SELECT value FROM ItemTable WHERE key='unrelated';",
+  });
 
-    assert.match(kept, /KEEP/);
-  },
-);
+  assert.match(kept, /KEEP/);
+});
 
 const headerKey = {
   main: 'composer.composerHeaders',
   workspace: 'composer.composerData',
 } as const;
 
-test(
-  'header writer rejects malformed lists and selected ids without rewriting them',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
+test('header writer rejects malformed lists and selected ids without rewriting them', async (t) => {
+  const { session } = await writerFixture(t);
 
-    const cases: Array<[string, RegExp]> = [
-      ['null', /Unsupported header list/],
-      ['[]', /Unsupported header list/],
-      ['"text"', /Unsupported header list/],
-      ['{"allComposers":null}', /Unsupported header list/],
-      ['{"allComposers":{"composerId":"x"}}', /Unsupported header list/],
-      ['{"allComposers":[null]}', /Unsupported header list/],
-      ['{"allComposers":["x"]}', /Unsupported header list/],
-      ['{"allComposers":[{"composerId":1}]}', /Unsupported header list/],
-      ['{"allComposers":[{"name":"missing id"}]}', /Unsupported header list/],
-      [
-        '{"allComposers":[],"selectedComposerIds":[1]}',
-        /Unsupported selected chat list/,
-      ],
-      [
-        '{"allComposers":[],"selectedComposerIds":"x"}',
-        /Unsupported selected chat list/,
-      ],
-      [
-        '{"allComposers":[],"lastFocusedComposerIds":[null]}',
-        /Unsupported selected chat list/,
-      ],
-      [
-        '{"allComposers":[],"lastFocusedComposerIds":{"id":"x"}}',
-        /Unsupported selected chat list/,
-      ],
-      ['{"selectedComposerIds":[1]}', /Unsupported selected chat list/],
-      ['{"lastFocusedComposerIds":null}', /Unsupported selected chat list/],
-    ];
+  const cases: Array<[string, RegExp]> = [
+    ['null', /Unsupported header list/],
+    ['[]', /Unsupported header list/],
+    ['"text"', /Unsupported header list/],
+    ['{"allComposers":null}', /Unsupported header list/],
+    ['{"allComposers":{"composerId":"x"}}', /Unsupported header list/],
+    ['{"allComposers":[null]}', /Unsupported header list/],
+    ['{"allComposers":["x"]}', /Unsupported header list/],
+    ['{"allComposers":[{"composerId":1}]}', /Unsupported header list/],
+    ['{"allComposers":[{"name":"missing id"}]}', /Unsupported header list/],
+    [
+      '{"allComposers":[],"selectedComposerIds":[1]}',
+      /Unsupported selected chat list/,
+    ],
+    [
+      '{"allComposers":[],"selectedComposerIds":"x"}',
+      /Unsupported selected chat list/,
+    ],
+    [
+      '{"allComposers":[],"lastFocusedComposerIds":[null]}',
+      /Unsupported selected chat list/,
+    ],
+    [
+      '{"allComposers":[],"lastFocusedComposerIds":{"id":"x"}}',
+      /Unsupported selected chat list/,
+    ],
+    ['{"selectedComposerIds":[1]}', /Unsupported selected chat list/],
+    ['{"lastFocusedComposerIds":null}', /Unsupported selected chat list/],
+  ];
 
-    for (const schema of ['main', 'workspace'] as const) {
-      const key = headerKey[schema];
-
-      await session.exec(
-        `INSERT INTO ${schema}.ItemTable(key, value) VALUES (${sqlText(key)}, '{}');`,
-      );
-
-      for (const [raw, message] of cases) {
-        await session.exec(
-          `UPDATE ${schema}.ItemTable SET value=${sqlText(raw)} WHERE key=${sqlText(key)};`,
-        );
-
-        await assert.rejects(
-          () =>
-            deleteHeaderReferences(
-              session,
-              schema,
-              writerLayout(false),
-              new Set([A]),
-            ),
-          message,
-          `${schema} ${raw}`,
-        );
-
-        assert.equal(
-          await storedText(session, schema, key),
-          raw,
-          `${schema} ${raw}`,
-        );
-      }
-    }
-  },
-);
-
-test(
-  'header writer keeps sibling fields and drops only selected ids',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
-
-    const listed = {
-      hasMigratedComposerData: true,
-      custom: { keep: true },
-      allComposers: [
-        { composerId: A, name: 'Gone', pinned: true },
-        { composerId: B, name: 'Stay', pinned: false },
-      ],
-      selectedComposerIds: [A, B],
-      lastFocusedComposerIds: [B, A],
-    };
-
-    const migrated = {
-      hasMigratedMultipleComposers: true,
-      selectedComposerIds: [A, B],
-      lastFocusedComposerIds: [A],
-    };
-
-    for (const schema of ['main', 'workspace'] as const) {
-      const key = headerKey[schema];
-
-      await session.exec(
-        `DELETE FROM selected;
-INSERT INTO ${schema}.ItemTable(key, value) VALUES (${sqlText(key)}, ${sqlText(JSON.stringify(listed))});
-INSERT INTO ${schema}.composerHeaders(composerId, value) VALUES (${sqlText(A)}, '{}'), (${sqlText(B)}, '{}'), ('abc', '{}'), ('abcd', '{}');
-INSERT INTO selected VALUES (${sqlText(A)}), ('abc');`,
-      );
-
-      await deleteHeaderReferences(
-        session,
-        schema,
-        writerLayout(true),
-        new Set([A, 'abc']),
-      );
-
-      assert.deepEqual(JSON.parse(await storedText(session, schema, key)), {
-        hasMigratedComposerData: true,
-        custom: { keep: true },
-        allComposers: [{ composerId: B, name: 'Stay', pinned: false }],
-        selectedComposerIds: [B],
-        lastFocusedComposerIds: [B],
-      });
-
-      assert.deepEqual(
-        (
-          await session.exec(
-            `SELECT composerId FROM ${schema}.composerHeaders ORDER BY composerId;`,
-          )
-        )
-          .trim()
-          .split(/\s+/)
-          .filter(Boolean),
-        [B, 'abcd'],
-      );
-
-      await session.exec(
-        `DELETE FROM selected;
-UPDATE ${schema}.ItemTable SET value=${sqlText(JSON.stringify(migrated))} WHERE key=${sqlText(key)};
-INSERT INTO selected VALUES (${sqlText(A)});`,
-      );
-
-      await deleteHeaderReferences(
-        session,
-        schema,
-        writerLayout(false),
-        new Set([A]),
-      );
-
-      assert.deepEqual(JSON.parse(await storedText(session, schema, key)), {
-        hasMigratedMultipleComposers: true,
-        selectedComposerIds: [B],
-        lastFocusedComposerIds: [],
-      });
-
-      assert.equal(
-        (
-          await session.exec(`SELECT count(*) FROM ${schema}.composerHeaders;`)
-        ).trim(),
-        '2',
-      );
-    }
-  },
-);
-
-test(
-  'a missing header item still deletes selected composerHeaders rows',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
+  for (const schema of ['main', 'workspace'] as const) {
+    const key = headerKey[schema];
 
     await session.exec(
-      `INSERT INTO composerHeaders(composerId, value) VALUES (${sqlText(A)}, '{}'), (${sqlText(B)}, '{}'), ('abc', '{}'), ('abcd', '{}');
+      `INSERT INTO ${schema}.ItemTable(key, value) VALUES (${sqlText(key)}, '{}');`,
+    );
+
+    for (const [raw, message] of cases) {
+      await session.exec(
+        `UPDATE ${schema}.ItemTable SET value=${sqlText(raw)} WHERE key=${sqlText(key)};`,
+      );
+
+      await assert.rejects(
+        () =>
+          deleteHeaderReferences(
+            session,
+            schema,
+            writerLayout(false),
+            new Set([A]),
+          ),
+        message,
+        `${schema} ${raw}`,
+      );
+
+      assert.equal(
+        await storedText(session, schema, key),
+        raw,
+        `${schema} ${raw}`,
+      );
+    }
+  }
+});
+
+test('header writer keeps sibling fields and drops only selected ids', async (t) => {
+  const { session } = await writerFixture(t);
+
+  const listed = {
+    hasMigratedComposerData: true,
+    custom: { keep: true },
+    allComposers: [
+      { composerId: A, name: 'Gone', pinned: true },
+      { composerId: B, name: 'Stay', pinned: false },
+    ],
+    selectedComposerIds: [A, B],
+    lastFocusedComposerIds: [B, A],
+  };
+
+  const migrated = {
+    hasMigratedMultipleComposers: true,
+    selectedComposerIds: [A, B],
+    lastFocusedComposerIds: [A],
+  };
+
+  for (const schema of ['main', 'workspace'] as const) {
+    const key = headerKey[schema];
+
+    await session.exec(
+      `DELETE FROM selected;
+INSERT INTO ${schema}.ItemTable(key, value) VALUES (${sqlText(key)}, ${sqlText(JSON.stringify(listed))});
+INSERT INTO ${schema}.composerHeaders(composerId, value) VALUES (${sqlText(A)}, '{}'), (${sqlText(B)}, '{}'), ('abc', '{}'), ('abcd', '{}');
 INSERT INTO selected VALUES (${sqlText(A)}), ('abc');`,
     );
 
     await deleteHeaderReferences(
       session,
-      'main',
+      schema,
       writerLayout(true),
       new Set([A, 'abc']),
     );
 
+    assert.deepEqual(JSON.parse(await storedText(session, schema, key)), {
+      hasMigratedComposerData: true,
+      custom: { keep: true },
+      allComposers: [{ composerId: B, name: 'Stay', pinned: false }],
+      selectedComposerIds: [B],
+      lastFocusedComposerIds: [B],
+    });
+
     assert.deepEqual(
       (
         await session.exec(
-          'SELECT composerId FROM composerHeaders ORDER BY composerId;',
+          `SELECT composerId FROM ${schema}.composerHeaders ORDER BY composerId;`,
         )
       )
         .trim()
@@ -1127,276 +1005,364 @@ INSERT INTO selected VALUES (${sqlText(A)}), ('abc');`,
       [B, 'abcd'],
     );
 
-    assert.equal(
-      (
-        await session.exec(
-          "SELECT count(*) FROM ItemTable WHERE key='composer.composerHeaders';",
-        )
-      ).trim(),
-      '0',
-    );
-  },
-);
-
-test(
-  'header metadata above the supported record limit is left untouched',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
-    const bytes = MAX_SQLITE_VALUE_BYTES + 1;
-
     await session.exec(
-      `INSERT INTO ItemTable(key, value) VALUES ('composer.composerHeaders', randomblob(${bytes}));
-INSERT INTO workspace.ItemTable(key, value) VALUES ('composer.composerData', randomblob(${bytes}));`,
-    );
-
-    for (const schema of ['main', 'workspace'] as const) {
-      await assert.rejects(
-        () =>
-          deleteHeaderReferences(
-            session,
-            schema,
-            writerLayout(true),
-            new Set([A]),
-          ),
-        /Header metadata exceeds the supported record limit/,
-      );
-    }
-
-    assert.equal(
-      (
-        await session.exec(
-          "SELECT length(value) FROM ItemTable WHERE key='composer.composerHeaders';",
-        )
-      ).trim(),
-      String(bytes),
-    );
-
-    assert.equal(
-      (
-        await session.exec(
-          "SELECT length(value) FROM workspace.ItemTable WHERE key='composer.composerData';",
-        )
-      ).trim(),
-      String(bytes),
-    );
-  },
-);
-
-test(
-  'multi-megabyte header metadata is updated without hex expansion',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
-    const padding = 'x'.repeat(3 * 1024 * 1024);
-
-    const value = {
-      padding,
-      allComposers: [
-        { composerId: A, name: 'Delete' },
-        { composerId: B, name: 'Keep' },
-      ],
-      selectedComposerIds: [A, B],
-    };
-
-    await session.exec(
-      `INSERT INTO ItemTable(key, value) VALUES ('composer.composerHeaders', ${sqlText(JSON.stringify(value))}); INSERT INTO selected VALUES (${sqlText(A)});`,
+      `DELETE FROM selected;
+UPDATE ${schema}.ItemTable SET value=${sqlText(JSON.stringify(migrated))} WHERE key=${sqlText(key)};
+INSERT INTO selected VALUES (${sqlText(A)});`,
     );
 
     await deleteHeaderReferences(
       session,
-      'main',
+      schema,
       writerLayout(false),
       new Set([A]),
     );
 
-    let raw: Buffer | undefined;
+    assert.deepEqual(JSON.parse(await storedText(session, schema, key)), {
+      hasMigratedMultipleComposers: true,
+      selectedComposerIds: [B],
+      lastFocusedComposerIds: [],
+    });
 
-    await session.rows(
-      "SELECT CAST(value AS BLOB) FROM ItemTable WHERE key='composer.composerHeaders';",
-      [],
-      (row) => {
-        if (Buffer.isBuffer(row[0])) raw = row[0];
-      },
+    assert.equal(
+      (
+        await session.exec(`SELECT count(*) FROM ${schema}.composerHeaders;`)
+      ).trim(),
+      '2',
     );
+  }
+});
 
-    const stored = JSON.parse(raw!.toString('utf8')) as typeof value;
+test('a missing header item still deletes selected composerHeaders rows', async (t) => {
+  const { session } = await writerFixture(t);
 
-    assert.equal(stored.padding.length, padding.length);
-    assert.deepEqual(stored.allComposers, [{ composerId: B, name: 'Keep' }]);
-    assert.deepEqual(stored.selectedComposerIds, [B]);
-  },
-);
+  await session.exec(
+    `INSERT INTO composerHeaders(composerId, value) VALUES (${sqlText(A)}, '{}'), (${sqlText(B)}, '{}'), ('abc', '{}'), ('abcd', '{}');
+INSERT INTO selected VALUES (${sqlText(A)}), ('abc');`,
+  );
 
-test(
-  'message deletion removes only the exact composer row and its bubble range',
-  { skip },
-  async (t) => {
-    const { session } = await writerFixture(t);
+  await deleteHeaderReferences(
+    session,
+    'main',
+    writerLayout(true),
+    new Set([A, 'abc']),
+  );
 
-    const gone = [
-      `composerData:${A}`,
-      `bubbleId:${A}:`,
-      `bubbleId:${A}:message`,
-      `composerRootWriterDiagnostic:${A}`,
-    ];
-
-    const kept = [
-      `bubbleId:${A}`,
-      `bubbleId:${A};next`,
-      `composerData:${A}:tail`,
-      `agentKv:${A}:blob`,
-      `composerData:${B}`,
-      `bubbleId:${B}:message`,
-      `composerRootWriterDiagnostic:${A}:tail`,
-      `composerRootWriterDiagnostic:${B}`,
-    ];
-
-    await session.exec(
-      [...gone, ...kept]
-        .map(
-          (key) => `INSERT INTO cursorDiskKV VALUES (${sqlText(key)}, '{}');`,
-        )
-        .join('\n'),
-    );
-
-    await deleteMessageRows(session, [A]);
-
-    const left = (
-      await session.exec('SELECT key FROM cursorDiskKV ORDER BY key;')
+  assert.deepEqual(
+    (
+      await session.exec(
+        'SELECT composerId FROM composerHeaders ORDER BY composerId;',
+      )
     )
       .trim()
       .split(/\s+/)
-      .filter(Boolean);
+      .filter(Boolean),
+    [B, 'abcd'],
+  );
 
-    assert.deepEqual(left, [...kept].sort());
+  assert.equal(
+    (
+      await session.exec(
+        "SELECT count(*) FROM ItemTable WHERE key='composer.composerHeaders';",
+      )
+    ).trim(),
+    '0',
+  );
+});
 
-    const abort = new AbortController();
+test('header metadata above the supported record limit is left untouched', async (t) => {
+  const { session } = await writerFixture(t);
+  const bytes = MAX_SQLITE_VALUE_BYTES + 1;
 
-    abort.abort();
+  await session.exec(
+    `INSERT INTO ItemTable(key, value) VALUES ('composer.composerHeaders', randomblob(${bytes}));
+INSERT INTO workspace.ItemTable(key, value) VALUES ('composer.composerData', randomblob(${bytes}));`,
+  );
 
-    await session.exec(
-      `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${C}`)}, '{}');`,
+  for (const schema of ['main', 'workspace'] as const) {
+    await assert.rejects(
+      () =>
+        deleteHeaderReferences(
+          session,
+          schema,
+          writerLayout(true),
+          new Set([A]),
+        ),
+      /Header metadata exceeds the supported record limit/,
     );
+  }
 
-    await assert.rejects(() => deleteMessageRows(session, [C], abort.signal), {
-      name: 'AbortError',
-    });
+  assert.equal(
+    (
+      await session.exec(
+        "SELECT length(value) FROM ItemTable WHERE key='composer.composerHeaders';",
+      )
+    ).trim(),
+    String(bytes),
+  );
 
-    assert.match(
-      await session.exec('SELECT key FROM cursorDiskKV;'),
-      new RegExp(`composerData:${C}`),
-    );
-  },
-);
+  assert.equal(
+    (
+      await session.exec(
+        "SELECT length(value) FROM workspace.ItemTable WHERE key='composer.composerData';",
+      )
+    ).trim(),
+    String(bytes),
+  );
+});
 
-test(
-  'message verification failure rolls the delete back',
-  { skip },
-  async (t) => {
-    const { ctx, entries, dump } = await setup(t);
-    const before = await dump();
-    const exec = SqliteSession.prototype.exec;
+test('multi-megabyte header metadata is updated without hex expansion', async (t) => {
+  const { session } = await writerFixture(t);
+  const padding = 'x'.repeat(3 * 1024 * 1024);
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  const value = {
+    padding,
+    allComposers: [
+      { composerId: A, name: 'Delete' },
+      { composerId: B, name: 'Keep' },
+    ],
+    selectedComposerIds: [A, B],
+  };
 
-    SqliteSession.prototype.exec = async function (sql) {
-      if (sql.includes('SELECT EXISTS')) return '1';
+  await session.exec(
+    `INSERT INTO ItemTable(key, value) VALUES ('composer.composerHeaders', ${sqlText(JSON.stringify(value))}); INSERT INTO selected VALUES (${sqlText(A)});`,
+  );
 
-      return exec.call(this, sql);
-    };
+  await deleteHeaderReferences(
+    session,
+    'main',
+    writerLayout(false),
+    new Set([A]),
+  );
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
+  let raw: Buffer | undefined;
 
-    assert.match(result.error || '', /Deletion verification failed/);
-    assert.equal(result.deleted.length, 0);
-    assert.equal(result.uncertain, undefined);
-    assert.deepEqual(await dump(), before);
-  },
-);
+  await session.rows(
+    "SELECT CAST(value AS BLOB) FROM ItemTable WHERE key='composer.composerHeaders';",
+    [],
+    (row) => {
+      if (Buffer.isBuffer(row[0])) raw = row[0];
+    },
+  );
 
-test(
-  'cancelling a later message batch rolls back the earlier batch and its headers',
-  { skip },
-  async (t) => {
-    const { ctx, entries, dump } = await setup(t);
+  const stored = JSON.parse(raw!.toString('utf8')) as typeof value;
 
-    const ids = Array.from(
-      { length: 65 },
-      (_, index) =>
-        `bbbbbbbb-bbbb-4bbb-8bbb-${String(index).padStart(12, '0')}`,
-    );
+  assert.equal(stored.padding.length, padding.length);
+  assert.deepEqual(stored.allComposers, [{ composerId: B, name: 'Keep' }]);
+  assert.deepEqual(stored.selectedComposerIds, [B]);
+});
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].globalDbPath,
-      sql: `BEGIN; ${ids.map((id) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${id}`)},'{}'),(${sqlText(`bubbleId:${id}:message`)},'{}');`).join('\n')} COMMIT;`,
-    });
+test('message deletion removes only the exact composer row and its bubble range', async (t) => {
+  const { session } = await writerFixture(t);
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [...ids, A, B].map((composerId) => ({ composerId })), selectedComposerIds: [A, B], lastFocusedComposerIds: [A] }))} WHERE key='composer.composerData';`,
-    });
+  const gone = [
+    `composerData:${A}`,
+    `bubbleId:${A}:`,
+    `bubbleId:${A}:message`,
+    `composerRootWriterDiagnostic:${A}`,
+  ];
 
-    const before = await dump();
-    const abort = new AbortController();
-    const exec = SqliteSession.prototype.exec;
+  const kept = [
+    `bubbleId:${A}`,
+    `bubbleId:${A};next`,
+    `composerData:${A}:tail`,
+    `agentKv:${A}:blob`,
+    `composerData:${B}`,
+    `bubbleId:${B}:message`,
+    `composerRootWriterDiagnostic:${A}:tail`,
+    `composerRootWriterDiagnostic:${B}`,
+  ];
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+  await session.exec(
+    [...gone, ...kept]
+      .map((key) => `INSERT INTO cursorDiskKV VALUES (${sqlText(key)}, '{}');`)
+      .join('\n'),
+  );
 
-    SqliteSession.prototype.exec = async function (sql) {
-      const output = await exec.call(this, sql);
+  await deleteMessageRows(session, [A]);
 
-      if (sql.startsWith('DELETE FROM main.cursorDiskKV')) abort.abort();
+  const left = (
+    await session.exec('SELECT key FROM cursorDiskKV ORDER BY key;')
+  )
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 
-      return output;
-    };
+  assert.deepEqual(left, [...kept].sort());
 
-    const result = await deleteSelectedChats(
-      { ...ctx, signal: abort.signal },
-      entries,
-      [{ workspace: entries[0], ids }],
-    );
+  const abort = new AbortController();
 
-    assert.equal(result.cancelled, true);
-    assert.equal(result.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-  },
-);
+  abort.abort();
 
-test(
-  'exclusive deletion keeps sibling header fields in both legacy lists',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+  await session.exec(
+    `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${C}`)}, '{}');`,
+  );
 
-    const workspaceList = {
+  await assert.rejects(() => deleteMessageRows(session, [C], abort.signal), {
+    name: 'AbortError',
+  });
+
+  assert.match(
+    await session.exec('SELECT key FROM cursorDiskKV;'),
+    new RegExp(`composerData:${C}`),
+  );
+});
+
+test('message verification failure rolls the delete back', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+  const before = await dump();
+  const exec = SqliteSession.prototype.exec;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    if (sql.includes('SELECT EXISTS')) return '1';
+
+    return exec.call(this, sql);
+  };
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /Deletion verification failed/);
+  assert.equal(result.deleted.length, 0);
+  assert.equal(result.uncertain, undefined);
+  assert.deepEqual(await dump(), before);
+});
+
+test('cancelling a later message batch rolls back the earlier batch and its headers', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+
+  const ids = Array.from(
+    { length: 65 },
+    (_, index) => `bbbbbbbb-bbbb-4bbb-8bbb-${String(index).padStart(12, '0')}`,
+  );
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].globalDbPath,
+    sql: `BEGIN; ${ids.map((id) => `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${id}`)},'{}'),(${sqlText(`bubbleId:${id}:message`)},'{}');`).join('\n')} COMMIT;`,
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [...ids, A, B].map((composerId) => ({ composerId })), selectedComposerIds: [A, B], lastFocusedComposerIds: [A] }))} WHERE key='composer.composerData';`,
+  });
+
+  const before = await dump();
+  const abort = new AbortController();
+  const exec = SqliteSession.prototype.exec;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    const output = await exec.call(this, sql);
+
+    if (sql.startsWith('DELETE FROM main.cursorDiskKV')) abort.abort();
+
+    return output;
+  };
+
+  const result = await deleteSelectedChats(
+    { ...ctx, signal: abort.signal },
+    entries,
+    [{ workspace: entries[0], ids }],
+  );
+
+  assert.equal(result.cancelled, true);
+  assert.equal(result.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+});
+
+test('exclusive deletion keeps sibling header fields in both legacy lists', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  const workspaceList = {
+    hasMigratedComposerData: false,
+    custom: { keep: true },
+    allComposers: [
+      { composerId: A, name: 'Gone', pinned: true },
+      { composerId: B, name: 'Stay', pinned: false },
+    ],
+    selectedComposerIds: [A, B],
+    lastFocusedComposerIds: [A, B],
+  };
+
+  const globalList = {
+    custom: { keep: true },
+    allComposers: [
+      {
+        composerId: A,
+        name: 'Gone',
+        pinned: true,
+        workspaceIdentifier: { id: 'one' },
+      },
+      {
+        composerId: C,
+        name: 'Other',
+        pinned: false,
+        workspaceIdentifier: { id: 'two' },
+      },
+    ],
+    selectedComposerIds: [A, C],
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify(workspaceList))} WHERE key='composer.composerData';`,
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify(globalList))} WHERE key='composer.composerHeaders';
+INSERT INTO cursorDiskKV VALUES (${sqlText(`bubbleId:${A}`)}, 'KEEP'), (${sqlText(`bubbleId:${A};next`)}, 'KEEP'), (${sqlText(`composerData:${A}:tail`)}, 'KEEP'), (${sqlText(`agentKv:${A}:blob`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${A}`)}, 'DROP'), (${sqlText(`composerRootWriterDiagnostic:${A}:tail`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${B}`)}, 'KEEP');`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
+
+  assert.deepEqual(
+    JSON.parse(
+      (
+        await read(
+          entries[0].workspaceDbPath,
+          "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+        )
+      ).trim(),
+    ),
+    {
       hasMigratedComposerData: false,
       custom: { keep: true },
-      allComposers: [
-        { composerId: A, name: 'Gone', pinned: true },
-        { composerId: B, name: 'Stay', pinned: false },
-      ],
-      selectedComposerIds: [A, B],
-      lastFocusedComposerIds: [A, B],
-    };
+      allComposers: [{ composerId: B, name: 'Stay', pinned: false }],
+      selectedComposerIds: [B],
+      lastFocusedComposerIds: [B],
+    },
+  );
 
-    const globalList = {
+  assert.deepEqual(
+    JSON.parse(
+      (
+        await read(
+          globalDbPath,
+          "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
+        )
+      ).trim(),
+    ),
+    {
       custom: { keep: true },
       allComposers: [
-        {
-          composerId: A,
-          name: 'Gone',
-          pinned: true,
-          workspaceIdentifier: { id: 'one' },
-        },
         {
           composerId: C,
           name: 'Other',
@@ -1404,466 +1370,379 @@ test(
           workspaceIdentifier: { id: 'two' },
         },
       ],
-      selectedComposerIds: [A, C],
-    };
+      selectedComposerIds: [C],
+    },
+  );
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify(workspaceList))} WHERE key='composer.composerData';`,
-    });
+  const keys = new Set(
+    (await read(globalDbPath, 'SELECT key FROM cursorDiskKV ORDER BY key;'))
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean),
+  );
 
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify(globalList))} WHERE key='composer.composerHeaders';
-INSERT INTO cursorDiskKV VALUES (${sqlText(`bubbleId:${A}`)}, 'KEEP'), (${sqlText(`bubbleId:${A};next`)}, 'KEEP'), (${sqlText(`composerData:${A}:tail`)}, 'KEEP'), (${sqlText(`agentKv:${A}:blob`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${A}`)}, 'DROP'), (${sqlText(`composerRootWriterDiagnostic:${A}:tail`)}, 'KEEP'), (${sqlText(`composerRootWriterDiagnostic:${B}`)}, 'KEEP');`,
-    });
+  assert.equal(keys.has(`composerData:${A}`), false);
+  assert.equal(keys.has(`bubbleId:${A}:message`), false);
+  assert.equal(keys.has(`bubbleId:${A}`), true);
+  assert.equal(keys.has(`bubbleId:${A};next`), true);
+  assert.equal(keys.has(`composerData:${A}:tail`), true);
+  assert.equal(keys.has(`agentKv:${A}:blob`), true);
+  assert.equal(keys.has(`composerRootWriterDiagnostic:${A}`), false);
+  assert.equal(keys.has(`composerRootWriterDiagnostic:${A}:tail`), true);
+  assert.equal(keys.has(`composerRootWriterDiagnostic:${B}`), true);
+  assert.equal(keys.has(`composerData:${B}`), true);
+});
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(result.error, undefined);
-    assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
-
-    assert.deepEqual(
-      JSON.parse(
-        (
-          await read(
-            entries[0].workspaceDbPath,
-            "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-          )
-        ).trim(),
-      ),
-      {
-        hasMigratedComposerData: false,
-        custom: { keep: true },
-        allComposers: [{ composerId: B, name: 'Stay', pinned: false }],
-        selectedComposerIds: [B],
-        lastFocusedComposerIds: [B],
-      },
-    );
-
-    assert.deepEqual(
-      JSON.parse(
-        (
-          await read(
-            globalDbPath,
-            "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
-          )
-        ).trim(),
-      ),
-      {
-        custom: { keep: true },
-        allComposers: [
-          {
-            composerId: C,
-            name: 'Other',
-            pinned: false,
-            workspaceIdentifier: { id: 'two' },
-          },
-        ],
-        selectedComposerIds: [C],
-      },
-    );
-
-    const keys = new Set(
-      (await read(globalDbPath, 'SELECT key FROM cursorDiskKV ORDER BY key;'))
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean),
-    );
-
-    assert.equal(keys.has(`composerData:${A}`), false);
-    assert.equal(keys.has(`bubbleId:${A}:message`), false);
-    assert.equal(keys.has(`bubbleId:${A}`), true);
-    assert.equal(keys.has(`bubbleId:${A};next`), true);
-    assert.equal(keys.has(`composerData:${A}:tail`), true);
-    assert.equal(keys.has(`agentKv:${A}:blob`), true);
-    assert.equal(keys.has(`composerRootWriterDiagnostic:${A}`), false);
-    assert.equal(keys.has(`composerRootWriterDiagnostic:${A}:tail`), true);
-    assert.equal(keys.has(`composerRootWriterDiagnostic:${B}`), true);
-    assert.equal(keys.has(`composerData:${B}`), true);
-  },
-);
-
-test(
-  'a migrated chat stays exclusive when another window shares the global table',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
-      extraStorageIds: ['other'],
-      localHeaderIds: [A, E],
-      globalHeaders: [
-        { composerId: A, storageId: 'migrated' },
-        { composerId: E, storageId: 'migrated' },
-        { composerId: D, storageId: 'other' },
+test('a migrated chat stays exclusive when another window shares the global table', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    extraStorageIds: ['other'],
+    localHeaderIds: [A, E],
+    globalHeaders: [
+      { composerId: A, storageId: 'migrated' },
+      { composerId: E, storageId: 'migrated' },
+      { composerId: D, storageId: 'other' },
+    ],
+    globalBlob: {
+      custom: { keep: true },
+      allComposers: [
+        {
+          composerId: A,
+          name: 'Gone',
+          pinned: true,
+          workspaceIdentifier: { id: 'migrated' },
+        },
+        {
+          composerId: E,
+          name: 'Also',
+          pinned: true,
+          workspaceIdentifier: { id: 'migrated' },
+        },
+        {
+          composerId: D,
+          name: 'Other',
+          pinned: false,
+          workspaceIdentifier: { id: 'other' },
+        },
       ],
-      globalBlob: {
-        custom: { keep: true },
-        allComposers: [
-          {
-            composerId: A,
-            name: 'Gone',
-            pinned: true,
-            workspaceIdentifier: { id: 'migrated' },
-          },
-          {
-            composerId: E,
-            name: 'Also',
-            pinned: true,
-            workspaceIdentifier: { id: 'migrated' },
-          },
-          {
-            composerId: D,
-            name: 'Other',
-            pinned: false,
-            workspaceIdentifier: { id: 'other' },
-          },
-        ],
-        selectedComposerIds: [A, E, D],
-      },
-      keys: [
-        `composerData:${A}`,
-        `bubbleId:${A}:message`,
-        `bubbleId:${A}`,
-        `composerData:${E}`,
-        `composerData:${D}`,
-        `composerData:${B}`,
-        `agentKv:${A}:blob`,
-      ],
-    });
+      selectedComposerIds: [A, E, D],
+    },
+    keys: [
+      `composerData:${A}`,
+      `bubbleId:${A}:message`,
+      `bubbleId:${A}`,
+      `composerData:${E}`,
+      `composerData:${D}`,
+      `composerData:${B}`,
+      `agentKv:${A}:blob`,
+    ],
+  });
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A, E] },
-    ]);
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A, E] },
+  ]);
 
-    assert.equal(result.error, undefined);
+  assert.equal(result.error, undefined);
 
-    assert.deepEqual(
-      result.deleted,
-      [A, E].map((id) => `${entries[0].workspaceDbPath}: ${id}`),
-    );
+  assert.deepEqual(
+    result.deleted,
+    [A, E].map((id) => `${entries[0].workspaceDbPath}: ${id}`),
+  );
 
-    const workspaceList = JSON.parse(
-      (
-        await read(
-          entries[0].workspaceDbPath,
-          "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-        )
-      ).trim(),
-    ) as {
-      hasMigratedComposerData?: boolean;
-      allComposers?: unknown;
-      selectedComposerIds?: string[];
-      lastFocusedComposerIds?: string[];
-      custom?: unknown;
-    };
-
-    assert.equal(workspaceList.hasMigratedComposerData, true);
-    assert.equal(workspaceList.allComposers, undefined);
-    assert.deepEqual(workspaceList.selectedComposerIds, [B]);
-    assert.deepEqual(workspaceList.lastFocusedComposerIds, []);
-
-    assert.deepEqual(
-      JSON.parse(
-        (
-          await read(
-            globalDbPath,
-            "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
-          )
-        ).trim(),
-      ),
-      {
-        custom: { keep: true },
-        allComposers: [
-          {
-            composerId: D,
-            name: 'Other',
-            pinned: false,
-            workspaceIdentifier: { id: 'other' },
-          },
-        ],
-        selectedComposerIds: [D],
-      },
-    );
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT group_concat(composerId, ',') FROM composerHeaders ORDER BY composerId;`,
-        )
-      ).trim(),
-      D,
-    );
-
-    assert.equal(
-      (
-        await read(
-          entries[0].workspaceDbPath,
-          'SELECT count(*) FROM composerHeaders;',
-        )
-      ).trim(),
-      '0',
-    );
-
-    const keys = new Set(
-      (await read(globalDbPath, 'SELECT key FROM cursorDiskKV ORDER BY key;'))
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean),
-    );
-
-    assert.equal(keys.has(`composerData:${A}`), false);
-    assert.equal(keys.has(`composerData:${E}`), false);
-    assert.equal(keys.has(`bubbleId:${A}:message`), false);
-    assert.equal(keys.has(`bubbleId:${A}`), true);
-    assert.equal(keys.has(`composerData:${B}`), true);
-    assert.equal(keys.has(`composerData:${D}`), true);
-    assert.equal(keys.has(`agentKv:${A}:blob`), true);
-
-    assert.match(
+  const workspaceList = JSON.parse(
+    (
       await read(
-        entries[1].workspaceDbPath,
-        "SELECT value FROM ItemTable WHERE key='unrelated';",
-      ),
-      /KEEP/,
-    );
-  },
-);
+        entries[0].workspaceDbPath,
+        "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+      )
+    ).trim(),
+  ) as {
+    hasMigratedComposerData?: boolean;
+    allComposers?: unknown;
+    selectedComposerIds?: string[];
+    lastFocusedComposerIds?: string[];
+    custom?: unknown;
+  };
 
-test(
-  'a chat indexed only by the global table is deleted when the workspace list key is absent',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
-      includeComposerData: false,
-      localHeaderTable: false,
-      globalHeaders: [
-        { composerId: A, storageId: 'migrated' },
-        { composerId: D, storageId: 'migrated' },
-      ],
-      keys: [`composerData:${A}`, `bubbleId:${A}:message`, `composerData:${D}`],
-    });
+  assert.equal(workspaceList.hasMigratedComposerData, true);
+  assert.equal(workspaceList.allComposers, undefined);
+  assert.deepEqual(workspaceList.selectedComposerIds, [B]);
+  assert.deepEqual(workspaceList.lastFocusedComposerIds, []);
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(result.error, undefined);
-    assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT group_concat(composerId, ',') FROM composerHeaders ORDER BY composerId;`,
-        )
-      ).trim(),
-      D,
-    );
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '0',
-    );
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${D}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-
-    assert.equal(
-      (
-        await read(
-          entries[0].workspaceDbPath,
-          "SELECT count(*) FROM ItemTable WHERE key='composer.composerData';",
-        )
-      ).trim(),
-      '0',
-    );
-  },
-);
-
-test(
-  'a nullable unknown composerHeaders column still allows deletion',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
-      headerExtraColumn: 'subagentTypeName TEXT',
-      globalHeaders: [{ composerId: A, storageId: 'migrated' }],
-      keys: [`composerData:${A}`],
-    });
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 1);
-
-    assert.equal(
-      (
-        await read(globalDbPath, 'SELECT count(*) FROM composerHeaders;')
-      ).trim(),
-      '0',
-    );
-  },
-);
-
-test(
-  'a global header bound to an unknown window is retained',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read, dump } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, workspaceId TEXT, value BLOB);
-INSERT INTO composerHeaders(composerId, workspaceId, value) VALUES (${sqlText(D)}, 'missing-storage', ${sqlText(JSON.stringify({ composerId: D, workspaceIdentifier: { id: 'missing-storage' } }))});
-INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)}, '{}');`,
-    });
-
-    const before = await dump();
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [D] },
-    ]);
-
-    assert.equal(result.deleted.length, 0);
-    assert.match(result.skipped[0] || '', /shared, absent, or unverified/);
-    assert.deepEqual(await dump(), before);
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM composerHeaders WHERE composerId=${sqlText(D)};`,
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
-
-test(
-  'a header with no workspace binding is deleted when the local list owns it',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(
-        JSON.stringify({
-          allComposers: [
-            { composerId: A, name: 'Unbound' },
-            {
-              composerId: C,
-              name: 'Other',
-              workspaceIdentifier: { id: 'two' },
-            },
-          ],
-        }),
-      )} WHERE key='composer.composerHeaders';`,
-    });
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 1);
-
-    const globalList = JSON.parse(
+  assert.deepEqual(
+    JSON.parse(
       (
         await read(
           globalDbPath,
           "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
         )
       ).trim(),
-    ) as { allComposers: Array<{ composerId: string }> };
+    ),
+    {
+      custom: { keep: true },
+      allComposers: [
+        {
+          composerId: D,
+          name: 'Other',
+          pinned: false,
+          workspaceIdentifier: { id: 'other' },
+        },
+      ],
+      selectedComposerIds: [D],
+    },
+  );
 
-    assert.deepEqual(
-      globalList.allComposers.map((row) => row.composerId),
-      [C],
-    );
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT group_concat(composerId, ',') FROM composerHeaders ORDER BY composerId;`,
+      )
+    ).trim(),
+    D,
+  );
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '0',
-    );
-  },
-);
+  assert.equal(
+    (
+      await read(
+        entries[0].workspaceDbPath,
+        'SELECT count(*) FROM composerHeaders;',
+      )
+    ).trim(),
+    '0',
+  );
 
-test(
-  'an empty local composer list still deletes a chat indexed globally',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+  const keys = new Set(
+    (await read(globalDbPath, 'SELECT key FROM cursorDiskKV ORDER BY key;'))
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean),
+  );
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [], selectedComposerIds: [A, B], lastFocusedComposerIds: [A, B], hasMigratedComposerData: true }))} WHERE key='composer.composerData';`,
-    });
+  assert.equal(keys.has(`composerData:${A}`), false);
+  assert.equal(keys.has(`composerData:${E}`), false);
+  assert.equal(keys.has(`bubbleId:${A}:message`), false);
+  assert.equal(keys.has(`bubbleId:${A}`), true);
+  assert.equal(keys.has(`composerData:${B}`), true);
+  assert.equal(keys.has(`composerData:${D}`), true);
+  assert.equal(keys.has(`agentKv:${A}:blob`), true);
 
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
+  assert.match(
+    await read(
+      entries[1].workspaceDbPath,
+      "SELECT value FROM ItemTable WHERE key='unrelated';",
+    ),
+    /KEEP/,
+  );
+});
 
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 1);
+test('a chat indexed only by the global table is deleted when the workspace list key is absent', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    includeComposerData: false,
+    localHeaderTable: false,
+    globalHeaders: [
+      { composerId: A, storageId: 'migrated' },
+      { composerId: D, storageId: 'migrated' },
+    ],
+    keys: [`composerData:${A}`, `bubbleId:${A}:message`, `composerData:${D}`],
+  });
 
-    const stored = JSON.parse(
-      (
-        await read(
-          entries[0].workspaceDbPath,
-          "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-        )
-      ).trim(),
-    ) as {
-      allComposers: unknown[];
-      selectedComposerIds: string[];
-      lastFocusedComposerIds: string[];
-      hasMigratedComposerData: boolean;
-    };
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
 
-    assert.deepEqual(stored.allComposers, []);
-    assert.deepEqual(stored.selectedComposerIds, [B]);
-    assert.deepEqual(stored.lastFocusedComposerIds, [B]);
-    assert.equal(stored.hasMigratedComposerData, true);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '0',
-    );
-  },
-);
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT group_concat(composerId, ',') FROM composerHeaders ORDER BY composerId;`,
+      )
+    ).trim(),
+    D,
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${D}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+
+  assert.equal(
+    (
+      await read(
+        entries[0].workspaceDbPath,
+        "SELECT count(*) FROM ItemTable WHERE key='composer.composerData';",
+      )
+    ).trim(),
+    '0',
+  );
+});
+
+test('a nullable unknown composerHeaders column still allows deletion', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    headerExtraColumn: 'subagentTypeName TEXT',
+    globalHeaders: [{ composerId: A, storageId: 'migrated' }],
+    keys: [`composerData:${A}`],
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+
+  assert.equal(
+    (await read(globalDbPath, 'SELECT count(*) FROM composerHeaders;')).trim(),
+    '0',
+  );
+});
+
+test('a global header bound to an unknown window is retained', async (t) => {
+  const { ctx, entries, globalDbPath, read, dump } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, workspaceId TEXT, value BLOB);
+INSERT INTO composerHeaders(composerId, workspaceId, value) VALUES (${sqlText(D)}, 'missing-storage', ${sqlText(JSON.stringify({ composerId: D, workspaceIdentifier: { id: 'missing-storage' } }))});
+INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)}, '{}');`,
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [D] },
+  ]);
+
+  assert.equal(result.deleted.length, 0);
+  assert.match(result.skipped[0] || '', /shared, absent, or unverified/);
+  assert.deepEqual(await dump(), before);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM composerHeaders WHERE composerId=${sqlText(D)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+test('a header with no workspace binding is deleted when the local list owns it', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(
+      JSON.stringify({
+        allComposers: [
+          { composerId: A, name: 'Unbound' },
+          {
+            composerId: C,
+            name: 'Other',
+            workspaceIdentifier: { id: 'two' },
+          },
+        ],
+      }),
+    )} WHERE key='composer.composerHeaders';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+
+  const globalList = JSON.parse(
+    (
+      await read(
+        globalDbPath,
+        "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
+      )
+    ).trim(),
+  ) as { allComposers: Array<{ composerId: string }> };
+
+  assert.deepEqual(
+    globalList.allComposers.map((row) => row.composerId),
+    [C],
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+});
+
+test('an empty local composer list still deletes a chat indexed globally', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [], selectedComposerIds: [A, B], lastFocusedComposerIds: [A, B], hasMigratedComposerData: true }))} WHERE key='composer.composerData';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+
+  const stored = JSON.parse(
+    (
+      await read(
+        entries[0].workspaceDbPath,
+        "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+      )
+    ).trim(),
+  ) as {
+    allComposers: unknown[];
+    selectedComposerIds: string[];
+    lastFocusedComposerIds: string[];
+    hasMigratedComposerData: boolean;
+  };
+
+  assert.deepEqual(stored.allComposers, []);
+  assert.deepEqual(stored.selectedComposerIds, [B]);
+  assert.deepEqual(stored.lastFocusedComposerIds, [B]);
+  assert.equal(stored.hasMigratedComposerData, true);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+});
 
 for (const [label, value, message] of [
   ['a null composer list', { allComposers: null }, /Invalid chat header list/],
@@ -1874,7 +1753,7 @@ for (const [label, value, message] of [
   ],
   ['a header value that is an array', [], /Invalid chat header metadata/],
 ] as const)
-  test(`${label} rolls deletion back`, { skip }, async (t) => {
+  test(`${label} rolls deletion back`, async (t) => {
     const { ctx, entries, globalDbPath, read } = await setup(t);
 
     const before = await read(
@@ -1904,234 +1783,654 @@ for (const [label, value, message] of [
     );
   });
 
-test(
-  'a bad selected-id list rolls back the global header update in the same transaction',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+test('a bad selected-id list rolls back the global header update in the same transaction', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
 
-    const globalBefore = await read(
+  const globalBefore = await read(
+    globalDbPath,
+    "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
+  );
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A }, { composerId: B }], selectedComposerIds: [1], lastFocusedComposerIds: [A, B] }))} WHERE key='composer.composerData';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /Unsupported selected chat list/);
+  assert.equal(result.deleted.length, 0);
+
+  assert.equal(
+    await read(
       globalDbPath,
       "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
-    );
+    ),
+    globalBefore,
+  );
 
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A }, { composerId: B }], selectedComposerIds: [1], lastFocusedComposerIds: [A, B] }))} WHERE key='composer.composerData';`,
-    });
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.match(result.error || '', /Unsupported selected chat list/);
-    assert.equal(result.deleted.length, 0);
-
-    assert.equal(
+  assert.equal(
+    (
       await read(
         globalDbPath,
-        "SELECT value FROM ItemTable WHERE key='composer.composerHeaders';",
-      ),
-      globalBefore,
-    );
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
+test('a bad focused-id list on the global header rolls deletion back', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
 
-test(
-  'a bad focused-id list on the global header rolls deletion back',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(
+      JSON.stringify({
+        allComposers: [
+          { composerId: A, workspaceIdentifier: { id: 'one' } },
+          { composerId: C, workspaceIdentifier: { id: 'two' } },
+        ],
+        lastFocusedComposerIds: [1],
+      }),
+    )} WHERE key='composer.composerHeaders';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /Unsupported selected chat list/);
+  assert.equal(result.deleted.length, 0);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+
+  assert.match(
+    await read(
+      entries[0].workspaceDbPath,
+      "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+    ),
+    new RegExp(A),
+  );
+});
+
+test('a changed workspace index aborts before mutation', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+  const exec = SqliteSession.prototype.exec;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    if (sql === 'BEGIN IMMEDIATE;') {
+      SqliteSession.prototype.exec = exec;
+
+      await execSqlScript({
+        ...ctx,
+        database: entries[0].workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=json_set(value,'$.allComposers[0].name','Changed locally') WHERE key='composer.composerData';`,
+      });
+    }
+
+    return exec.call(this, sql);
+  };
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /workspace indices changed/);
+  assert.equal(result.deleted.length, 0);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+test('a changed composerHeaders row aborts before mutation', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    globalHeaders: [{ composerId: A, storageId: 'migrated' }],
+    keys: [`composerData:${A}`],
+  });
+
+  const exec = SqliteSession.prototype.exec;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    if (sql === 'BEGIN IMMEDIATE;') {
+      SqliteSession.prototype.exec = exec;
+
+      await execSqlScript({
+        ...ctx,
+        database: globalDbPath,
+        sql: `UPDATE composerHeaders SET value=json_set(value,'$.name','Changed in table') WHERE composerId=${sqlText(A)};`,
+      });
+    }
+
+    return exec.call(this, sql);
+  };
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /indices changed/);
+  assert.equal(result.deleted.length, 0);
+
+  assert.match(
+    await read(
+      globalDbPath,
+      `SELECT value FROM composerHeaders WHERE composerId=${sqlText(A)};`,
+    ),
+    /Changed in table/,
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+test('a later workspace schema failure keeps the earlier committed deletion', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  const exec = SqliteSession.prototype.exec;
+  let changed = false;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    const output = await exec.call(this, sql);
+
+    // The preflight was valid; the next workspace changes after the first commit.
+    if (sql === 'COMMIT;' && !changed) {
+      changed = true;
+
+      await execSqlScript({
+        ...ctx,
+        database: entries[1].workspaceDbPath,
+        sql: 'CREATE TABLE composerHeaders(unknown TEXT);',
+      });
+    }
+
+    return output;
+  };
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+    { workspace: entries[1], ids: [C] },
+  ]);
+
+  assert.match(result.error || '', /Unsupported database schema/);
+  assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${C}`)};`,
+      )
+    ).trim(),
+    '1',
+  );
+
+  assert.match(
+    await read(
+      entries[1].workspaceDbPath,
+      "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+    ),
+    new RegExp(C),
+  );
+});
+
+test('an unknown NOT NULL composerHeaders column blocks deletion', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].globalDbPath,
+    sql: 'CREATE TABLE composerHeaders(composerId TEXT, value BLOB, secret TEXT NOT NULL);',
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /Unsupported database schema/);
+  assert.equal(result.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+});
+
+test('an unknown NOT NULL ItemTable column blocks deletion', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `CREATE TABLE ItemTable_new(key TEXT NOT NULL, value BLOB, secret TEXT NOT NULL, PRIMARY KEY(key));
+INSERT INTO ItemTable_new(key, value, secret) SELECT key, value, 'x' FROM ItemTable;
+DROP TABLE ItemTable;
+ALTER TABLE ItemTable_new RENAME TO ItemTable;`,
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.match(result.error || '', /Unsupported database schema/);
+  assert.equal(result.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+});
+
+test('a trigger on an unrelated table does not block deletion', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: 'CREATE TABLE notes(body TEXT); CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN SELECT 1; END;',
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        "SELECT count(*) FROM sqlite_schema WHERE name='notes';",
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+test('shared, absent, empty, and duplicate selections do not invent deletions', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+  const before = await dump();
+
+  const shared = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [B] },
+  ]);
+
+  assert.equal(shared.deleted.length, 0);
+  assert.match(shared.skipped[0] || '', /shared, absent, or unverified/);
+
+  const absent = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [E] },
+  ]);
+
+  assert.equal(absent.deleted.length, 0);
+  assert.equal(absent.skipped.length, 1);
+
+  const otherWindow = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[1], ids: [A] },
+  ]);
+
+  assert.equal(otherWindow.deleted.length, 0);
+  assert.equal(otherWindow.skipped.length, 1);
+
+  const empty = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [] },
+  ]);
+
+  assert.equal(empty.error, undefined);
+  assert.equal(empty.deleted.length, 0);
+
+  const abort = new AbortController();
+
+  abort.abort();
+
+  const cancelled = await deleteSelectedChats(
+    { ...ctx, signal: abort.signal },
+    entries,
+    [{ workspace: entries[0], ids: [A] }],
+  );
+
+  assert.equal(cancelled.cancelled, true);
+  assert.equal(cancelled.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+
+  const duplicated = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(duplicated.error, undefined);
+
+  assert.deepEqual(duplicated.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
+});
+
+test('uppercase composer ids are deleted and unsafe ids or paths are refused', async (t) => {
+  const { ctx, entries, root, globalDbPath, read, dump } = await setup(t);
+  const upper = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA';
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [A, B, upper].map((composerId) => ({ composerId })), selectedComposerIds: [A, B, upper], lastFocusedComposerIds: [upper] }))} WHERE key='composer.composerData';`,
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${upper}`)}, '{}'), (${sqlText(`bubbleId:${upper}:message`)}, '{}');`,
+  });
+
+  const removed = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [upper] },
+  ]);
+
+  assert.equal(removed.error, undefined);
+  assert.equal(removed.deleted.length, 1);
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${upper}`)};`,
+      )
+    ).trim(),
+    '0',
+  );
+
+  assert.match(
+    await read(
+      entries[0].workspaceDbPath,
+      "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+    ),
+    new RegExp(A),
+  );
+
+  const before = await dump();
+
+  const invalid = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: ['not-a-uuid'] },
+  ]);
+
+  assert.match(invalid.error || '', /Unsupported composer ID/);
+  assert.equal(invalid.deleted.length, 0);
+
+  const stranger = {
+    ...entries[0],
+    workspaceDbPath: `${entries[0].workspaceDbPath}.missing`,
+  };
+
+  const unknown = await deleteSelectedChats(ctx, entries, [
+    { workspace: stranger, ids: [A] },
+  ]);
+
+  assert.match(unknown.error || '', /Workspace storage changed/);
+
+  const wrongStorage = await deleteSelectedChats(ctx, entries, [
+    { workspace: { ...entries[0], storageId: 'renamed' }, ids: [A] },
+  ]);
+
+  assert.match(wrongStorage.error || '', /Workspace storage changed/);
+
+  const wrongGlobal = await deleteSelectedChats(ctx, entries, [
+    {
+      workspace: { ...entries[0], globalDbPath: `${globalDbPath}.other` },
+      ids: [A],
+    },
+  ]);
+
+  assert.match(wrongGlobal.error || '', /Workspace storage changed/);
+
+  const link = path.join(root, 'state-link.vscdb');
+
+  await fs.symlink(entries[0].workspaceDbPath, link);
+
+  const linked = {
+    ...entries[0],
+    workspaceDbPath: link,
+  };
+
+  const symlink = await deleteSelectedChats(
+    ctx,
+    [linked, entries[1]],
+    [{ workspace: linked, ids: [A] }],
+  );
+
+  assert.match(symlink.error || '', /symbolic links/);
+
+  const samePath = {
+    ...entries[0],
+    workspaceDbPath: globalDbPath,
+    globalDbPath,
+  };
+
+  const identical = await deleteSelectedChats(
+    ctx,
+    [samePath],
+    [{ workspace: samePath, ids: [A] }],
+  );
+
+  assert.match(
+    identical.error || '',
+    /Global and workspace databases must be separate/,
+  );
+
+  const exec = SqliteSession.prototype.exec;
+
+  t.after(() => {
+    SqliteSession.prototype.exec = exec;
+  });
+
+  SqliteSession.prototype.exec = async function (sql) {
+    if (sql === 'BEGIN IMMEDIATE;') throw 'plain failure';
+
+    return exec.call(this, sql);
+  };
+
+  const plain = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(plain.error, 'plain failure');
+  assert.equal(plain.uncertain, undefined);
+  assert.equal(plain.deleted.length, 0);
+  assert.deepEqual(await dump(), before);
+});
+
+for (const mismatch of ['composer-id', 'workspace-id'] as const)
+  test(`deletion rejects conflicting ${mismatch} columns before any write`, async (t) => {
+    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+      globalHeaders: [{ composerId: A, storageId: 'migrated' }],
+      keys: [`composerData:${A}`, `composerData:${C}`],
+    });
 
     await execSqlScript({
       ...ctx,
       database: globalDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(
-        JSON.stringify({
-          allComposers: [
-            { composerId: A, workspaceIdentifier: { id: 'one' } },
-            { composerId: C, workspaceIdentifier: { id: 'two' } },
-          ],
-          lastFocusedComposerIds: [1],
-        }),
-      )} WHERE key='composer.composerHeaders';`,
+      sql:
+        mismatch === 'composer-id'
+          ? `UPDATE composerHeaders SET composerId=${sqlText(C)};`
+          : "UPDATE composerHeaders SET workspaceId='other-storage';",
     });
+
+    const before = await read(
+      globalDbPath,
+      'SELECT composerId,workspaceId,value FROM composerHeaders; SELECT key,value FROM cursorDiskKV ORDER BY key;',
+    );
 
     const result = await deleteSelectedChats(ctx, entries, [
       { workspace: entries[0], ids: [A] },
     ]);
 
-    assert.match(result.error || '', /Unsupported selected chat list/);
     assert.equal(result.deleted.length, 0);
+    assert.match(result.error || '', /Conflicting chat header/);
 
     assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-
-    assert.match(
       await read(
-        entries[0].workspaceDbPath,
-        "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+        globalDbPath,
+        'SELECT composerId,workspaceId,value FROM composerHeaders; SELECT key,value FROM cursorDiskKV ORDER BY key;',
       ),
-      new RegExp(A),
+      before,
     );
-  },
-);
+  });
 
-test(
-  'a changed workspace index aborts before mutation',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-    const exec = SqliteSession.prototype.exec;
+test('unknown header schema in another workspace cannot prove exclusive ownership', async (t) => {
+  const { ctx, entries, globalDbPath, dump } = await setup(t);
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
+  await execSqlScript({
+    ...ctx,
+    database: entries[1].workspaceDbPath,
+    sql: `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, futurePayload BLOB); INSERT INTO composerHeaders VALUES (${sqlText(A)}, '{}');`,
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.deleted.length, 0);
+  assert.match(result.error || '', /Unsupported workspace header schema/);
+  assert.deepEqual(await dump(), before);
+
+  assert.equal(
+    (
+      await execSql({
+        ...ctx,
+        database: globalDbPath,
+        sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+      })
+    ).trim(),
+    '1',
+  );
+});
+
+for (const schema of ['global', 'workspace'] as const)
+  test(`mixed-case incoming foreign key blocks ${schema} deletion`, async (t) => {
+    const { ctx, entries, globalDbPath, dump, read } = await setup(t);
+
+    const database =
+      schema === 'global' ? globalDbPath : entries[0].workspaceDbPath;
+
+    await execSqlScript({
+      ...ctx,
+      database,
+      sql:
+        schema === 'global'
+          ? `CREATE TABLE dependent(value TEXT REFERENCES CURSORDISKKV(key) ON DELETE CASCADE); INSERT INTO dependent VALUES (${sqlText(`composerData:${A}`)});`
+          : "CREATE TABLE dependent(value TEXT REFERENCES ITEMTABLE(key)); INSERT INTO dependent VALUES ('composer.composerData');",
     });
 
-    SqliteSession.prototype.exec = async function (sql) {
-      if (sql === 'BEGIN IMMEDIATE;') {
-        SqliteSession.prototype.exec = exec;
-
-        await execSqlScript({
-          ...ctx,
-          database: entries[0].workspaceDbPath,
-          sql: `UPDATE ItemTable SET value=json_set(value,'$.allComposers[0].name','Changed locally') WHERE key='composer.composerData';`,
-        });
-      }
-
-      return exec.call(this, sql);
-    };
+    const before = await dump();
+    const dependent = await read(database, 'SELECT value FROM dependent;');
 
     const result = await deleteSelectedChats(ctx, entries, [
       { workspace: entries[0], ids: [A] },
     ]);
 
-    assert.match(result.error || '', /workspace indices changed/);
     assert.equal(result.deleted.length, 0);
+    assert.match(result.error || '', /foreign-key dependencies/);
+    assert.deepEqual(await dump(), before);
 
     assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '1',
+      await read(database, 'SELECT value FROM dependent;'),
+      dependent,
     );
-  },
-);
+  });
 
-test(
-  'a changed composerHeaders row aborts before mutation',
-  { skip },
-  async (t) => {
+for (const location of ['global', 'workspace'] as const)
+  test(`a conflicting ${location} workspace column introduced after preflight aborts deletion`, async (t) => {
     const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
       globalHeaders: [{ composerId: A, storageId: 'migrated' }],
+      localHeaderIds: [A],
       keys: [`composerData:${A}`],
     });
 
     const exec = SqliteSession.prototype.exec;
 
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
+    const database =
+      location === 'global' ? globalDbPath : entries[0].workspaceDbPath;
 
-    SqliteSession.prototype.exec = async function (sql) {
-      if (sql === 'BEGIN IMMEDIATE;') {
-        SqliteSession.prototype.exec = exec;
-
-        await execSqlScript({
-          ...ctx,
-          database: globalDbPath,
-          sql: `UPDATE composerHeaders SET value=json_set(value,'$.name','Changed in table') WHERE composerId=${sqlText(A)};`,
-        });
-      }
-
-      return exec.call(this, sql);
-    };
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.match(result.error || '', /indices changed/);
-    assert.equal(result.deleted.length, 0);
-
-    assert.match(
-      await read(
-        globalDbPath,
-        `SELECT value FROM composerHeaders WHERE composerId=${sqlText(A)};`,
-      ),
-      /Changed in table/,
-    );
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
-
-test(
-  'a later workspace schema failure keeps the earlier committed deletion',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-
-    const exec = SqliteSession.prototype.exec;
     let changed = false;
 
     t.after(() => {
       SqliteSession.prototype.exec = exec;
     });
 
-    SqliteSession.prototype.exec = async function (sql) {
-      const output = await exec.call(this, sql);
-
-      // The preflight was valid; the next workspace changes after the first commit.
-      if (sql === 'COMMIT;' && !changed) {
+    SqliteSession.prototype.exec = async function (statement) {
+      if (statement === 'BEGIN IMMEDIATE;' && !changed) {
         changed = true;
 
         await execSqlScript({
           ...ctx,
-          database: entries[1].workspaceDbPath,
-          sql: 'CREATE TABLE composerHeaders(unknown TEXT);',
+          database,
+          sql: "UPDATE composerHeaders SET workspaceId='another-window';",
         });
       }
 
-      return output;
+      return exec.call(this, statement);
     };
 
     const result = await deleteSelectedChats(ctx, entries, [
       { workspace: entries[0], ids: [A] },
-      { workspace: entries[1], ids: [C] },
     ]);
 
-    assert.match(result.error || '', /Unsupported database schema/);
-    assert.deepEqual(result.deleted, [`${entries[0].workspaceDbPath}: ${A}`]);
+    assert.equal(changed, true);
+    assert.match(result.error || '', /Conflicting chat header/);
+    assert.equal(result.deleted.length, 0);
 
     assert.equal(
       (
@@ -2140,370 +2439,23 @@ test(
           `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
         )
       ).trim(),
-      '0',
-    );
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${C}`)};`,
-        )
-      ).trim(),
       '1',
     );
 
-    assert.match(
-      await read(
-        entries[1].workspaceDbPath,
-        "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-      ),
-      new RegExp(C),
-    );
-  },
-);
-
-test(
-  'an unknown NOT NULL composerHeaders column blocks deletion',
-  { skip },
-  async (t) => {
-    const { ctx, entries, dump } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].globalDbPath,
-      sql: 'CREATE TABLE composerHeaders(composerId TEXT, value BLOB, secret TEXT NOT NULL);',
-    });
-
-    const before = await dump();
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.match(result.error || '', /Unsupported database schema/);
-    assert.equal(result.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-  },
-);
-
-test(
-  'an unknown NOT NULL ItemTable column blocks deletion',
-  { skip },
-  async (t) => {
-    const { ctx, entries, dump } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `CREATE TABLE ItemTable_new(key TEXT NOT NULL, value BLOB, secret TEXT NOT NULL, PRIMARY KEY(key));
-INSERT INTO ItemTable_new(key, value, secret) SELECT key, value, 'x' FROM ItemTable;
-DROP TABLE ItemTable;
-ALTER TABLE ItemTable_new RENAME TO ItemTable;`,
-    });
-
-    const before = await dump();
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.match(result.error || '', /Unsupported database schema/);
-    assert.equal(result.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-  },
-);
-
-test(
-  'a trigger on an unrelated table does not block deletion',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: 'CREATE TABLE notes(body TEXT); CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN SELECT 1; END;',
-    });
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(result.error, undefined);
-    assert.equal(result.deleted.length, 1);
-
     assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        )
-      ).trim(),
-      '0',
+      (await read(database, 'SELECT workspaceId FROM composerHeaders;')).trim(),
+      'another-window',
     );
+  });
 
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          "SELECT count(*) FROM sqlite_schema WHERE name='notes';",
-        )
-      ).trim(),
-      '1',
-    );
-  },
-);
-
-test(
-  'shared, absent, empty, and duplicate selections do not invent deletions',
-  { skip },
-  async (t) => {
+for (const field of ['selectedComposerIds', 'lastFocusedComposerIds'] as const)
+  test(`a migrated workspace's ${field} alone prevents deleting shared message bodies`, async (t) => {
     const { ctx, entries, dump } = await setup(t);
-    const before = await dump();
-
-    const shared = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [B] },
-    ]);
-
-    assert.equal(shared.deleted.length, 0);
-    assert.match(shared.skipped[0] || '', /shared, absent, or unverified/);
-
-    const absent = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [E] },
-    ]);
-
-    assert.equal(absent.deleted.length, 0);
-    assert.equal(absent.skipped.length, 1);
-
-    const otherWindow = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[1], ids: [A] },
-    ]);
-
-    assert.equal(otherWindow.deleted.length, 0);
-    assert.equal(otherWindow.skipped.length, 1);
-
-    const empty = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [] },
-    ]);
-
-    assert.equal(empty.error, undefined);
-    assert.equal(empty.deleted.length, 0);
-
-    const abort = new AbortController();
-
-    abort.abort();
-
-    const cancelled = await deleteSelectedChats(
-      { ...ctx, signal: abort.signal },
-      entries,
-      [{ workspace: entries[0], ids: [A] }],
-    );
-
-    assert.equal(cancelled.cancelled, true);
-    assert.equal(cancelled.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-
-    const duplicated = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(duplicated.error, undefined);
-
-    assert.deepEqual(duplicated.deleted, [
-      `${entries[0].workspaceDbPath}: ${A}`,
-    ]);
-  },
-);
-
-test(
-  'uppercase composer ids are deleted and unsafe ids or paths are refused',
-  { skip },
-  async (t) => {
-    const { ctx, entries, root, globalDbPath, read, dump } = await setup(t);
-    const upper = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA';
-
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [A, B, upper].map((composerId) => ({ composerId })), selectedComposerIds: [A, B, upper], lastFocusedComposerIds: [upper] }))} WHERE key='composer.composerData';`,
-    });
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${upper}`)}, '{}'), (${sqlText(`bubbleId:${upper}:message`)}, '{}');`,
-    });
-
-    const removed = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [upper] },
-    ]);
-
-    assert.equal(removed.error, undefined);
-    assert.equal(removed.deleted.length, 1);
-
-    assert.equal(
-      (
-        await read(
-          globalDbPath,
-          `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${upper}`)};`,
-        )
-      ).trim(),
-      '0',
-    );
-
-    assert.match(
-      await read(
-        entries[0].workspaceDbPath,
-        "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-      ),
-      new RegExp(A),
-    );
-
-    const before = await dump();
-
-    const invalid = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: ['not-a-uuid'] },
-    ]);
-
-    assert.match(invalid.error || '', /Unsupported composer ID/);
-    assert.equal(invalid.deleted.length, 0);
-
-    const stranger = {
-      ...entries[0],
-      workspaceDbPath: `${entries[0].workspaceDbPath}.missing`,
-    };
-
-    const unknown = await deleteSelectedChats(ctx, entries, [
-      { workspace: stranger, ids: [A] },
-    ]);
-
-    assert.match(unknown.error || '', /Workspace storage changed/);
-
-    const wrongStorage = await deleteSelectedChats(ctx, entries, [
-      { workspace: { ...entries[0], storageId: 'renamed' }, ids: [A] },
-    ]);
-
-    assert.match(wrongStorage.error || '', /Workspace storage changed/);
-
-    const wrongGlobal = await deleteSelectedChats(ctx, entries, [
-      {
-        workspace: { ...entries[0], globalDbPath: `${globalDbPath}.other` },
-        ids: [A],
-      },
-    ]);
-
-    assert.match(wrongGlobal.error || '', /Workspace storage changed/);
-
-    const link = path.join(root, 'state-link.vscdb');
-
-    await fs.symlink(entries[0].workspaceDbPath, link);
-
-    const linked = {
-      ...entries[0],
-      workspaceDbPath: link,
-    };
-
-    const symlink = await deleteSelectedChats(
-      ctx,
-      [linked, entries[1]],
-      [{ workspace: linked, ids: [A] }],
-    );
-
-    assert.match(symlink.error || '', /symbolic links/);
-
-    const samePath = {
-      ...entries[0],
-      workspaceDbPath: globalDbPath,
-      globalDbPath,
-    };
-
-    const identical = await deleteSelectedChats(
-      ctx,
-      [samePath],
-      [{ workspace: samePath, ids: [A] }],
-    );
-
-    assert.match(
-      identical.error || '',
-      /Global and workspace databases must be separate/,
-    );
-
-    const exec = SqliteSession.prototype.exec;
-
-    t.after(() => {
-      SqliteSession.prototype.exec = exec;
-    });
-
-    SqliteSession.prototype.exec = async function (sql) {
-      if (sql === 'BEGIN IMMEDIATE;') throw 'plain failure';
-
-      return exec.call(this, sql);
-    };
-
-    const plain = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [A] },
-    ]);
-
-    assert.equal(plain.error, 'plain failure');
-    assert.equal(plain.uncertain, undefined);
-    assert.equal(plain.deleted.length, 0);
-    assert.deepEqual(await dump(), before);
-  },
-);
-
-for (const mismatch of ['composer-id', 'workspace-id'] as const)
-  test(
-    `deletion rejects conflicting ${mismatch} columns before any write`,
-    { skip },
-    async (t) => {
-      const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
-        globalHeaders: [{ composerId: A, storageId: 'migrated' }],
-        keys: [`composerData:${A}`, `composerData:${C}`],
-      });
-
-      await execSqlScript({
-        ...ctx,
-        database: globalDbPath,
-        sql:
-          mismatch === 'composer-id'
-            ? `UPDATE composerHeaders SET composerId=${sqlText(C)};`
-            : "UPDATE composerHeaders SET workspaceId='other-storage';",
-      });
-
-      const before = await read(
-        globalDbPath,
-        'SELECT composerId,workspaceId,value FROM composerHeaders; SELECT key,value FROM cursorDiskKV ORDER BY key;',
-      );
-
-      const result = await deleteSelectedChats(ctx, entries, [
-        { workspace: entries[0], ids: [A] },
-      ]);
-
-      assert.equal(result.deleted.length, 0);
-      assert.match(result.error || '', /Conflicting chat header/);
-
-      assert.equal(
-        await read(
-          globalDbPath,
-          'SELECT composerId,workspaceId,value FROM composerHeaders; SELECT key,value FROM cursorDiskKV ORDER BY key;',
-        ),
-        before,
-      );
-    },
-  );
-
-test(
-  'unknown header schema in another workspace cannot prove exclusive ownership',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, dump } = await setup(t);
 
     await execSqlScript({
       ...ctx,
       database: entries[1].workspaceDbPath,
-      sql: `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY, futurePayload BLOB); INSERT INTO composerHeaders VALUES (${sqlText(A)}, '{}');`,
+      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ hasMigratedComposerData: true, [field]: [A] }))} WHERE key='composer.composerData';`,
     });
 
     const before = await dump();
@@ -2513,256 +2465,111 @@ test(
     ]);
 
     assert.equal(result.deleted.length, 0);
-    assert.match(result.error || '', /Unsupported workspace header schema/);
-    assert.deepEqual(await dump(), before);
-
-    assert.equal(
-      (
-        await execSql({
-          ...ctx,
-          database: globalDbPath,
-          sql: `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-        })
-      ).trim(),
-      '1',
-    );
-  },
-);
-
-for (const schema of ['global', 'workspace'] as const)
-  test(
-    `mixed-case incoming foreign key blocks ${schema} deletion`,
-    { skip },
-    async (t) => {
-      const { ctx, entries, globalDbPath, dump, read } = await setup(t);
-
-      const database =
-        schema === 'global' ? globalDbPath : entries[0].workspaceDbPath;
-
-      await execSqlScript({
-        ...ctx,
-        database,
-        sql:
-          schema === 'global'
-            ? `CREATE TABLE dependent(value TEXT REFERENCES CURSORDISKKV(key) ON DELETE CASCADE); INSERT INTO dependent VALUES (${sqlText(`composerData:${A}`)});`
-            : "CREATE TABLE dependent(value TEXT REFERENCES ITEMTABLE(key)); INSERT INTO dependent VALUES ('composer.composerData');",
-      });
-
-      const before = await dump();
-      const dependent = await read(database, 'SELECT value FROM dependent;');
-
-      const result = await deleteSelectedChats(ctx, entries, [
-        { workspace: entries[0], ids: [A] },
-      ]);
-
-      assert.equal(result.deleted.length, 0);
-      assert.match(result.error || '', /foreign-key dependencies/);
-      assert.deepEqual(await dump(), before);
-
-      assert.equal(
-        await read(database, 'SELECT value FROM dependent;'),
-        dependent,
-      );
-    },
-  );
-
-for (const location of ['global', 'workspace'] as const)
-  test(
-    `a conflicting ${location} workspace column introduced after preflight aborts deletion`,
-    { skip },
-    async (t) => {
-      const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
-        globalHeaders: [{ composerId: A, storageId: 'migrated' }],
-        localHeaderIds: [A],
-        keys: [`composerData:${A}`],
-      });
-
-      const exec = SqliteSession.prototype.exec;
-
-      const database =
-        location === 'global' ? globalDbPath : entries[0].workspaceDbPath;
-
-      let changed = false;
-
-      t.after(() => {
-        SqliteSession.prototype.exec = exec;
-      });
-
-      SqliteSession.prototype.exec = async function (statement) {
-        if (statement === 'BEGIN IMMEDIATE;' && !changed) {
-          changed = true;
-
-          await execSqlScript({
-            ...ctx,
-            database,
-            sql: "UPDATE composerHeaders SET workspaceId='another-window';",
-          });
-        }
-
-        return exec.call(this, statement);
-      };
-
-      const result = await deleteSelectedChats(ctx, entries, [
-        { workspace: entries[0], ids: [A] },
-      ]);
-
-      assert.equal(changed, true);
-      assert.match(result.error || '', /Conflicting chat header/);
-      assert.equal(result.deleted.length, 0);
-
-      assert.equal(
-        (
-          await read(
-            globalDbPath,
-            `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-          )
-        ).trim(),
-        '1',
-      );
-
-      assert.equal(
-        (
-          await read(database, 'SELECT workspaceId FROM composerHeaders;')
-        ).trim(),
-        'another-window',
-      );
-    },
-  );
-
-for (const field of ['selectedComposerIds', 'lastFocusedComposerIds'] as const)
-  test(
-    `a migrated workspace's ${field} alone prevents deleting shared message bodies`,
-    { skip },
-    async (t) => {
-      const { ctx, entries, dump } = await setup(t);
-
-      await execSqlScript({
-        ...ctx,
-        database: entries[1].workspaceDbPath,
-        sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ hasMigratedComposerData: true, [field]: [A] }))} WHERE key='composer.composerData';`,
-      });
-
-      const before = await dump();
-
-      const result = await deleteSelectedChats(ctx, entries, [
-        { workspace: entries[0], ids: [A] },
-      ]);
-
-      assert.equal(result.deleted.length, 0);
-      assert.equal(result.skipped.length, 1);
-      assert.equal(result.error, undefined);
-      assert.deepEqual(await dump(), before);
-    },
-  );
-
-test(
-  'ownership-only references do not create rows in normal workspace listings',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath } = await setup(t);
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: "UPDATE ItemTable SET value='{\"allComposers\":[]}' WHERE key='composer.composerHeaders';",
-    });
-
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ hasMigratedComposerData: true, selectedComposerIds: [A], lastFocusedComposerIds: [A] }))} WHERE key='composer.composerData';`,
-    });
-
-    const { WorkspaceHeaderReader } =
-      await import('../src/workspace-header-reader');
-
-    const reader = new WorkspaceHeaderReader(ctx);
-
-    assert.deepEqual(await reader.read(entries[0]), []);
-
-    assert.deepEqual(
-      (await reader.read(entries[0], true)).map((row) => row.composerId),
-      [A],
-    );
-  },
-);
-
-test(
-  'deleting a subagent removes it from the kept parent',
-  { skip },
-  async (t) => {
-    const { ctx, entries, globalDbPath, read } = await setup(t);
-
-    const parentBody = {
-      composerId: A,
-      text: 'keep parent',
-      subagentComposerIds: [D],
-    };
-
-    const childBody = {
-      composerId: D,
-      subagentInfo: { parentComposerId: A },
-    };
-
-    await execSqlScript({
-      ...ctx,
-      database: globalDbPath,
-      sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(parentBody))} WHERE key=${sqlText(`composerData:${A}`)}; INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)},${sqlText(JSON.stringify(childBody))}); UPDATE ItemTable SET value=${sqlText(
-        JSON.stringify({
-          allComposers: [
-            {
-              composerId: A,
-              workspaceIdentifier: { id: 'one' },
-              subagentComposerIds: [D],
-            },
-            {
-              composerId: D,
-              workspaceIdentifier: { id: 'one' },
-              subagentInfo: { parentComposerId: A },
-            },
-            { composerId: C, workspaceIdentifier: { id: 'two' } },
-          ],
-        }),
-      )} WHERE key='composer.composerHeaders';`,
-    });
-
-    await execSqlScript({
-      ...ctx,
-      database: entries[0].workspaceDbPath,
-      sql: `UPDATE ItemTable SET value=${sqlText(
-        JSON.stringify({
-          allComposers: [
-            { composerId: A, subagentComposerIds: [D] },
-            { composerId: D },
-            { composerId: B },
-          ],
-          selectedComposerIds: [A, D, B],
-          lastFocusedComposerIds: [A],
-        }),
-      )} WHERE key='composer.composerData';`,
-    });
-
-    const result = await deleteSelectedChats(ctx, entries, [
-      { workspace: entries[0], ids: [D] },
-    ]);
-
+    assert.equal(result.skipped.length, 1);
     assert.equal(result.error, undefined);
-    assert.ok(result.deleted.some((line) => line.endsWith(D)));
+    assert.deepEqual(await dump(), before);
+  });
 
-    const stored = await read(
-      globalDbPath,
-      `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
-    );
+test('ownership-only references do not create rows in normal workspace listings', async (t) => {
+  const { ctx, entries, globalDbPath } = await setup(t);
 
-    assert.equal(stored.includes(D), false);
-    assert.match(stored, /keep parent/);
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: "UPDATE ItemTable SET value='{\"allComposers\":[]}' WHERE key='composer.composerHeaders';",
+  });
 
-    const list = await read(
-      entries[0].workspaceDbPath,
-      "SELECT value FROM ItemTable WHERE key='composer.composerData';",
-    );
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ hasMigratedComposerData: true, selectedComposerIds: [A], lastFocusedComposerIds: [A] }))} WHERE key='composer.composerData';`,
+  });
 
-    assert.equal(list.includes(D), false);
-    assert.match(list, new RegExp(A));
-  },
-);
+  const { WorkspaceHeaderReader } =
+    await import('../src/workspace-header-reader');
+
+  const reader = new WorkspaceHeaderReader(ctx);
+
+  assert.deepEqual(await reader.read(entries[0]), []);
+
+  assert.deepEqual(
+    (await reader.read(entries[0], true)).map((row) => row.composerId),
+    [A],
+  );
+});
+
+test('deleting a subagent removes it from the kept parent', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await setup(t);
+
+  const parentBody = {
+    composerId: A,
+    text: 'keep parent',
+    subagentComposerIds: [D],
+  };
+
+  const childBody = {
+    composerId: D,
+    subagentInfo: { parentComposerId: A },
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(parentBody))} WHERE key=${sqlText(`composerData:${A}`)}; INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${D}`)},${sqlText(JSON.stringify(childBody))}); UPDATE ItemTable SET value=${sqlText(
+      JSON.stringify({
+        allComposers: [
+          {
+            composerId: A,
+            workspaceIdentifier: { id: 'one' },
+            subagentComposerIds: [D],
+          },
+          {
+            composerId: D,
+            workspaceIdentifier: { id: 'one' },
+            subagentInfo: { parentComposerId: A },
+          },
+          { composerId: C, workspaceIdentifier: { id: 'two' } },
+        ],
+      }),
+    )} WHERE key='composer.composerHeaders';`,
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(
+      JSON.stringify({
+        allComposers: [
+          { composerId: A, subagentComposerIds: [D] },
+          { composerId: D },
+          { composerId: B },
+        ],
+        selectedComposerIds: [A, D, B],
+        lastFocusedComposerIds: [A],
+      }),
+    )} WHERE key='composer.composerData';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [D] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.ok(result.deleted.some((line) => line.endsWith(D)));
+
+  const stored = await read(
+    globalDbPath,
+    `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${A}`)};`,
+  );
+
+  assert.equal(stored.includes(D), false);
+  assert.match(stored, /keep parent/);
+
+  const list = await read(
+    entries[0].workspaceDbPath,
+    "SELECT value FROM ItemTable WHERE key='composer.composerData';",
+  );
+
+  assert.equal(list.includes(D), false);
+  assert.match(list, new RegExp(A));
+});

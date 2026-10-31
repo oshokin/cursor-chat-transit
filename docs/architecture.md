@@ -372,6 +372,6 @@ Metadata text queries are single statements; scripts deliberately discard result
 
 Write errors close and poison the owned connection, rolling back uncommitted work. Opening writable Cursor databases requires their existing file; private staging databases explicitly opt into creation. ATTACH remains subject to schema validation and SQLite's WAL crash-atomicity restrictions. FULL is set explicitly on main and attached connections. The driver does not change Cursor's journal or locking mode.
 
-`prepare-sqlite.ts` copies only the pinned driver's runtime JS, license and eight prebuilds to vendor. The universal VSIX is offline-capable. Native loading requires Node-API 10 in the actual worker, independently of the development .nvmrc. The sqlite3 CLI remains only a development/test oracle, not an application dependency.
+`prepare-sqlite.ts` copies only the pinned driver's runtime JS, license and eight prebuilds to vendor. The universal VSIX is offline-capable. Native loading requires Node-API 10 in the actual worker, independently of the development .nvmrc. The sqlite3 CLI is not an application or test-runner dependency. A few tests open it as a second writer and skip that case when it is absent.
 
 Human log fields use logValue rather than JSON serialization: path separators stay literal, quotes and controls are escaped. Archive JSON and durable metadata serialization remain unchanged.

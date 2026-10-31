@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { findSqliteExecutable } from '../test/support/sqlite-cli';
 import { spawnSync } from 'node:child_process';
 
 /** Repository root. */
@@ -13,14 +12,8 @@ const args = process.argv.slice(2);
 const watch = args.includes('--watch');
 /** Restrict the run to `*.sqlite.test.ts`. */
 const sqliteOnly = args.includes('--sqlite');
-/** Restrict the run to tests that do not need sqlite3. */
+/** Restrict the run to tests that do not open SQLite fixtures. */
 const unitOnly = args.includes('--unit');
-
-if (!unitOnly && !findSqliteExecutable()) {
-  throw new Error(
-    'sqlite3 is required for integration tests. Install it on PATH or run test:unit.',
-  );
-}
 
 /** Directory names passed after the flags. */
 const dirs = args.filter(

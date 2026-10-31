@@ -45,7 +45,7 @@ tasks:
     cmds:
       - '{{.DEV_NODE}} -- npm run format:check'
   test:
-    desc: Run all core tests (sqlite3 required)
+    desc: Run all core tests
     cmds:
       - '{{.DEV_NODE}} -- npm test'
   test:unit:
@@ -53,11 +53,11 @@ tasks:
     cmds:
       - '{{.DEV_NODE}} -- npm run test:unit'
   test:sqlite:
-    desc: Run SQLite integration tests (sqlite3 required)
+    desc: Run SQLite integration tests
     cmds:
       - '{{.DEV_NODE}} -- npm run test:sqlite'
   test:perf:
-    desc: Run opt-in statistics and transfer benchmarks (sqlite3 required)
+    desc: Run opt-in statistics and transfer benchmarks
     cmds:
       - '{{.DEV_NODE}} -- npm run test:perf'
   check:
