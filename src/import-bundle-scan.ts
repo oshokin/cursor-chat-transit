@@ -628,53 +628,31 @@ export async function scanChat(
       }
 
       const slash = bubbleId.indexOf('/');
-      let targetBubbleId: string = randomUUID();
+      const sourceRoot = slash > 0 ? bubbleId.slice(0, slash) : bubbleId;
 
-      if (slash > 0) {
-        const sourceRoot = bubbleId.slice(0, slash);
+      let targetRoot = (
+        await opts.work.exec(
+          `SELECT target_id FROM bubble_root WHERE ordinal=${ordinal} AND source_id=${sqlText(sourceRoot)};`,
+        )
+      ).trim();
 
-        const targetRoot = (
-          await opts.work.exec(
-            `SELECT target_id FROM bubble_root WHERE ordinal=${ordinal} AND source_id=${sqlText(sourceRoot)};`,
-          )
-        ).trim();
+      if (!targetRoot) {
+        targetRoot = randomUUID();
 
-        targetBubbleId = targetRoot ? targetRoot + bubbleId.slice(slash) : '';
-      } else {
         await opts.work.exec(
           `INSERT INTO bubble_root(ordinal, source_id, target_id)
-           VALUES (${ordinal}, ${sqlText(bubbleId)}, ${sqlText(targetBubbleId)});`,
+           VALUES (${ordinal}, ${sqlText(sourceRoot)}, ${sqlText(targetRoot)});`,
         );
       }
+
+      const targetBubbleId =
+        slash > 0 ? targetRoot + bubbleId.slice(slash) : targetRoot;
 
       await opts.work.exec(
         `INSERT INTO bubble(ordinal, source_id, target_id, component)
          VALUES (${ordinal}, ${sqlText(bubbleId)}, ${sqlText(targetBubbleId)}, ${sqlText(component)});`,
       );
     }
-  }
-
-  await opts.work.exec(
-    `UPDATE bubble
-     SET target_id=(
-       SELECT root.target_id || substr(bubble.source_id, instr(bubble.source_id, '/'))
-       FROM bubble_root root
-       WHERE root.ordinal=bubble.ordinal
-         AND root.source_id=substr(bubble.source_id, 1, instr(bubble.source_id, '/') - 1)
-     )
-     WHERE ordinal=${ordinal} AND target_id='';`,
-  );
-
-  const unresolvedNested = (
-    await opts.work.exec(
-      `SELECT source_id FROM bubble WHERE ordinal=${ordinal} AND target_id='' LIMIT 1;`,
-    )
-  ).trim();
-
-  if (unresolvedNested) {
-    throw new Error(
-      `Chat ${sourceId} stores nested message ${unresolvedNested} without its root.`,
-    );
   }
 
   const missingReference = (

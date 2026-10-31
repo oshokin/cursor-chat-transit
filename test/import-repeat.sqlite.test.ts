@@ -223,6 +223,60 @@ test(
 );
 
 test(
+  'import assigns one target turn to standalone canonical rows without an unsuffixed root',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+    const source = payload() as unknown as ExportObject;
+    const turn = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const sourceIds = [`${turn}/s:0`, `${turn}/t:call`, `${turn}/t2:call`];
+    const body = JSON.parse(source.composers[A]!) as Record<string, unknown>;
+
+    body.fullConversationHeadersOnly = sourceIds.map((bubbleId) => ({
+      bubbleId,
+      type: 2,
+    }));
+
+    source.composers[A] = JSON.stringify(body);
+
+    source.bubbles![A] = sourceIds.map((bubbleId) => ({
+      key: `bubbleId:${A}:${bubbleId}`,
+      bubbleId,
+      value: JSON.stringify({ _v: 3, bubbleId, type: 2, text: bubbleId }),
+    }));
+
+    const result = await transfer.importFromObject(ctx, source, workspace);
+
+    const targetComposer = (
+      await sql.execSql({
+        ...gl,
+        sql: "SELECT substr(key, 14) FROM cursorDiskKV WHERE key GLOB 'composerData:*' LIMIT 1;",
+      })
+    ).trim();
+
+    const targetIds = (
+      await sql.execSql({
+        ...gl,
+        sql: `SELECT substr(key, ${'bubbleId:'.length + targetComposer.length + 2}) FROM cursorDiskKV WHERE key >= ${sqlText(`bubbleId:${targetComposer}:`)} AND key < ${sqlText(`bubbleId:${targetComposer};`)} ORDER BY key;`,
+      })
+    )
+      .trim()
+      .split(/\r?\n/);
+
+    const roots = new Set(targetIds.map((id) => id.slice(0, id.indexOf('/'))));
+
+    assert.equal(result.imported, 1);
+    assert.equal(targetIds.length, 3);
+    assert.equal(roots.size, 1);
+
+    assert.deepEqual(
+      targetIds.map((id) => id.slice(id.indexOf('/') + 1)),
+      ['s:0', 't2:call', 't:call'],
+    );
+  },
+);
+
+test(
   'repeat import restores a legacy copy whose opaque state kept the source id',
   { skip },
   async (t) => {
