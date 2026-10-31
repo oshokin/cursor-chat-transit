@@ -409,6 +409,66 @@ export function remapFamilyRecord(
   return next;
 }
 
+/** Collect known family composer IDs, including TASK_V2 navigation metadata. */
+export function familyRecordIds(record: Record<string, unknown>): Set<string> {
+  const ids = new Set<string>();
+  const info = record.subagentInfo;
+
+  if (info && typeof info === 'object' && !Array.isArray(info))
+    for (const key of ['parentComposerId', 'rootParentConversationId']) {
+      const id = (info as Record<string, unknown>)[key];
+
+      if (typeof id === 'string') ids.add(id);
+    }
+
+  if (Array.isArray(record.subagentComposerIds))
+    for (const id of record.subagentComposerIds)
+      if (typeof id === 'string') ids.add(id);
+
+  collectEmbeddedFamilyIds(record.toolFormerData, ids);
+  collectEmbeddedFamilyIds(record.additionalData, ids);
+
+  return ids;
+}
+
+/** Walk only structured metadata and collect known composer-ID properties. */
+function collectEmbeddedFamilyIds(value: unknown, ids: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectEmbeddedFamilyIds(item, ids);
+
+    return;
+  }
+
+  if (!value || typeof value !== 'object') return;
+
+  for (const [key, nested] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (
+      [
+        'subagentComposerId',
+        'parentComposerId',
+        'rootParentConversationId',
+      ].includes(key) &&
+      typeof nested === 'string'
+    )
+      ids.add(nested);
+    else if (key === 'supersededSubagentComposerIds' && Array.isArray(nested)) {
+      for (const id of nested) if (typeof id === 'string') ids.add(id);
+    } else if (
+      key === 'composerData' &&
+      nested &&
+      typeof nested === 'object' &&
+      !Array.isArray(nested)
+    ) {
+      const id = (nested as Record<string, unknown>).composerId;
+
+      if (typeof id === 'string') ids.add(id);
+      collectEmbeddedFamilyIds(nested, ids);
+    } else collectEmbeddedFamilyIds(nested, ids);
+  }
+}
+
 /** Rewrite family pointers nested in TASK_V2 metadata without touching free text. */
 function remapEmbeddedFamilyPointers(
   value: unknown,

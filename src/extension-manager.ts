@@ -807,10 +807,7 @@ export class ChatManager
 
     if (!info || !graph) return '';
     if (info.relation === 'unresolved') return 'Parent unavailable';
-    if (info.relation === 'child')
-      return info.subagentTypeName
-        ? subagentTypeLabel(info.subagentTypeName)
-        : 'Subagent';
+    if (info.relation === 'child') return 'Subagent';
     const count = descendantCount(graph, node.chat.composerId);
 
     return count ? `${count} subagent${count === 1 ? '' : 's'}` : '';
@@ -1803,14 +1800,6 @@ function issueSelectionMessage(
     : '';
 
   return `${selected} chat${selected === 1 ? '' : 's'} selected: ${parts.join(', ')}.${subagents}${counts.unchecked ? ` ${counts.unchecked} could not be checked.` : ''}`;
-}
-
-function subagentTypeLabel(name: string): string {
-  if (name === 'explore') return 'Explore';
-  if (name === 'generalPurpose') return 'General purpose';
-  if (name === 'shell') return 'Shell';
-
-  return name;
 }
 
 /** Keep management inside the existing container and use familiar native actions. */

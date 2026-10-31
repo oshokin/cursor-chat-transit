@@ -1829,7 +1829,7 @@ function familyPayload(extra = '') {
   const result = payload([
     { id: A, name: 'Parent' },
     { id: B, name: 'Child', extra },
-  ]);
+  ]) as unknown as ExportObject;
 
   (
     result.allComposers[0] as { subagentComposerIds?: string[] }
@@ -1844,6 +1844,27 @@ function familyPayload(extra = '') {
     ...JSON.parse(result.composers[A]),
     subagentComposerIds: [B],
   });
+
+  const taskId = `${X}/t:call_child`;
+
+  result.bubbles![A] = [
+    {
+      key: `bubbleId:${A}:${taskId}`,
+      bubbleId: taskId,
+      value: JSON.stringify({
+        _v: 3,
+        composerId: A,
+        bubbleId: taskId,
+        type: 2,
+        toolFormerData: {
+          name: 'task_v2',
+          tool: 48,
+          status: 'completed',
+          additionalData: { subagentComposerId: B },
+        },
+      }),
+    },
+  ];
 
   result.composers[B] = JSON.stringify({
     ...JSON.parse(result.composers[B]),
@@ -1873,19 +1894,17 @@ function stateFamilyPayload() {
   parent.conversationState = state;
   result.composers[A] = JSON.stringify(parent);
 
-  result.bubbles![A] = [
-    {
-      key: `bubbleId:${A}:${bubble}`,
+  result.bubbles![A].push({
+    key: `bubbleId:${A}:${bubble}`,
+    bubbleId: bubble,
+    value: JSON.stringify({
+      _v: 3,
+      composerId: A,
       bubbleId: bubble,
-      value: JSON.stringify({
-        _v: 3,
-        composerId: A,
-        bubbleId: bubble,
-        type: 1,
-        text: 'state-backed message',
-      }),
-    },
-  ];
+      type: 1,
+      text: 'state-backed message',
+    }),
+  });
 
   return result;
 }
@@ -1917,7 +1936,7 @@ test(
     const bubbleKey = (
       await sql.execSql({
         ...gl,
-        sql: `SELECT key FROM cursorDiskKV WHERE key >= ${sqlText(`bubbleId:${parent}:`)} AND key < ${sqlText(`bubbleId:${parent};`)} LIMIT 1;`,
+        sql: `SELECT key FROM cursorDiskKV WHERE key >= ${sqlText(`bubbleId:${parent}:`)} AND key < ${sqlText(`bubbleId:${parent};`)} AND CAST(value AS TEXT) LIKE '%state-backed message%' LIMIT 1;`,
       })
     ).trim();
 
@@ -1934,6 +1953,27 @@ test(
     assert.equal(state.includes(B), false);
     assert.equal(state.includes(X), false);
     assert.equal(childBody.subagentInfo?.parentComposerId, parent);
+
+    const taskRows: Array<Record<string, unknown>> = [];
+
+    await db.forEachBubble(gl, parent, (row) => {
+      const parsed = JSON.parse(row.value) as Record<string, unknown>;
+
+      if (
+        (parsed.toolFormerData as Record<string, unknown> | undefined)?.name ===
+        'task_v2'
+      )
+        taskRows.push(parsed);
+    });
+
+    const additional = (
+      taskRows[0]!.toolFormerData as {
+        additionalData: { subagentComposerId: string };
+      }
+    ).additionalData;
+
+    assert.equal(additional.subagentComposerId, child);
+    assert.equal(JSON.stringify(taskRows).includes(B), false);
 
     const catalogs = await Promise.all(
       [

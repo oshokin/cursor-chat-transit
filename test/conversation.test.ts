@@ -234,6 +234,84 @@ test('SQLite bubble decoding keeps colons and client-row suffixes in the exact I
   }
 });
 
+test('clone preserves every persisted Cursor message and tool status as opaque data', async () => {
+  const input = payload();
+  const root = input.bubbles[A][0].bubbleId;
+  const statuses = ['loading', 'completed', 'error', 'cancelled'];
+
+  const tools = [
+    ['run_terminal_command_v2', 15],
+    ['web_search', 18],
+    ['mcp-tool', 19],
+    ['read_lints', 30],
+    ['todo_write', 35],
+    ['edit_file_v2', 38],
+    ['list_dir_v2', 39],
+    ['read_file_v2', 40],
+    ['ripgrep_raw_search', 41],
+    ['glob_file_search', 42],
+    ['create_plan', 43],
+    ['fetch_mcp_resource', 45],
+    ['task_v2', 48],
+    ['ask_question', 51],
+    ['switch_mode', 52],
+    ['generate_image', 53],
+    ['web_fetch', 57],
+    ['mcp_auth', 60],
+    ['await', 62],
+    ['get_mcp_tools', 63],
+    ['connect_scm', 66],
+  ] as const;
+
+  input.bubbles[A].push(
+    ...tools.map(([name, tool], index) => {
+      const bubbleId = `${root}/t:${index}`;
+
+      return {
+        key: `bubbleId:${A}:${bubbleId}`,
+        bubbleId,
+        value: JSON.stringify({
+          _v: 3,
+          bubbleId,
+          type: 2,
+          toolFormerData: {
+            name,
+            tool,
+            status: statuses[index % statuses.length],
+            unknownFutureField: { keep: true },
+          },
+        }),
+      };
+    }),
+  );
+
+  const { cloned } = await cloneExportObjectForCopy(input);
+  const id = cloned.allComposers[0].composerId;
+
+  const copied = cloned.bubbles![id].slice(2).map((row) => {
+    const value = JSON.parse(row.value);
+
+    return [
+      value.type,
+      value.toolFormerData.name,
+      value.toolFormerData.tool,
+      value.toolFormerData.status,
+      value.toolFormerData.unknownFutureField,
+    ];
+  });
+
+  assert.deepEqual(
+    copied,
+    tools.map(([name, tool], index) => [
+      2,
+      name,
+      tool,
+      statuses[index % statuses.length],
+      { keep: true },
+    ]),
+  );
+});
+
 test('clone rejects body IDs that differ from their exact canonical storage ID', async () => {
   const input = payload();
   const root = input.bubbles[A][0];

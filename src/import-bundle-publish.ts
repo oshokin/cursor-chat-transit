@@ -9,7 +9,7 @@ import type { ConversationLayout } from './bundle-writer';
 import { rewriteCanvasReferences } from './canvases';
 import { remapJsonObject } from './chat-json';
 import { remapConversationStateIds } from './conversation-state';
-import { remapFamilyRecord } from './chat-family';
+import { familyRecordIds, remapFamilyRecord } from './chat-family';
 import { sqlText } from './core';
 import * as db from './db';
 import { headerUpsertSql, isCasConflict, itemCasReplaceSql } from './db-write';
@@ -870,21 +870,7 @@ export async function remapValue(
     unknown
   >;
 
-  const familyIds = new Set<string>();
-  const info = record.subagentInfo;
-
-  if (info && typeof info === 'object' && !Array.isArray(info)) {
-    for (const key of ['parentComposerId', 'rootParentConversationId']) {
-      const value = (info as Record<string, unknown>)[key];
-
-      if (typeof value === 'string') familyIds.add(value);
-    }
-  }
-
-  if (Array.isArray(record.subagentComposerIds)) {
-    for (const id of record.subagentComposerIds)
-      if (typeof id === 'string') familyIds.add(id);
-  }
+  const familyIds = familyRecordIds(record);
 
   const familyMap = new Map<string, string>();
 

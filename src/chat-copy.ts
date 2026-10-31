@@ -6,6 +6,7 @@ import {
   remapJsonObject,
 } from './chat-json';
 import { assertCanonicalClientRowId } from './client-row-key';
+import { remapFamilyRecord } from './chat-family';
 import { parseExportResources } from './dependencies';
 import { remapConversationStateIds } from './conversation-state';
 import { assertExportShape, incompleteComposers } from './format';
@@ -221,7 +222,10 @@ export async function cloneExportObjectForCopy(
     if (!newId) continue;
 
     cloned.allComposers.push({
-      ...c,
+      ...(remapFamilyRecord(
+        c as Record<string, unknown>,
+        composerMap,
+      ) as typeof c),
       composerId: newId,
       workspaceIdentifier: undefined,
     });
@@ -255,7 +259,10 @@ export async function cloneExportObjectForCopy(
         `bubble for ${oldComposerId}`,
       );
 
-      const rewritten = remapJsonObject(parsed, ids.all, ids.bubbles);
+      const rewritten = remapFamilyRecord(
+        remapJsonObject(parsed, ids.all, ids.bubbles),
+        composerMap,
+      );
 
       rewritten.composerId = newComposerId;
 
@@ -279,13 +286,16 @@ export async function cloneExportObjectForCopy(
 
     if (!newId || !ids) continue;
 
-    const rewritten = remapJsonObject(
-      parseRemappableJson(
-        typeof val === 'string' ? val : String(val),
-        `composer body for ${oldId}`,
+    const rewritten = remapFamilyRecord(
+      remapJsonObject(
+        parseRemappableJson(
+          typeof val === 'string' ? val : String(val),
+          `composer body for ${oldId}`,
+        ),
+        ids.all,
+        ids.bubbles,
       ),
-      ids.all,
-      ids.bubbles,
+      composerMap,
     );
 
     rewritten.conversationState = remapConversationStateIds(
