@@ -373,7 +373,7 @@ INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + stored + ':kept')},${sql
 );
 
 test(
-  'deep checks accept standalone nested rows and reject stale state and missing family composers',
+  'deep checks preserve opaque state and accept standalone nested rows',
   { skip },
   async (t) => {
     const { ctx, workspace } = await fixture(t);
@@ -446,14 +446,7 @@ ${bubble(family, familyRoot)}`,
 
     assert.deepEqual(
       rows.map((row) => row.health),
-      ['ready', 'incomplete', 'unknown', 'incomplete'],
-    );
-
-    assert.equal(
-      notes.some((note) =>
-        note.includes('does not reference its current composer'),
-      ),
-      true,
+      ['ready', 'ready', 'unknown', 'incomplete'],
     );
 
     assert.equal(

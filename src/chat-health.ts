@@ -1,6 +1,5 @@
 import { readChatForExport } from './export-chat';
 import { assertOrderedReferences } from './chat-json';
-import { conversationStateIds } from './conversation-state';
 import { execSql } from './sqlite';
 import { bubbleRange, sqlText } from './core';
 import { inChat } from './transfer-events';
@@ -132,9 +131,7 @@ export async function inspectChatHealth(
     conn,
     id,
     fields,
-    available,
     header,
-    references.length === 0 && rootUserMessages > 0,
   );
 
   if (structuralIssue) {
@@ -215,40 +212,14 @@ export async function inspectChatHealth(
   return 'empty';
 }
 
-/** Validate v13-v18 opaque ids, nested bubble ownership, and explicit family links. */
+/** Validate explicit family links without interpreting opaque conversation state. */
 async function inspectCurrentStructure(
   conn: SqliteConn,
   composerId: string,
   fields: Record<string, unknown>,
-  available: ReadonlySet<string>,
   header: ComposerHeader,
-  stateBacked: boolean,
 ): Promise<string | undefined> {
   const requiredComposers = familyComposerIds(fields, header);
-  const version = fields._v;
-  const state = fields.conversationState;
-
-  let stateIds = new Set<string>();
-
-  if (
-    typeof version === 'number' &&
-    Number.isInteger(version) &&
-    version >= 13 &&
-    version <= 18 &&
-    typeof state === 'string' &&
-    state.trim() !== ''
-  ) {
-    stateIds = conversationStateIds(state);
-  }
-
-  if (stateBacked && version === 18) {
-    if (!stateIds.has(composerId))
-      return 'conversation state does not reference its current composer';
-
-    for (const bubbleId of available)
-      if (!bubbleId.includes('/') && !stateIds.has(bubbleId))
-        return `conversation state does not reference stored root ${bubbleId}`;
-  }
 
   requiredComposers.delete(composerId);
 
