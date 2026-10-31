@@ -1,34 +1,20 @@
 import path from 'node:path';
 import { attachmentDirectory, isAttachmentBasename } from './attachments';
-import { canvasFilenamesFromChat, readCanvasFile } from './canvases';
+import { readCanvasFile } from './canvases';
 import * as db from './db';
 import { workspaceBinding } from './db-headers';
-import {
-  blobKeysFromComposerBody,
-  decodeSqliteBytes,
-  imageUuidsFromBubbles,
-  resolveAttachmentPath,
-  resolveBlobGraph,
-} from './dependencies';
+import { resolveAttachmentPath } from './dependencies';
 import {
   classifyTargetObservation,
   formatTargetFacts,
-  sha256Text,
   type TargetFacts,
   type TargetProbeState,
 } from './import-policy';
-import { type PendingImportChat } from './journal';
-import { planFilenamesFromChat, readPlanFile } from './plans';
+import type { PendingImportChat } from './journal';
+import { readPlanFile } from './plans';
 import { hashFile } from './hash-file';
 import { sha256Hex } from './resource-bytes';
-import type {
-  BubbleRecord,
-  ExportObject,
-  ExportResources,
-  Layout,
-  SqliteConn,
-  WorkspaceEntry,
-} from './types';
+import type { Layout, SqliteConn, WorkspaceEntry } from './types';
 import { TransferError } from './types';
 
 /** Fail closed so a half-finished import is never treated as a new copy. */
@@ -47,231 +33,6 @@ export function needsAttention(
   }
 
   return err;
-}
-
-/** Pending journal rows from a clone: ids, hashes, and expected resources. */
-export function pendingChatsFromClone(opts: {
-  /** Cloned export object whose destination ids are already assigned. */
-  cloned: ExportObject;
-  /** Source composer id to destination composer id. */
-  composerMap: Map<string, string>;
-  /** Compound source bubble key to destination bubble id. */
-  bubbleMap: Map<string, string>;
-  /** Snapshot fingerprints keyed by source composer id. */
-  snapshotBySource: Map<string, string>;
-  /** Completeness of each source chat in this batch. */
-  quality: Map<string, 'complete' | 'history-only'>;
-}): PendingImportChat[] {
-  const bubblesBySource = new Map<string, Array<[string, string]>>();
-
-  for (const [compound, newId] of opts.bubbleMap) {
-    const sep = compound.indexOf('\0');
-
-    if (sep < 0) continue;
-    const sourceId = compound.slice(0, sep);
-    const pair: [string, string] = [compound.slice(sep + 1), newId];
-    const grouped = bubblesBySource.get(sourceId);
-
-    if (grouped) grouped.push(pair);
-    else bubblesBySource.set(sourceId, [pair]);
-  }
-
-  const chats: PendingImportChat[] = [];
-
-  for (const [sourceId, targetId] of opts.composerMap) {
-    const bubbleMap = bubblesBySource.get(sourceId) || [];
-
-    const body = opts.cloned.composers[targetId] || '';
-
-    const expectedBubbles: Array<[string, string]> = (
-      opts.cloned.bubbles?.[targetId] || []
-    ).map((row) => [row.bubbleId, sha256Text(row.value)]);
-
-    chats.push({
-      sourceComposerId: sourceId,
-      snapshotHash: opts.snapshotBySource.get(sourceId) || '',
-      targetComposerId: targetId,
-      bubbleMap,
-      expectedComposerHash: sha256Text(body),
-      expectedBubbles,
-      expectedResources: expectedResourcesFromChat(
-        body,
-        opts.cloned.bubbles?.[targetId],
-        opts.cloned.resources || { kv: [], attachments: [], plans: [] },
-      ),
-      quality: opts.quality.get(sourceId) || 'complete',
-    });
-  }
-
-  return chats;
-}
-
-/** Resource checksums the pending record must still find on disk after commit. */
-export function expectedResourcesFromChat(
-  body: string,
-  /** Bubble records keyed by composer id. */
-  bubbles: BubbleRecord[] | undefined,
-  /** Resource rows for this chat. */
-  resources: ExportResources,
-): NonNullable<PendingImportChat['expectedResources']> {
-  const out: NonNullable<PendingImportChat['expectedResources']> = [];
-  const seen = new Set<string>();
-
-  /** Record one unique kv, image, or plan checksum the pending row must keep. */
-  const add = (
-    /** Resource class the pending row must keep. */
-    kind: 'kv' | 'image' | 'plan' | 'canvas',
-    /** Resource id the pending row must keep. */
-    id: string,
-    /** SHA-256 the pending row must keep. */
-    sha256: string,
-  ) => {
-    const key = `${kind}\0${id}`;
-
-    if (seen.has(key)) return;
-    seen.add(key);
-    out.push({ kind, id, sha256 });
-  };
-
-  const kvByKey = new Map(resources.kv.map((row) => [row.key, row]));
-
-  const blobs = blobKeysFromComposerBody(body);
-
-  if (blobs.status === 'ok') {
-    const stored = new Map<string, Buffer>();
-
-    for (const row of resources.kv) {
-      if (!row.key.startsWith('agentKv:blob:')) continue;
-
-      stored.set(
-        row.key.slice('agentKv:blob:'.length),
-        decodeSqliteBytes(row.value),
-      );
-    }
-
-    let state: unknown;
-
-    try {
-      /** Conversation state. */
-      state = (
-        JSON.parse(body) as {
-          conversationState?: unknown;
-        }
-      ).conversationState;
-    } catch {
-      state = undefined;
-    }
-
-    const closed = resolveBlobGraph(state, stored);
-    const ids = closed.status === 'ok' ? closed.keys : blobs.keys;
-
-    for (const key of ids) {
-      const row = kvByKey.get(key);
-
-      if (row) add('kv', key, row.value.sha256);
-    }
-  }
-
-  const images = new Map<string, typeof resources.attachments>();
-
-  for (const row of resources.attachments) {
-    const id = row.id.toLowerCase();
-    const list = images.get(id) || [];
-
-    list.push(row);
-    images.set(id, list);
-  }
-
-  try {
-    for (const uuid of imageUuidsFromBubbles(bubbles)) {
-      const rows = images.get(uuid.toLowerCase()) || [];
-
-      for (const row of rows) add('image', row.filename || uuid, row.sha256);
-    }
-  } catch {
-    /* clone already rejected invalid attachment ids */
-  }
-
-  const plans = new Map(
-    (resources.plans || []).map((row) => [row.filename, row]),
-  );
-
-  for (const name of planFilenamesFromChat(body, bubbles)) {
-    const row = plans.get(name);
-
-    if (row) add('plan', name, row.sha256);
-  }
-
-  const canvases = new Map(
-    (resources.canvases || []).map((row) => [row.filename, row]),
-  );
-
-  for (const name of canvasFilenamesFromChat(body, bubbles)) {
-    const row = canvases.get(name);
-
-    if (row) add('canvas', name, row.sha256);
-  }
-
-  return out;
-}
-
-/** Compare one pending chat with the live databases and plan files. */
-export async function pendingChatMatch(
-  chat: PendingImportChat,
-  opts: {
-    /** Destination workspace whose databases are being compared. */
-    workspace: WorkspaceEntry;
-    connWs: SqliteConn;
-    connGl: SqliteConn;
-    /** Detected workspace schema. */
-    wsInfo: Layout;
-    /** Detected global schema. */
-    glInfo: Layout;
-    /** Directory that should still hold pending plan files. */
-    plansDir: string;
-    /** Directory that should still hold pending canvas files. */
-    canvasesDir: string | null;
-  },
-): Promise<'missing' | 'exact' | 'changed'> {
-  const body = await db.readKvText(
-    opts.connGl,
-    `composerData:${chat.targetComposerId}`,
-  );
-
-  const bubbleIds = await db.listBubbleIds(opts.connGl, chat.targetComposerId);
-  const mentioned = await composerMentioned(chat.targetComposerId, opts);
-
-  if (!body && bubbleIds.size === 0 && !mentioned) return 'missing';
-  if (!body) return 'changed';
-  if (sha256Text(body) !== chat.expectedComposerHash) return 'changed';
-  if (bubbleIds.size !== chat.expectedBubbles.length) return 'changed';
-  const expected = new Map(chat.expectedBubbles);
-
-  for (const [bubbleId, expectedHash] of expected) {
-    if (!bubbleIds.has(bubbleId)) return 'changed';
-
-    const row = await db.readKvText(
-      opts.connGl,
-      `bubbleId:${chat.targetComposerId}:${bubbleId}`,
-    );
-
-    if (!row || sha256Text(row) !== expectedHash) return 'changed';
-  }
-
-  const bound = await probeTargetComposer({
-    targetComposerId: chat.targetComposerId,
-    ...opts,
-  });
-
-  // Global headers alone are not evidence that the workspace commit happened.
-  if (bound !== 'available' || !mentioned) return 'changed';
-  if (!Array.isArray(chat.expectedResources)) return 'changed';
-
-  for (const dep of chat.expectedResources) {
-    if (!(await pendingResourceMatches(dep, opts))) return 'changed';
-  }
-
-  return 'exact';
 }
 
 /**
