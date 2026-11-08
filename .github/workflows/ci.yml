@@ -46,6 +46,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: Exclude test files from Windows Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $paths = @($env:GITHUB_WORKSPACE, $env:TEMP, $env:RUNNER_TEMP) | Where-Object { $_ }
+          foreach ($path in $paths) {
+            try { Add-MpPreference -ExclusionPath $path } catch {
+              Write-Host "Defender exclusion was not applied for ${path}: $($_.Exception.Message)"
+            }
+          }
+          try { Add-MpPreference -ExclusionProcess 'node.exe' } catch {
+            Write-Host "Defender process exclusion was not applied: $($_.Exception.Message)"
+          }
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version-file: .nvmrc

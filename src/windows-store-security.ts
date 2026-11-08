@@ -105,7 +105,7 @@ export function verifyWindowsStoreSecurity(
     allowed.size
   )
     throw new Error(
-      'Unsafe Windows agent-store ownership, reparse point or ACL.',
+      `Unsafe Windows agent-store ownership, reparse point or ACL. owner=${security.owner} protected=${security.protected} reparse=${security.reparse} rules=${JSON.stringify(security.rules)}`,
     );
 }
 
@@ -144,20 +144,24 @@ export async function provisionWindowsVisualizationScope(
 
       if (made)
         created.push({ directory: current, dev: stat.dev, ino: stat.ino });
-      if (
-        stat.isSymbolicLink() &&
-        path.resolve(base).startsWith(`${path.resolve(current)}${path.sep}`)
-      )
-        continue;
+
+      const resolved = path.resolve(current);
+      const resolvedBase = path.resolve(base);
+      const aboveBase = resolvedBase.startsWith(`${resolved}${path.sep}`);
+
+      const privateScope =
+        resolved === resolvedBase ||
+        resolved.startsWith(`${resolvedBase}${path.sep}`);
+
+      if (stat.isSymbolicLink() && aboveBase) continue;
       if (!stat.isDirectory() || stat.isSymbolicLink())
         throw new Error('Unsafe Windows scope directory.');
+      // C:\ and the runner temp parents are not the store. Inspecting them
+      // starts PowerShell for every ancestor and rejects ordinary junctions.
+      if (!made && !privateScope) continue;
       const before = await inspect(current);
 
       if (before.reparse) throw new Error('Unsafe Windows reparse point.');
-
-      const privateScope =
-        path.resolve(current) === path.resolve(base) ||
-        path.resolve(current).startsWith(`${path.resolve(base)}${path.sep}`);
 
       if (made) {
         // An elevated token owns a new directory as Administrators. The
