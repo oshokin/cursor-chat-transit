@@ -352,7 +352,11 @@ export async function copyResources(opts: {
       if (!destination)
         throw new Error('Destination project artifact root unavailable.');
 
-      await assertVisualizationScope(path.dirname(destination));
+      await assertVisualizationScope(
+        path.dirname(destination),
+        historicalProjectRoot(opts.ctx, opts.workspace) ?? undefined,
+      );
+
       const effectId = fileEffectId(destination);
 
       await opts.journal.setEffectState(opts.operationId, effectId, 'prepared');

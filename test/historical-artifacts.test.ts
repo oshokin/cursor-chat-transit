@@ -180,7 +180,10 @@ test('transcript content never establishes parent ownership; external parents re
     ownerMap: new Map([['child', 'new-child']]),
   });
 
-  assert.match(destination, /external\/subagents\/new-child\.txt$/);
+  assert.deepEqual(
+    destination.slice(path.join(root, 'dest').length).split(path.sep),
+    ['', 'agent-transcripts', 'external', 'subagents', 'new-child.txt'],
+  );
 });
 
 test('only structurally explicit terminal files and shell snapshots are selected', async (t) => {

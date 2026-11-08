@@ -99,6 +99,9 @@ export async function provisionVisualizationScope(
     try {
       const stat = await fs.lstat(current);
 
+      if (stat.isSymbolicLink() && ancestorSymlink(current, base)) continue;
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error('Unsafe visualization scope directory.');
       if ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0)
         throw new Error('Insecure writable agent-store ancestor.');
     } catch (error) {
@@ -133,6 +136,7 @@ export async function provisionVisualizationScope(
 
       if (made)
         created.push({ directory: current, dev: entry.dev, ino: entry.ino });
+      if (entry.isSymbolicLink() && ancestorSymlink(current, base)) continue;
       if (!entry.isDirectory() || entry.isSymbolicLink())
         throw new Error('Unsafe visualization scope directory.');
       if (
@@ -211,11 +215,30 @@ export function localAgentStoreBase(): string {
   throw new Error('Unsupported visualization agent-store platform.');
 }
 
-/** Reject symlinks in every existing scope ancestor, including store ownership directories. */
-export async function assertVisualizationScope(scope: string): Promise<void> {
-  let current = path.parse(scope).root;
+/**
+ * A symlink strictly above `boundary` is an OS path alias, such as macOS
+ * `/var`. A symlink at or below the boundary can redirect the store.
+ */
+function ancestorSymlink(current: string, boundary: string): boolean {
+  return path
+    .resolve(boundary)
+    .startsWith(`${path.resolve(current)}${path.sep}`);
+}
 
-  for (const part of scope
+/** Reject symlinks in the trusted scope. Ancestors above `boundary` may be OS aliases. */
+export async function assertVisualizationScope(
+  scope: string,
+  boundary = scope,
+): Promise<void> {
+  const target = path.resolve(scope);
+  const trusted = path.resolve(boundary);
+
+  if (trusted !== target && !target.startsWith(`${trusted}${path.sep}`))
+    throw new Error('Unsafe visualization scope directory.');
+
+  let current = path.parse(target).root;
+
+  for (const part of target
     .slice(current.length)
     .split(path.sep)
     .filter(Boolean)) {
@@ -224,10 +247,13 @@ export async function assertVisualizationScope(scope: string): Promise<void> {
     try {
       const entry = await fs.lstat(current);
 
+      if (entry.isSymbolicLink() && ancestorSymlink(current, trusted)) continue;
       if (!entry.isDirectory() || entry.isSymbolicLink())
         throw new Error('Unsafe visualization scope directory.');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+
+      return;
     }
   }
 }

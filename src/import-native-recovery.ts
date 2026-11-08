@@ -43,28 +43,15 @@ export async function prepareNativeIntent(
     hashes.push((await hashFile(destination)).sha256);
   }
 
-  const directory = await open(staging, 'r');
-
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
+  await syncDirectory(staging);
 
   // Persist newly created parent entries as well as the leaf files.
   for (const parent of [
     path.dirname(staging),
     path.dirname(path.dirname(staging)),
     path.dirname(journal.filePath),
-  ]) {
-    const dir = await open(parent, 'r');
-
-    try {
-      await dir.sync();
-    } finally {
-      await dir.close();
-    }
-  }
+  ])
+    await syncDirectory(parent);
 
   const effect = {
     operationId,
@@ -81,6 +68,22 @@ export async function prepareNativeIntent(
   await journal.setEffectState(operationId, effect.effectId, 'prepared');
 
   return effect;
+}
+
+/** Directory durability is best-effort. Windows rejects or leaks directory fsync. */
+async function syncDirectory(directory: string): Promise<void> {
+  if (process.platform === 'win32') return;
+
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+
+  try {
+    handle = await open(directory, 'r');
+    await handle.sync();
+  } catch {
+    /* directory fsync is not available on every platform */
+  } finally {
+    await handle?.close();
+  }
 }
 
 /** Verify an existing native destination or publish only into an absent one. */

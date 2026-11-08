@@ -97,7 +97,10 @@ export async function pendingResourceMatches(
       opts.historicalOwnerMap,
     );
 
-    await assertVisualizationScope(path.dirname(destination));
+    await assertVisualizationScope(
+      path.dirname(destination),
+      opts.historicalProjectRoot,
+    );
 
     return imageChecksum(destination, dep.sha256, opts.signal);
   }

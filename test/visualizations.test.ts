@@ -10,6 +10,7 @@ import {
   visualizationScopeFiles,
   provisionVisualizationScope,
   localAgentStoreBase,
+  assertVisualizationScope,
 } from '../src/visualizations';
 import type { WorkspaceEntry } from '../src/types';
 import { pendingResourceMatches } from '../src/import-reconcile';
@@ -338,6 +339,33 @@ test('pending visualization recovery verifies owning scope and refuses changed b
     await fs.rename(`${root}-real`, root);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('an ancestor symlink does not make a real scope unsafe', async () => {
+  const real = await fs.mkdtemp(path.join(os.tmpdir(), 'scope-real-'));
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'scope-link-'));
+  const link = path.join(parent, 'via-link');
+
+  await fs.symlink(real, link, 'dir');
+  const scope = path.join(link, 'files');
+
+  try {
+    await assertVisualizationScope(scope);
+
+    if (process.platform !== 'win32') {
+      await provisionVisualizationScope(
+        { resolveVisualizationScopeFiles: () => scope },
+        {} as WorkspaceEntry,
+        'owner',
+      );
+
+      assert.equal((await fs.stat(scope)).mode & 0o777, 0o700);
+      await assertVisualizationScope(scope);
+    }
+  } finally {
+    await fs.rm(parent, { recursive: true, force: true });
+    await fs.rm(real, { recursive: true, force: true });
   }
 });
 

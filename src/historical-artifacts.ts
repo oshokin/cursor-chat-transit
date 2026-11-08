@@ -222,7 +222,7 @@ export async function readOwnedTranscripts(opts: {
 
       const full = path.join(opts.projectRoot, 'agent-transcripts', relative);
 
-      await assertVisualizationScope(path.dirname(full));
+      await assertVisualizationScope(path.dirname(full), opts.projectRoot);
 
       const source = await readArtifactSource({
         root: path.dirname(full),
@@ -407,7 +407,10 @@ export async function readReferencedTerminalHistory(opts: {
   const missing: string[] = [];
   const seen = new Set<string>();
 
-  await assertVisualizationScope(path.join(opts.projectRoot, 'terminals'));
+  await assertVisualizationScope(
+    path.join(opts.projectRoot, 'terminals'),
+    opts.projectRoot,
+  );
 
   for (const reference of opts.references) {
     opts.signal?.throwIfAborted();
@@ -424,7 +427,7 @@ export async function readReferencedTerminalHistory(opts: {
 
     const sourceFile = parsed.uri ? fileURLToPath(raw) : raw;
 
-    await assertVisualizationScope(path.dirname(sourceFile));
+    await assertVisualizationScope(path.dirname(sourceFile), opts.projectRoot);
 
     const source = await readArtifactSource({
       root: path.dirname(sourceFile),
@@ -506,7 +509,7 @@ export async function installHistoricalArtifact(opts: {
     );
   }
 
-  await assertVisualizationScope(path.dirname(destination));
+  await assertVisualizationScope(path.dirname(destination), opts.projectRoot);
   opts.signal?.throwIfAborted();
 
   await writeFileNoClobber(

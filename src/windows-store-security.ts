@@ -144,6 +144,11 @@ export async function provisionWindowsVisualizationScope(
 
       if (made)
         created.push({ directory: current, dev: stat.dev, ino: stat.ino });
+      if (
+        stat.isSymbolicLink() &&
+        path.resolve(base).startsWith(`${path.resolve(current)}${path.sep}`)
+      )
+        continue;
       if (!stat.isDirectory() || stat.isSymbolicLink())
         throw new Error('Unsafe Windows scope directory.');
       const before = await inspect(current);
@@ -151,11 +156,22 @@ export async function provisionWindowsVisualizationScope(
       if (before.reparse) throw new Error('Unsafe Windows reparse point.');
 
       const privateScope =
-        current === base || current.startsWith(`${base}${path.sep}`);
+        path.resolve(current) === path.resolve(base) ||
+        path.resolve(current).startsWith(`${path.resolve(base)}${path.sep}`);
 
       if (made) {
-        if (before.owner !== user)
-          throw new Error('Unsafe Windows directory owner.');
+        // An elevated token owns a new directory as Administrators. The
+        // directory was created by this attempt, so claim it before the ACL.
+        if (before.owner !== user) {
+          if (before.owner !== ADMINISTRATORS)
+            throw new Error('Unsafe Windows directory owner.');
+
+          await runWindowsSecurityTool('icacls', [
+            current,
+            '/setowner',
+            `*${user}`,
+          ]);
+        }
 
         await runWindowsSecurityTool('icacls', [
           current,
