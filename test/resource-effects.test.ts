@@ -10,6 +10,16 @@ import { SqliteSession } from '../src/sqlite-session';
 import { sqlText } from '../src/core';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
 
+/** Windows rejects unlink while SQLite still has the file, so close first and retry. */
+async function removeTree(root: string): Promise<void> {
+  await fs.rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  });
+}
+
 async function workDb(file: string, rows: string): Promise<SqliteSession> {
   const work = await SqliteSession.open({ database: file });
 
@@ -38,10 +48,9 @@ test('shared visualization filenames keep separate destination intents', async (
 
   process.env.CURSOR_AGENT_STORE_DIR = path.join(root, 'stores');
 
-  t.after(async () => {
+  t.after(() => {
     if (previous === undefined) delete process.env.CURSOR_AGENT_STORE_DIR;
     else process.env.CURSOR_AGENT_STORE_DIR = previous;
-    await fs.rm(root, { recursive: true, force: true });
   });
 
   const workspace = {
@@ -69,6 +78,7 @@ test('shared visualization filenames keep separate destination intents', async (
   t.after(async () => {
     await work.close();
     await journal.close();
+    await removeTree(root);
   });
 
   await journal.beginPending({ operationId: 'op', phase: 'prepared' });
@@ -101,8 +111,6 @@ test('shared visualization filenames keep separate destination intents', async (
 test('same destination with different bytes remains a hard conflict', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-effect-conflict-'));
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-
   const workspace = {
     workspaceDbPath: path.join(root, 'workspace.vscdb'),
   } as WorkspaceEntry;
@@ -123,6 +131,7 @@ test('same destination with different bytes remains a hard conflict', async (t) 
   t.after(async () => {
     await work.close();
     await journal.close();
+    await removeTree(root);
   });
 
   await journal.beginPending({ operationId: 'op', phase: 'prepared' });
@@ -144,8 +153,6 @@ test('same destination with different bytes remains a hard conflict', async (t) 
 
 test('transcript layouts with the same basename stay distinct', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-effect-layout-'));
-
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   const owner = '11111111-1111-4111-8111-111111111111';
 
@@ -177,6 +184,7 @@ test('transcript layouts with the same basename stay distinct', async (t) => {
   t.after(async () => {
     await work.close();
     await journal.close();
+    await removeTree(root);
   });
 
   await journal.beginPending({ operationId: 'op', phase: 'prepared' });
@@ -199,6 +207,13 @@ test('transcript layouts with the same basename stay distinct', async (t) => {
   });
 
   assert.equal(effects.length, 2);
-  assert.ok(effects.some((item) => item.endsWith(`${owner}/${owner}.jsonl`)));
-  assert.ok(effects.some((item) => item.endsWith(`${owner}.jsonl`)));
+  const nested = path.join(owner, `${owner}.jsonl`);
+
+  assert.ok(effects.some((item) => item.endsWith(nested)));
+
+  assert.ok(
+    effects.some(
+      (item) => item.endsWith(`${owner}.jsonl`) && !item.endsWith(nested),
+    ),
+  );
 });

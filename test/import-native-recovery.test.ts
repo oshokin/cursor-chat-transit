@@ -15,7 +15,6 @@ import { JournalStore } from '../src/journal-db';
 test('native recovery publishes retained bytes and verifies a rename-before-ledger crash', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-native-recover-'));
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const sessionId = 'synthetic-session';
   const database = path.join(root, 'source.sqlite');
   const meta = path.join(root, 'source.json');
@@ -62,7 +61,16 @@ test('native recovery publishes retained bytes and verifies a rename-before-ledg
     targetKey: 'synthetic',
   });
 
-  t.after(() => journal.close());
+  t.after(async () => {
+    await journal.close();
+
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  });
 
   await journal.beginPending({
     operationId: 'synthetic-operation',
@@ -101,7 +109,6 @@ test('native recovery publishes retained bytes and verifies a rename-before-ledg
 test('native intent survives archive removal and refuses foreign bytes', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'cct-native-intent-'));
 
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
   const source = path.join(root, 'source');
 
   await fs.mkdir(source);
@@ -120,7 +127,16 @@ test('native intent survives archive removal and refuses foreign bytes', async (
     targetKey: 'synthetic',
   });
 
-  t.after(() => journal.close());
+  t.after(async () => {
+    await journal.close();
+
+    await fs.rm(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  });
 
   await journal.beginPending({
     operationId: 'synthetic-operation',

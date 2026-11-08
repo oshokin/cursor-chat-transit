@@ -103,7 +103,7 @@ for (const fault of [
 
       const script = Buffer.from(argv.at(-1)!, 'base64').toString('utf16le');
 
-      if (!script.includes('Get-Acl')) return callback(null, user);
+      if (!script.includes('DirectorySecurity')) return callback(null, user);
       const acl = security();
 
       if (fault === 'mismatch' && grants) acl.protected = false;

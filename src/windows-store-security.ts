@@ -45,9 +45,10 @@ function powershell(script: string): Promise<string> {
     '-NoProfile',
     '-NonInteractive',
     '-EncodedCommand',
-    Buffer.from(`$ErrorActionPreference='Stop';${script}`, 'utf16le').toString(
-      'base64',
-    ),
+    Buffer.from(
+      `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';${script}`,
+      'utf16le',
+    ).toString('base64'),
   ]);
 }
 
@@ -72,7 +73,10 @@ async function inspect(directory: string): Promise<Security> {
   return JSON.parse(
     await powershell(
       `$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'));` +
-        '$i=Get-Item -LiteralPath $p -Force;$a=Get-Acl -LiteralPath $p;' +
+        // Get-Acl autoloads Microsoft.PowerShell.Security, which the runner
+        // cannot load under -NoProfile. DirectorySecurity is the same ACL.
+        '$i=[IO.DirectoryInfo]::new($p);' +
+        "$a=[Security.AccessControl.DirectorySecurity]::new($p,[Security.AccessControl.AccessControlSections]'Access, Owner');" +
         '$r=@($a.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | ForEach-Object {' +
         "@{sid=$_.IdentityReference.Value;inherited=$_.IsInherited;allow=($_.AccessControlType -eq 'Allow');rights=[int]$_.FileSystemRights;inheritance=[int]$_.InheritanceFlags;propagation=[int]$_.PropagationFlags}});" +
         '@{owner=$a.GetOwner([Security.Principal.SecurityIdentifier]).Value;reparse=(($i.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0);protected=$a.AreAccessRulesProtected;rules=$r}|ConvertTo-Json -Compress -Depth 4',

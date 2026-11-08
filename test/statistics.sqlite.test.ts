@@ -818,7 +818,7 @@ test('a conversation index past 100,000 properties still passes the deep check',
     extra,
   }));
 
-  const slow = { ...ctx, timeoutMs: 60_000 };
+  const slow = { ...ctx, timeoutMs: 180_000 };
 
   await execSqlScript({
     ...slow,

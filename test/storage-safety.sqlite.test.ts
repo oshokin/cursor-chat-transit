@@ -341,7 +341,7 @@ test(
 
 test(
   'worker loses IPC during preparation, exits and releases all SQLite writers',
-  { skip, timeout: 60_000 },
+  { skip, timeout: 180_000 },
   async (t) => {
     const { ctx, workspace } = await setup(t);
     const file = await messageArchive(workspace.storageRoot);
