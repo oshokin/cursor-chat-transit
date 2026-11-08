@@ -80,29 +80,52 @@ async function inspect(directory: string): Promise<Security> {
   ) as Security;
 }
 
-/** Reject any deviation from the private, current-user-owned SID ACL. */
+const FULL_CONTROL = 2032127;
+const GENERIC_ALL = 268435456;
+
+function isFullControl(value: unknown): boolean {
+  const rights = Number(value);
+
+  return (
+    rights === FULL_CONTROL ||
+    rights === GENERIC_ALL ||
+    (rights & FULL_CONTROL) === FULL_CONTROL
+  );
+}
+
+/** Reject any deviation from the private SID ACL. An elevated token may own the directory as Administrators. */
 export function verifyWindowsStoreSecurity(
   security: Security,
   user: string,
 ): void {
-  const allowed = new Set([user, SYSTEM, ADMINISTRATORS]);
+  const required = new Set([user, SYSTEM, ADMINISTRATORS]);
+  const rules = Array.isArray(security.rules) ? security.rules : [];
+  const seen = new Set<string>();
 
   if (
     security.reparse ||
-    security.owner !== user ||
+    (security.owner !== user && security.owner !== ADMINISTRATORS) ||
     !security.protected ||
-    !Array.isArray(security.rules) ||
-    security.rules.length !== allowed.size ||
-    security.rules.some(
-      (rule) =>
-        !allowed.delete(rule.sid) ||
+    rules.length === 0 ||
+    rules.some((rule) => {
+      const inheritance = Number(rule.inheritance);
+      const propagation = Number(rule.propagation);
+
+      if (
+        !required.has(rule.sid) ||
         rule.inherited ||
         !rule.allow ||
-        rule.rights !== 2032127 ||
-        rule.inheritance !== 3 ||
-        rule.propagation !== 0,
-    ) ||
-    allowed.size
+        !isFullControl(rule.rights) ||
+        inheritance !== 3 ||
+        propagation !== 0
+      )
+        return true;
+
+      seen.add(rule.sid);
+
+      return false;
+    }) ||
+    seen.size !== required.size
   )
     throw new Error(
       `Unsafe Windows agent-store ownership, reparse point or ACL. owner=${security.owner} protected=${security.protected} reparse=${security.reparse} rules=${JSON.stringify(security.rules)}`,
@@ -164,18 +187,10 @@ export async function provisionWindowsVisualizationScope(
       if (before.reparse) throw new Error('Unsafe Windows reparse point.');
 
       if (made) {
-        // An elevated token owns a new directory as Administrators. The
-        // directory was created by this attempt, so claim it before the ACL.
-        if (before.owner !== user) {
-          if (before.owner !== ADMINISTRATORS)
-            throw new Error('Unsafe Windows directory owner.');
-
-          await runWindowsSecurityTool('icacls', [
-            current,
-            '/setowner',
-            `*${user}`,
-          ]);
-        }
+        // An elevated token owns a new directory as Administrators. That is
+        // the Windows default and still one of the three private SIDs.
+        if (before.owner !== user && before.owner !== ADMINISTRATORS)
+          throw new Error('Unsafe Windows directory owner.');
 
         await runWindowsSecurityTool('icacls', [
           current,

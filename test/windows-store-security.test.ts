@@ -29,6 +29,8 @@ function security() {
 
 test('Windows ACL verification requires exact private inheritable SID grants and owner', () => {
   verifyWindowsStoreSecurity(security(), user);
+
+  verifyWindowsStoreSecurity({ ...security(), owner: 'S-1-5-32-544' }, user);
   for (const mutation of [
     { owner: 'S-1-5-18' },
     { reparse: true },

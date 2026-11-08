@@ -32,7 +32,12 @@ export async function prepareNativeIntent(
     const destination = path.join(staging, name);
 
     await copyFile(source, destination);
-    const file = await open(destination, 'r');
+
+    // Windows rejects fsync on a read-only handle. r+ can flush the copy.
+    const file = await open(
+      destination,
+      process.platform === 'win32' ? 'r+' : 'r',
+    );
 
     try {
       await file.sync();

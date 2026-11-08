@@ -31,6 +31,11 @@ import {
 const idleWorkers: ChildProcess[] = [];
 const idleTimers = new WeakMap<ChildProcess, NodeJS.Timeout>();
 
+/** A pipe can keep the process alive after `ChildProcess.unref()` on Windows. */
+function unrefPipe(pipe: NodeJS.ReadableStream | null): void {
+  (pipe as { unref?: () => void } | null)?.unref?.();
+}
+
 function releaseWorker(child: ChildProcess): void {
   child.removeAllListeners('message');
   child.removeAllListeners('close');
@@ -46,6 +51,9 @@ function releaseWorker(child: ChildProcess): void {
   idleWorkers.push(child);
   child.unref();
   child.channel?.unref();
+  // Windows keeps a resumed stderr pipe referenced after ChildProcess.unref().
+  unrefPipe(child.stderr);
+  unrefPipe(child.stdout);
 
   const timer = setTimeout(() => {
     const index = idleWorkers.indexOf(child);

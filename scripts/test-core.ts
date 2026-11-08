@@ -50,14 +50,12 @@ if (!selected.length) throw new Error('No test files found');
 /**
  * Tests inside one file normally run one at a time, so a long SQLite file
  * becomes the whole run. These files use a private temp directory per test,
- * so several may run at once.
- * Windows process creation is already the slow part, so these files stay
- * serial there.
- * Files that patch process-wide hooks stay serial on every OS.
+ * so four may run at once on every OS. Files that patch process-wide hooks
+ * stay serial.
  */
 const sqliteTestConcurrency = 4;
-/** Intra-file parallelism. Off on Windows, where worker startup is expensive. */
-const parallelSqlite = process.platform !== 'win32';
+/** Intra-file parallelism. Serial files are excluded below. */
+const parallelSqlite = true;
 
 /** SQLite files whose tests share module-level hooks. */
 const serialSqliteFiles = new Set([
@@ -108,9 +106,7 @@ if (!watch) {
 const cpuCount = os.availableParallelism();
 const minimumParallelWorkers = 8;
 
-const workers = String(
-  parallelSqlite ? Math.max(cpuCount, minimumParallelWorkers) : cpuCount,
-);
+const workers = String(Math.max(cpuCount, minimumParallelWorkers));
 
 /** node:test process; its exit status is this script's exit status. */
 try {
@@ -120,7 +116,9 @@ try {
       '--import',
       'tsx',
       '--test',
-      ...(watch ? ['--watch'] : ['--test-concurrency', workers]),
+      ...(watch
+        ? ['--watch']
+        : ['--test-concurrency', workers, '--test-force-exit']),
       ...entrypoints,
     ],
     { cwd: root, stdio: 'inherit', shell: false },
