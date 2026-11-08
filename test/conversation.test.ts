@@ -17,7 +17,7 @@ const C = '33333333-3333-4333-8333-333333333333';
 /** Spare UUID for tests that need a fourth id. */
 const D = '44444444-4444-4444-8444-444444444444';
 
-test('opaque conversation state remaps fixed-width chat and bubble ids', () => {
+test('opaque conversation state preserves UUID-valued content', () => {
   const field = (value: string) =>
     Buffer.concat([
       Buffer.from([0x0a, Buffer.byteLength(value)]),
@@ -36,11 +36,11 @@ test('opaque conversation state remaps fixed-width chat and bubble ids', () => {
 
   assert.equal(
     Buffer.from(String(remapped).slice(1), 'base64').toString('hex'),
-    Buffer.concat([field(C), field(`path/${A}`), field(D)]).toString('hex'),
+    Buffer.concat([field(A), field(`path/${A}`), field(B)]).toString('hex'),
   );
 });
 
-test('clone remaps opaque conversation state with its generated ids', async () => {
+test('clone preserves opaque state content despite generated ids', async () => {
   const input = payload();
   const body = JSON.parse(input.composers[A]) as Record<string, unknown>;
 
@@ -68,8 +68,9 @@ test('clone remaps opaque conversation state with its generated ids', async () =
     'base64',
   ).toString();
 
-  assert.equal(state.includes(composer), true);
-  assert.equal(state.includes(bubble || ''), true);
+  assert.equal(state.includes(A), true);
+  assert.equal(state.includes(B), true);
+  assert.notEqual(bubble, B);
 });
 
 test('clone preserves canonical stream and repeated tool suffixes under the remapped root', async () => {
@@ -354,9 +355,9 @@ test('state remapping preserves unknown fields byte-for-byte and only rewrites e
 
   const expected = Buffer.concat([
     unknownVarint,
-    len(1, Buffer.from(C)),
+    len(1, Buffer.from(A)),
     len(4, Buffer.from(`prefix-${A}`)),
-    len(3, Buffer.concat([len(2, Buffer.from(D)), unknownVarint])),
+    len(3, Buffer.concat([len(2, Buffer.from(B)), unknownVarint])),
   ]);
 
   assert.equal(
@@ -364,7 +365,7 @@ test('state remapping preserves unknown fields byte-for-byte and only rewrites e
     expected.toString('hex'),
   );
 
-  assert.deepEqual(conversationStateIds(remapped), new Set([C, D]));
+  assert.deepEqual(conversationStateIds(remapped), new Set());
 });
 
 test('state remapping preserves every supported unknown protobuf wire type', () => {
@@ -400,8 +401,8 @@ test('state remapping preserves every supported unknown protobuf wire type', () 
     fixed32,
     duplicateRaw,
     duplicateRaw,
-    Buffer.from([0x22, C.length]),
-    Buffer.from(C),
+    Buffer.from([0x22, A.length]),
+    Buffer.from(A),
   ]);
 
   assert.equal(
@@ -413,7 +414,7 @@ test('state remapping preserves every supported unknown protobuf wire type', () 
 /** Minimal export object whose conversation headers must remap together. */
 function payload() {
   return {
-    formatVersion: 2,
+    formatVersion: 5,
     allComposers: [{ composerId: A, name: 'Fixture' }],
     composers: {
       [A]: JSON.stringify({
@@ -540,7 +541,7 @@ test('mismatched wrapper key is rejected before import', async () => {
 
 test('the same old bubbleId in two chats stays scoped after clone', async () => {
   const second = {
-    formatVersion: 2,
+    formatVersion: 5,
     allComposers: [
       { composerId: A, name: 'One' },
       { composerId: D, name: 'Two' },

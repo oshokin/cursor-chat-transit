@@ -244,7 +244,32 @@ export class ChatManager
           : request,
       );
 
-      if (await deleteManagedChats(this.context, this.operations, requests))
+      if (
+        await deleteManagedChats(
+          this.context,
+          this.operations,
+          requests,
+          (blocked) => {
+            for (const family of blocked) {
+              for (const selected of this.selection.values()) {
+                if (selected.workspace.workspaceDbPath !== family.workspaceKey)
+                  continue;
+                if (
+                  !selected.chat ||
+                  family.ids.includes(selected.chat.composerId)
+                )
+                  this.selection.set(selected, false);
+              }
+            }
+
+            this.operationMessage =
+              'Blocked selection deselected. Review the remaining checked chats, then choose Delete again.';
+
+            this.publishMessage();
+            this.changed.fire(undefined);
+          },
+        )
+      )
         this.refresh();
     } finally {
       if (!this.closed && this.loading.signal.aborted) {
@@ -502,6 +527,10 @@ export class ChatManager
         const key = this.key(descendant);
 
         if (seen.has(key)) continue;
+        const result = this.results.get(key);
+
+        if (!result?.health || result.failed || result.health === 'unknown')
+          continue;
         seen.add(key);
         picked.push(descendant);
         included += 1;

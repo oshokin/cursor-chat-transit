@@ -1,0 +1,10451 @@
+{
+  "agent.v1.AiAttributionArgs": [
+    {
+      "no": 5,
+      "name": "file_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 2,
+      "name": "start_line",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "end_line",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "commit_hashes",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 7,
+      "name": "output_mode",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "max_commits",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "include_line_ranges",
+      "wire": 0
+    }
+  ],
+  "agent.v1.AiAttributionError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AiAttributionResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AiAttributionSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AiAttributionError"
+    }
+  ],
+  "agent.v1.AiAttributionSuccess": [
+    {
+      "no": 1,
+      "name": "attribution_text",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    }
+  ],
+  "agent.v1.AiAttributionToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.AiAttributionArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.AiAttributionResult"
+    }
+  ],
+  "agent.v1.AppliedAgentChange": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "change_type",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "before_content",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "after_content",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "message_for_model",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ApplyAgentDiffArgs": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ApplyAgentDiffError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "applied_changes",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.AppliedAgentChange"
+    }
+  ],
+  "agent.v1.ApplyAgentDiffResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ApplyAgentDiffSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ApplyAgentDiffError"
+    }
+  ],
+  "agent.v1.ApplyAgentDiffSuccess": [
+    {
+      "no": 1,
+      "name": "applied_changes",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.AppliedAgentChange"
+    }
+  ],
+  "agent.v1.ApplyAgentDiffToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ApplyAgentDiffArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ApplyAgentDiffResult"
+    }
+  ],
+  "agent.v1.AskQuestionArgs": [
+    {
+      "no": 1,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "questions",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.AskQuestionArgs.Question"
+    },
+    {
+      "no": 5,
+      "name": "run_async",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "async_original_tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionArgs.Option": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionArgs.Question": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "prompt",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "options",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.AskQuestionArgs.Option"
+    },
+    {
+      "no": 4,
+      "name": "allow_multiple",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "prompt_markdown",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionAsync": [
+    {
+      "no": 1,
+      "name": "interaction_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AskQuestionSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AskQuestionError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AskQuestionRejected"
+    },
+    {
+      "no": 4,
+      "name": "async",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AskQuestionAsync"
+    }
+  ],
+  "agent.v1.AskQuestionSuccess": [
+    {
+      "no": 1,
+      "name": "answers",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.AskQuestionSuccess.Answer"
+    }
+  ],
+  "agent.v1.AskQuestionSuccess.Answer": [
+    {
+      "no": 1,
+      "name": "question_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "selected_option_ids",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "freeform_text",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AskQuestionToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.AskQuestionArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.AskQuestionResult"
+    }
+  ],
+  "agent.v1.AssistantMessage": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "started_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "completed_at_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.AwaitArgs": [
+    {
+      "no": 1,
+      "name": "task_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "block_until_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "regex",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AwaitError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AwaitResult": [
+    {
+      "no": 1,
+      "name": "complete",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AwaitTaskComplete"
+    },
+    {
+      "no": 2,
+      "name": "still_running",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AwaitTaskStillRunning"
+    },
+    {
+      "no": 3,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AwaitError"
+    },
+    {
+      "no": 4,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.AwaitSuccess"
+    }
+  ],
+  "agent.v1.AwaitSuccess": [
+    {
+      "no": 1,
+      "name": "complete",
+      "wire": 2,
+      "oneof": "await_result",
+      "message": "agent.v1.AwaitTaskComplete"
+    },
+    {
+      "no": 2,
+      "name": "still_running",
+      "wire": 2,
+      "oneof": "await_result",
+      "message": "agent.v1.AwaitTaskStillRunning"
+    }
+  ],
+  "agent.v1.AwaitTaskComplete": [
+    {
+      "no": 1,
+      "name": "task_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "runtime_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "output_file_path",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "output_length",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "regex_requested",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "regex_match",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "exit_code",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "wake_reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AwaitTaskStillRunning": [
+    {
+      "no": 1,
+      "name": "task_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "runtime_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "output_file_path",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "output_length",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "regex_requested",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "regex_match",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "wake_reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.AwaitToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.AwaitArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.AwaitResult"
+    }
+  ],
+  "agent.v1.BlameByFilePathArgs": [
+    {
+      "no": 1,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "start_line",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "end_line",
+      "wire": 0
+    }
+  ],
+  "agent.v1.BlameByFilePathError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.BlameByFilePathResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.BlameByFilePathSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.BlameByFilePathError"
+    }
+  ],
+  "agent.v1.BlameByFilePathSuccess": [
+    {
+      "no": 1,
+      "name": "content",
+      "wire": 2
+    }
+  ],
+  "agent.v1.BlameByFilePathToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.BlameByFilePathArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.BlameByFilePathResult"
+    }
+  ],
+  "agent.v1.BugfixResultItem": [
+    {
+      "no": 1,
+      "name": "bug_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "bug_title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "verdict",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "explanation",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "severity",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ClickAction": [
+    {
+      "no": 1,
+      "name": "coordinate",
+      "wire": 2,
+      "message": "agent.v1.Coordinate"
+    },
+    {
+      "no": 2,
+      "name": "button",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "count",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "modifier_keys",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CloudCanvasToolDiagnostic": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "code",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "severity",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "range",
+      "wire": 2,
+      "message": "agent.v1.CloudCanvasToolDiagnosticRange"
+    }
+  ],
+  "agent.v1.CloudCanvasToolDiagnosticPosition": [
+    {
+      "no": 1,
+      "name": "line",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "character",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CloudCanvasToolDiagnosticRange": [
+    {
+      "no": 1,
+      "name": "start",
+      "wire": 2,
+      "message": "agent.v1.CloudCanvasToolDiagnosticPosition"
+    },
+    {
+      "no": 2,
+      "name": "end",
+      "wire": 2,
+      "message": "agent.v1.CloudCanvasToolDiagnosticPosition"
+    }
+  ],
+  "agent.v1.CommandClassifierResult": [
+    {
+      "no": 1,
+      "name": "commands",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.CommandClassifierResult.ClassifiedCommand"
+    },
+    {
+      "no": 2,
+      "name": "suggested_sandbox_mode",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "classification_failed",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CommandClassifierResult.ClassifiedCommand": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "arguments",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "suggested_allowlist_entry",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "subcommand_tokens",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.CommunicateUpdateArgs": [
+    {
+      "no": 1,
+      "name": "current_step",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "final_summary",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "completed_subtitle",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CommunicateUpdateError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CommunicateUpdateResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CommunicateUpdateSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CommunicateUpdateError"
+    }
+  ],
+  "agent.v1.CommunicateUpdateSuccess": [
+    {
+      "no": 1,
+      "name": "current_step",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "message_index",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CommunicateUpdateToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CommunicateUpdateArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CommunicateUpdateResult"
+    }
+  ],
+  "agent.v1.ComputerUseAction": [
+    {
+      "no": 1,
+      "name": "mouse_move",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.MouseMoveAction"
+    },
+    {
+      "no": 2,
+      "name": "click",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.ClickAction"
+    },
+    {
+      "no": 3,
+      "name": "mouse_down",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.MouseDownAction"
+    },
+    {
+      "no": 4,
+      "name": "mouse_up",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.MouseUpAction"
+    },
+    {
+      "no": 5,
+      "name": "drag",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.DragAction"
+    },
+    {
+      "no": 6,
+      "name": "scroll",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.ScrollAction"
+    },
+    {
+      "no": 7,
+      "name": "type",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.TypeAction"
+    },
+    {
+      "no": 8,
+      "name": "key",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.KeyAction"
+    },
+    {
+      "no": 9,
+      "name": "wait",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.WaitAction"
+    },
+    {
+      "no": 10,
+      "name": "screenshot",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.ScreenshotAction"
+    },
+    {
+      "no": 11,
+      "name": "cursor_position",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.CursorPositionAction"
+    }
+  ],
+  "agent.v1.ComputerUseArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "actions",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ComputerUseAction"
+    },
+    {
+      "no": 3,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "bind_unmapped_characters",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "desktop_lease_actor_id",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "screenshot_settle_ms",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "native_x11_driver",
+      "wire": 2,
+      "message": "agent.v1.NativeX11Driver"
+    },
+    {
+      "no": 11,
+      "name": "mark_monitor_busy",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "full_resolution_screenshot",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "capture_name_prefix",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "omit_inline_screenshot",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ComputerUseError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "action_count",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "log",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "screenshot",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "screenshot_path",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "driver",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "monitor_busy_marked",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "typing",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ComputerUseTyping"
+    }
+  ],
+  "agent.v1.ComputerUseFullResolutionScreenshot": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "sha256",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "size_bytes",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "width",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "height",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ComputerUseResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ComputerUseSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ComputerUseError"
+    }
+  ],
+  "agent.v1.ComputerUseSuccess": [
+    {
+      "no": 1,
+      "name": "action_count",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "screenshot",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "log",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "screenshot_path",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "cursor_position",
+      "wire": 2,
+      "message": "agent.v1.Coordinate"
+    },
+    {
+      "no": 7,
+      "name": "settle_ms",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "driver",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "monitor_busy_marked",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "full_resolution_screenshot",
+      "wire": 2,
+      "message": "agent.v1.ComputerUseFullResolutionScreenshot"
+    },
+    {
+      "no": 12,
+      "name": "typing",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ComputerUseTyping"
+    }
+  ],
+  "agent.v1.ComputerUseToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ComputerUseArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ComputerUseResult"
+    }
+  ],
+  "agent.v1.ComputerUseTyping": [
+    {
+      "no": 1,
+      "name": "method",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "chars",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "atoms",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "typed_atoms",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "aborted",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "check",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "verified",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "unchecked",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "landing",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "github",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.ConnectScmGithub"
+    },
+    {
+      "no": 3,
+      "name": "gitlab",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.ConnectScmGitlab"
+    },
+    {
+      "no": 4,
+      "name": "bitbucket",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.ConnectScmBitbucket"
+    },
+    {
+      "no": 5,
+      "name": "azure_devops",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.ConnectScmAzureDevops"
+    },
+    {
+      "no": 6,
+      "name": "reconnect",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "instance_host",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmAzureDevops": [],
+  "agent.v1.ConnectScmBitbucket": [
+    {
+      "no": 1,
+      "name": "instance_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmGithub": [
+    {
+      "no": 1,
+      "name": "repository",
+      "wire": 2,
+      "message": "agent.v1.ConnectScmGithubRepository"
+    },
+    {
+      "no": 2,
+      "name": "ghe_application",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmGithubRepository": [
+    {
+      "no": 1,
+      "name": "owner",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "repo",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmGitlab": [
+    {
+      "no": 1,
+      "name": "instance_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ConnectScmSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ConnectScmError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ConnectScmRejected"
+    },
+    {
+      "no": 4,
+      "name": "scm_target",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConnectScmSuccess": [],
+  "agent.v1.ConnectScmToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ConnectScmArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ConnectScmResult"
+    }
+  ],
+  "agent.v1.ConversationSearchArgs": [
+    {
+      "no": 1,
+      "name": "query",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "limit",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ConversationSearchError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConversationSearchHit": [
+    {
+      "no": 1,
+      "name": "conversation_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "source",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "updated_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "snippet",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ConversationSearchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ConversationSearchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ConversationSearchError"
+    }
+  ],
+  "agent.v1.ConversationSearchSuccess": [
+    {
+      "no": 1,
+      "name": "hits",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ConversationSearchHit"
+    },
+    {
+      "no": 2,
+      "name": "truncated",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "partial",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "rebuilding",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ConversationStep": [
+    {
+      "no": 1,
+      "name": "assistant_message",
+      "wire": 2,
+      "oneof": "message",
+      "message": "agent.v1.AssistantMessage"
+    },
+    {
+      "no": 2,
+      "name": "tool_call",
+      "wire": 2,
+      "oneof": "message",
+      "message": "agent.v1.ToolCall"
+    },
+    {
+      "no": 3,
+      "name": "thinking_message",
+      "wire": 2,
+      "oneof": "message",
+      "message": "agent.v1.ThinkingMessage"
+    }
+  ],
+  "agent.v1.Coordinate": [
+    {
+      "no": 1,
+      "name": "x",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "y",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CreateAgentArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "prompt",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "model",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "base_branch",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "machine_type",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "worker_id",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "pool",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "labels",
+      "wire": 2,
+      "message": "agent.v1.CreateAgentArgs.labelsEntry",
+      "repeated": true
+    },
+    {
+      "no": 10,
+      "name": "environment_build_id",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "environment_id",
+      "wire": 2
+    },
+    {
+      "no": 12,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "tracked_task_keys",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 14,
+      "name": "fork_from",
+      "wire": 2
+    },
+    {
+      "no": 15,
+      "name": "fork_turns",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CreateAgentArgs.labelsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateAgentError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "placement_approval_state",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CreateAgentResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateAgentSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateAgentError"
+    }
+  ],
+  "agent.v1.CreateAgentSuccess": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateAgentToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CreateAgentArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CreateAgentResult"
+    }
+  ],
+  "agent.v1.CreateGoalArgs": [
+    {
+      "no": 1,
+      "name": "objective",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateGoalResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateGoalSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GoalError"
+    }
+  ],
+  "agent.v1.CreateGoalSuccess": [],
+  "agent.v1.CreateGoalToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CreateGoalArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CreateGoalResult"
+    }
+  ],
+  "agent.v1.CreatePlanArgs": [
+    {
+      "no": 1,
+      "name": "plan",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "todos",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TodoItem"
+    },
+    {
+      "no": 3,
+      "name": "overview",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "is_project",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "phases",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.Phase"
+    }
+  ],
+  "agent.v1.CreatePlanError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreatePlanResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreatePlanSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreatePlanError"
+    },
+    {
+      "no": 3,
+      "name": "plan_uri",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreatePlanSuccess": [],
+  "agent.v1.CreatePlanToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CreatePlanArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CreatePlanResult"
+    }
+  ],
+  "agent.v1.CreatePrAction": [
+    {
+      "no": 1,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "body",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "base_branch",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "draft",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "add_labels",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 7,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "skip_branch_prefix_check",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "stack_on_pr_number",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CreateProjectArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "prompt",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "model",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "base_branch",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "machine_type",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "worker_id",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "pool",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "labels",
+      "wire": 2,
+      "message": "agent.v1.CreateProjectArgs.labelsEntry",
+      "repeated": true
+    },
+    {
+      "no": 10,
+      "name": "environment_build_id",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "environment_id",
+      "wire": 2
+    },
+    {
+      "no": 12,
+      "name": "repo_url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateProjectArgs.labelsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateProjectError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "placement_approval_state",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CreateProjectResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateProjectSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateProjectError"
+    }
+  ],
+  "agent.v1.CreateProjectSuccess": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateProjectToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CreateProjectArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CreateProjectResult"
+    }
+  ],
+  "agent.v1.CreateTrackedTasksArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tasks",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.NewTrackedTask"
+    }
+  ],
+  "agent.v1.CreateTrackedTasksError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateTrackedTasksResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateTrackedTasksSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.CreateTrackedTasksError"
+    }
+  ],
+  "agent.v1.CreateTrackedTasksSuccess": [
+    {
+      "no": 1,
+      "name": "created",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskCreated"
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CreateTrackedTasksToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.CreateTrackedTasksArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.CreateTrackedTasksResult"
+    }
+  ],
+  "agent.v1.CursorPositionAction": [],
+  "agent.v1.CursorRule": [
+    {
+      "no": 1,
+      "name": "full_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "content",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "type",
+      "wire": 2,
+      "message": "agent.v1.CursorRuleType"
+    },
+    {
+      "no": 4,
+      "name": "source",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "git_remote_origin",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "parse_error",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "environments",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "disabled_environments",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 9,
+      "name": "plugin",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "marketplace",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "plugin_id",
+      "wire": 2
+    },
+    {
+      "no": 12,
+      "name": "marketplace_id",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "scoped_to",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 14,
+      "name": "frontmatter",
+      "wire": 2
+    },
+    {
+      "no": 15,
+      "name": "is_required",
+      "wire": 0
+    },
+    {
+      "no": 16,
+      "name": "warnings",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 17,
+      "name": "body_omitted",
+      "wire": 0
+    }
+  ],
+  "agent.v1.CursorRuleType": [
+    {
+      "no": 1,
+      "name": "global",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.CursorRuleTypeGlobal"
+    },
+    {
+      "no": 2,
+      "name": "file_globbed",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.CursorRuleTypeFileGlobs"
+    },
+    {
+      "no": 3,
+      "name": "agent_fetched",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.CursorRuleTypeAgentFetched"
+    },
+    {
+      "no": 4,
+      "name": "manually_attached",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.CursorRuleTypeManuallyAttached"
+    }
+  ],
+  "agent.v1.CursorRuleTypeAgentFetched": [
+    {
+      "no": 1,
+      "name": "description",
+      "wire": 2
+    }
+  ],
+  "agent.v1.CursorRuleTypeFileGlobs": [
+    {
+      "no": 1,
+      "name": "globs",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.CursorRuleTypeGlobal": [],
+  "agent.v1.CursorRuleTypeManuallyAttached": [],
+  "agent.v1.DeleteArgs": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteError": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteFileBusy": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteFileNotFound": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteNotFile": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "actual_type",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeletePermissionDenied": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "client_visible_error",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.DeleteRejected": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteSuccess"
+    },
+    {
+      "no": 2,
+      "name": "file_not_found",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteFileNotFound"
+    },
+    {
+      "no": 3,
+      "name": "not_file",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteNotFile"
+    },
+    {
+      "no": 4,
+      "name": "permission_denied",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeletePermissionDenied"
+    },
+    {
+      "no": 5,
+      "name": "file_busy",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteFileBusy"
+    },
+    {
+      "no": 6,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteRejected"
+    },
+    {
+      "no": 7,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteError"
+    }
+  ],
+  "agent.v1.DeleteSuccess": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "deleted_file",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "file_size",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "prev_content",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.DeleteArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.DeleteResult"
+    }
+  ],
+  "agent.v1.DeleteTrackedTasksArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "keys",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.DeleteTrackedTasksError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteTrackedTasksResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteTrackedTasksSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.DeleteTrackedTasksError"
+    }
+  ],
+  "agent.v1.DeleteTrackedTasksSuccess": [
+    {
+      "no": 1,
+      "name": "deleted_keys",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 2,
+      "name": "unparented_keys",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.DeleteTrackedTasksToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.DeleteTrackedTasksArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.DeleteTrackedTasksResult"
+    }
+  ],
+  "agent.v1.DiagnosticItem": [
+    {
+      "no": 1,
+      "name": "severity",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "range",
+      "wire": 2,
+      "message": "agent.v1.DiagnosticRange"
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "source",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "code",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "is_stale",
+      "wire": 0
+    }
+  ],
+  "agent.v1.DiagnosticRange": [
+    {
+      "no": 1,
+      "name": "start",
+      "wire": 2,
+      "message": "agent.v1.Position"
+    },
+    {
+      "no": 2,
+      "name": "end",
+      "wire": 2,
+      "message": "agent.v1.Position"
+    }
+  ],
+  "agent.v1.DragAction": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.Coordinate"
+    },
+    {
+      "no": 2,
+      "name": "button",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "modifier_keys",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditArgs": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "stream_content",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditError": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "model_visible_error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditFileNotFound": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditPrLabelsArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "add_labels",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "remove_labels",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.EditPrLabelsError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditPrLabelsResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditPrLabelsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditPrLabelsError"
+    }
+  ],
+  "agent.v1.EditPrLabelsSuccess": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "pr_number",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditPrLabelsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.EditPrLabelsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.EditPrLabelsResult"
+    }
+  ],
+  "agent.v1.EditReadPermissionDenied": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditRejected": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditSuccess"
+    },
+    {
+      "no": 2,
+      "name": "file_not_found",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditFileNotFound"
+    },
+    {
+      "no": 3,
+      "name": "read_permission_denied",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditReadPermissionDenied"
+    },
+    {
+      "no": 4,
+      "name": "write_permission_denied",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditWritePermissionDenied"
+    },
+    {
+      "no": 6,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditRejected"
+    },
+    {
+      "no": 7,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.EditError"
+    }
+  ],
+  "agent.v1.EditSuccess": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "lines_added",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "lines_removed",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "diff_string",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "before_full_file_content",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "after_full_file_content",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.EditToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.EditArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.EditResult"
+    }
+  ],
+  "agent.v1.EditWritePermissionDenied": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.FetchArgs": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.FetchCloudAgentDataArgs": [
+    {
+      "no": 4,
+      "name": "bc_ids",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 6,
+      "name": "sources",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 7,
+      "name": "statuses",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "include_team_wide",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "include_archived",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "limit",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "include_transcript",
+      "wire": 0
+    },
+    {
+      "no": 13,
+      "name": "active_since",
+      "wire": 2
+    }
+  ],
+  "agent.v1.FetchCloudAgentDataError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.FetchCloudAgentDataResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.FetchCloudAgentDataSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.FetchCloudAgentDataError"
+    }
+  ],
+  "agent.v1.FetchCloudAgentDataSuccess": [
+    {
+      "no": 1,
+      "name": "summary",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_count",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "written_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 4,
+      "name": "unavailable_bc_ids",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.FetchCloudAgentDataToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.FetchCloudAgentDataArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.FetchCloudAgentDataResult"
+    }
+  ],
+  "agent.v1.FetchError": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.FetchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.FetchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.FetchError"
+    }
+  ],
+  "agent.v1.FetchSuccess": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "content",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "status_code",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "content_type",
+      "wire": 2
+    }
+  ],
+  "agent.v1.FetchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.FetchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.FetchResult"
+    }
+  ],
+  "agent.v1.FileDiagnostics": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "diagnostics",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.DiagnosticItem"
+    },
+    {
+      "no": 3,
+      "name": "diagnostics_count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GenerateImageArgs": [
+    {
+      "no": 1,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "reference_image_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 6,
+      "name": "aspect_ratio",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GenerateImageError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GenerateImageResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GenerateImageSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GenerateImageError"
+    }
+  ],
+  "agent.v1.GenerateImageSuccess": [
+    {
+      "no": 1,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "image_data",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GenerateImageToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GenerateImageArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GenerateImageResult"
+    }
+  ],
+  "agent.v1.GenerateVideoArgs": [
+    {
+      "no": 1,
+      "name": "prompt",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "image_path",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "reference_image_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "duration_seconds",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "aspect_ratio",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "resolution",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "last_frame_path",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "keyframes",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.GenerateVideoKeyframe"
+    }
+  ],
+  "agent.v1.GenerateVideoError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GenerateVideoKeyframe": [
+    {
+      "no": 1,
+      "name": "image_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "timestamp_seconds",
+      "wire": 1
+    }
+  ],
+  "agent.v1.GenerateVideoResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GenerateVideoSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GenerateVideoError"
+    }
+  ],
+  "agent.v1.GenerateVideoSuccess": [
+    {
+      "no": 1,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "duration_seconds",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GenerateVideoToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GenerateVideoArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GenerateVideoResult"
+    }
+  ],
+  "agent.v1.GetAgentStatusArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_ids",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.GetAgentStatusError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetAgentStatusResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetAgentStatusSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetAgentStatusError"
+    }
+  ],
+  "agent.v1.GetAgentStatusSuccess": [
+    {
+      "no": 1,
+      "name": "workers",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.GetAgentStatusWorker"
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetAgentStatusToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GetAgentStatusArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GetAgentStatusResult"
+    }
+  ],
+  "agent.v1.GetAgentStatusWorker": [
+    {
+      "no": 1,
+      "name": "bc_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "lifecycle",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "turn_in_flight",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "last_terminal_turn_status",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "last_activity_at_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GetCiStatusAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "repo_url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetMcpToolsAgentResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetMcpToolsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetMcpToolsError"
+    }
+  ],
+  "agent.v1.GetMcpToolsArgs": [
+    {
+      "no": 1,
+      "name": "server",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "pattern",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetMcpToolsError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetMcpToolsSuccess": [
+    {
+      "no": 1,
+      "name": "content",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "output_file_path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetMcpToolsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GetMcpToolsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GetMcpToolsAgentResult"
+    }
+  ],
+  "agent.v1.GetPrArgs": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetPrCodeTourArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "revision_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "section_id",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "head_sha",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "pr_url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetPrCodeTourError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetPrCodeTourResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetPrCodeTourSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GetPrCodeTourError"
+    }
+  ],
+  "agent.v1.GetPrCodeTourSuccess": [
+    {
+      "no": 1,
+      "name": "revisions",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.PrCodeTourRevisionSnapshot"
+    },
+    {
+      "no": 2,
+      "name": "section_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GetPrCodeTourToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GetPrCodeTourArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GetPrCodeTourResult"
+    }
+  ],
+  "agent.v1.GlobToolArgs": [
+    {
+      "no": 1,
+      "name": "target_directory",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "glob_pattern",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GlobToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GlobToolArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GlobToolResult"
+    }
+  ],
+  "agent.v1.GlobToolError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GlobToolResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GlobToolSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GlobToolError"
+    }
+  ],
+  "agent.v1.GlobToolSuccess": [
+    {
+      "no": 1,
+      "name": "pattern",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "files",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 4,
+      "name": "total_files",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "client_truncated",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "ripgrep_truncated",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GoalError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GrepArgs": [
+    {
+      "no": 1,
+      "name": "pattern",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "glob",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "output_mode",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "context_before",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "context_after",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "context",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "case_insensitive",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "type",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "head_limit",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "multiline",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "sort",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "sort_ascending",
+      "wire": 0
+    },
+    {
+      "no": 14,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 15,
+      "name": "sandbox_policy",
+      "wire": 2,
+      "message": "agent.v1.SandboxPolicy"
+    },
+    {
+      "no": 16,
+      "name": "offset",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepContentMatch": [
+    {
+      "no": 1,
+      "name": "line_number",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "content",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "content_truncated",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "is_context_line",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepContentResult": [
+    {
+      "no": 1,
+      "name": "matches",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.GrepFileMatch"
+    },
+    {
+      "no": 2,
+      "name": "total_lines",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "total_matched_lines",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "client_truncated",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "ripgrep_truncated",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "head_limit_applied",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "offset_applied",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepCountResult": [
+    {
+      "no": 1,
+      "name": "counts",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.GrepFileCount"
+    },
+    {
+      "no": 2,
+      "name": "total_files",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "total_matches",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "client_truncated",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "ripgrep_truncated",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "head_limit_applied",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "offset_applied",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.GrepFileCount": [
+    {
+      "no": 1,
+      "name": "file",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepFileMatch": [
+    {
+      "no": 1,
+      "name": "file",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "matches",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.GrepContentMatch"
+    }
+  ],
+  "agent.v1.GrepFilesResult": [
+    {
+      "no": 1,
+      "name": "files",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 2,
+      "name": "total_files",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "client_truncated",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "ripgrep_truncated",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "head_limit_applied",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "offset_applied",
+      "wire": 0
+    }
+  ],
+  "agent.v1.GrepResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GrepSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GrepError"
+    }
+  ],
+  "agent.v1.GrepSuccess": [
+    {
+      "no": 1,
+      "name": "pattern",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "output_mode",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "workspace_results",
+      "wire": 2,
+      "message": "agent.v1.GrepSuccess.workspace_resultsEntry",
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "active_editor_result",
+      "wire": 2,
+      "message": "agent.v1.GrepUnionResult"
+    }
+  ],
+  "agent.v1.GrepSuccess.workspace_resultsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2,
+      "message": "agent.v1.GrepUnionResult"
+    }
+  ],
+  "agent.v1.GrepToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.GrepArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.GrepResult"
+    }
+  ],
+  "agent.v1.GrepUnionResult": [
+    {
+      "no": 1,
+      "name": "count",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GrepCountResult"
+    },
+    {
+      "no": 2,
+      "name": "files",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GrepFilesResult"
+    },
+    {
+      "no": 3,
+      "name": "content",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GrepContentResult"
+    }
+  ],
+  "agent.v1.HookAdditionalContext": [
+    {
+      "no": 1,
+      "name": "hook_event_name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "content",
+      "wire": 2
+    }
+  ],
+  "agent.v1.KeyAction": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "hold_duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "stroke",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ListMcpResourcesError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListMcpResourcesExecArgs": [
+    {
+      "no": 1,
+      "name": "server",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListMcpResourcesExecResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ListMcpResourcesSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ListMcpResourcesError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ListMcpResourcesRejected"
+    }
+  ],
+  "agent.v1.ListMcpResourcesExecResult.McpResource": [
+    {
+      "no": 1,
+      "name": "uri",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "mime_type",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "server",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "annotations",
+      "wire": 2,
+      "message": "agent.v1.ListMcpResourcesExecResult.McpResource.annotationsEntry",
+      "repeated": true
+    }
+  ],
+  "agent.v1.ListMcpResourcesExecResult.McpResource.annotationsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListMcpResourcesRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListMcpResourcesSuccess": [
+    {
+      "no": 1,
+      "name": "resources",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ListMcpResourcesExecResult.McpResource"
+    }
+  ],
+  "agent.v1.ListMcpResourcesToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ListMcpResourcesExecArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ListMcpResourcesExecResult"
+    }
+  ],
+  "agent.v1.ListPrsArgs": [
+    {
+      "no": 1,
+      "name": "limit",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ListTrackedTasksArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "keys",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "status_categories",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 4,
+      "name": "owner",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "linked_agent_id",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "cursor",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListTrackedTasksError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListTrackedTasksResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ListTrackedTasksSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ListTrackedTasksError"
+    }
+  ],
+  "agent.v1.ListTrackedTasksSuccess": [
+    {
+      "no": 1,
+      "name": "tasks",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskView"
+    },
+    {
+      "no": 2,
+      "name": "statuses",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskStatusView"
+    },
+    {
+      "no": 3,
+      "name": "members",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskMemberView"
+    },
+    {
+      "no": 4,
+      "name": "older_closed_count",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "truncated",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "matching_count",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "tags",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskTagView"
+    },
+    {
+      "no": 9,
+      "name": "next_cursor",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ListTrackedTasksToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ListTrackedTasksArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ListTrackedTasksResult"
+    }
+  ],
+  "agent.v1.LsArgs": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "ignore",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "sandbox_policy",
+      "wire": 2,
+      "message": "agent.v1.SandboxPolicy"
+    },
+    {
+      "no": 5,
+      "name": "timeout_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.LsDirectoryTreeNode": [
+    {
+      "no": 1,
+      "name": "abs_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "children_dirs",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.LsDirectoryTreeNode"
+    },
+    {
+      "no": 3,
+      "name": "children_files",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.LsDirectoryTreeNode.File"
+    },
+    {
+      "no": 4,
+      "name": "children_were_processed",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "full_subtree_extension_counts",
+      "wire": 2,
+      "message": "agent.v1.LsDirectoryTreeNode.full_subtree_extension_countsEntry",
+      "repeated": true
+    },
+    {
+      "no": 6,
+      "name": "num_files",
+      "wire": 0
+    }
+  ],
+  "agent.v1.LsDirectoryTreeNode.File": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "terminal_metadata",
+      "wire": 2,
+      "message": "agent.v1.TerminalMetadata"
+    }
+  ],
+  "agent.v1.LsDirectoryTreeNode.full_subtree_extension_countsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 0
+    }
+  ],
+  "agent.v1.LsError": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.LsRejected": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.LsResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.LsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.LsError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.LsRejected"
+    },
+    {
+      "no": 4,
+      "name": "timeout",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.LsTimeout"
+    }
+  ],
+  "agent.v1.LsSuccess": [
+    {
+      "no": 1,
+      "name": "directory_tree_root",
+      "wire": 2,
+      "message": "agent.v1.LsDirectoryTreeNode"
+    }
+  ],
+  "agent.v1.LsTimeout": [
+    {
+      "no": 1,
+      "name": "directory_tree_root",
+      "wire": 2,
+      "message": "agent.v1.LsDirectoryTreeNode"
+    }
+  ],
+  "agent.v1.LsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.LsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.LsResult"
+    }
+  ],
+  "agent.v1.McpArgs": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.McpArgs.argsEntry",
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "provider_identifier",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "tool_name",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "smart_mode_approval",
+      "wire": 2,
+      "message": "agent.v1.SmartModeApproval"
+    },
+    {
+      "no": 7,
+      "name": "smart_mode_approval_only",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "skip_approval",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "server_identifier",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "symbolic_path_arguments",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.McpSymbolicPathArgument"
+    },
+    {
+      "no": 11,
+      "name": "arguments_repaired",
+      "wire": 0
+    }
+  ],
+  "agent.v1.McpArgs.argsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2,
+      "message": "google.protobuf.Value"
+    }
+  ],
+  "agent.v1.McpAuthArgs": [
+    {
+      "no": 1,
+      "name": "server_identifier",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpAuthError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpAuthRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpAuthResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpAuthSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpAuthError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpAuthRejected"
+    }
+  ],
+  "agent.v1.McpAuthSuccess": [
+    {
+      "no": 1,
+      "name": "server_identifier",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpAuthToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.McpAuthArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.McpAuthResult"
+    }
+  ],
+  "agent.v1.McpImageContent": [
+    {
+      "no": 1,
+      "name": "data",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "mime_type",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpPermissionDenied": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.McpRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.McpSuccess": [
+    {
+      "no": 1,
+      "name": "content",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.McpToolResultContentItem"
+    },
+    {
+      "no": 2,
+      "name": "is_error",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "structured_content",
+      "wire": 2,
+      "message": "google.protobuf.Struct"
+    },
+    {
+      "no": 4,
+      "name": "system_reminders",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.SystemReminder"
+    },
+    {
+      "no": 5,
+      "name": "result_meta",
+      "wire": 2,
+      "message": "google.protobuf.Struct"
+    }
+  ],
+  "agent.v1.McpSymbolicPathArgument": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "sha256",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "size_bytes",
+      "wire": 0
+    }
+  ],
+  "agent.v1.McpTextContent": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    }
+  ],
+  "agent.v1.McpToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.McpArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.McpToolResult"
+    },
+    {
+      "no": 3,
+      "name": "description",
+      "wire": 2
+    }
+  ],
+  "agent.v1.McpToolError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "read_tool_def_reminder",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "system_reminders",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.SystemReminder"
+    }
+  ],
+  "agent.v1.McpToolResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpToolError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpRejected"
+    },
+    {
+      "no": 4,
+      "name": "permission_denied",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.McpPermissionDenied"
+    }
+  ],
+  "agent.v1.McpToolResultContentItem": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2,
+      "oneof": "content",
+      "message": "agent.v1.McpTextContent"
+    },
+    {
+      "no": 2,
+      "name": "image",
+      "wire": 2,
+      "oneof": "content",
+      "message": "agent.v1.McpImageContent"
+    }
+  ],
+  "agent.v1.MergePrAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "mode",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "method",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "expected_head_sha",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "expected_member_head_shas",
+      "wire": 2,
+      "message": "agent.v1.MergePrAction.expected_member_head_shasEntry",
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "downstack",
+      "wire": 0
+    }
+  ],
+  "agent.v1.MergePrAction.expected_member_head_shasEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.MouseDownAction": [
+    {
+      "no": 1,
+      "name": "button",
+      "wire": 0
+    }
+  ],
+  "agent.v1.MouseMoveAction": [
+    {
+      "no": 1,
+      "name": "coordinate",
+      "wire": 2,
+      "message": "agent.v1.Coordinate"
+    }
+  ],
+  "agent.v1.MouseUpAction": [
+    {
+      "no": 1,
+      "name": "button",
+      "wire": 0
+    }
+  ],
+  "agent.v1.NativeX11Driver": [
+    {
+      "no": 1,
+      "name": "typing_delay_ms",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "allow_fallback",
+      "wire": 0
+    }
+  ],
+  "agent.v1.NetworkPolicy": [
+    {
+      "no": 1,
+      "name": "version",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "default_action",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "deny",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 4,
+      "name": "allow",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "logging",
+      "wire": 2,
+      "message": "agent.v1.NetworkPolicyLoggingConfig"
+    }
+  ],
+  "agent.v1.NetworkPolicyLoggingConfig": [
+    {
+      "no": 1,
+      "name": "decision_log_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "log_format",
+      "wire": 2
+    }
+  ],
+  "agent.v1.NewCloudVmTarget": [
+    {
+      "no": 1,
+      "name": "environment_build_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "base_branch",
+      "wire": 2
+    }
+  ],
+  "agent.v1.NewTrackedTask": [
+    {
+      "no": 1,
+      "name": "client_ref",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "status",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "owner",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "parent",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "links",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskLinkInput"
+    },
+    {
+      "no": 7,
+      "name": "tag",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "internal_notes",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "tags",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.OutputLocation": [
+    {
+      "no": 1,
+      "name": "file_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "size_bytes",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "line_count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.Phase": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "todos",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TodoItem"
+    }
+  ],
+  "agent.v1.Position": [
+    {
+      "no": 1,
+      "name": "line",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "column",
+      "wire": 0
+    }
+  ],
+  "agent.v1.PostCommentAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "body",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "in_reply_to",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "line",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "start_line",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "side",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "reply_to_reference",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrCodeTourRevisionSnapshot": [
+    {
+      "no": 1,
+      "name": "revision_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "status",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "head_sha",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "feedback",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "updated_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "is_current",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "markdown",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "source",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "edited_by_bc_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "create_pr",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.CreatePrAction"
+    },
+    {
+      "no": 3,
+      "name": "update_pr",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.UpdatePrAction"
+    },
+    {
+      "no": 4,
+      "name": "post_comment",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.PostCommentAction"
+    },
+    {
+      "no": 5,
+      "name": "resolve_comment",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.ResolveCommentAction"
+    },
+    {
+      "no": 6,
+      "name": "get_ci_status",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.GetCiStatusAction"
+    },
+    {
+      "no": 7,
+      "name": "set_pr_status",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.SetPrStatusAction"
+    },
+    {
+      "no": 8,
+      "name": "merge_pr",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.MergePrAction"
+    },
+    {
+      "no": 9,
+      "name": "list_prs",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.ListPrsArgs"
+    },
+    {
+      "no": 10,
+      "name": "get_pr",
+      "wire": 2,
+      "oneof": "action",
+      "message": "agent.v1.GetPrArgs"
+    }
+  ],
+  "agent.v1.PrManagementError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementNeedsConfirmation": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "discovered_pr_url",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "discovered_pr_number",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "discovered_pr_title",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "branch_name",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementRead": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementRegistered": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "body",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "base_branch",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "draft",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "branch_name",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementRejected"
+    },
+    {
+      "no": 4,
+      "name": "registered",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementRegistered"
+    },
+    {
+      "no": 5,
+      "name": "needs_confirmation",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementNeedsConfirmation"
+    },
+    {
+      "no": 6,
+      "name": "read",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.PrManagementRead"
+    }
+  ],
+  "agent.v1.PrManagementSuccess": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "pr_number",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.PrManagementToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.PrManagementArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.PrManagementResult"
+    }
+  ],
+  "agent.v1.ReadAgentTranscriptArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "mode",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "max_turns",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadAgentTranscriptError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadAgentTranscriptResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadAgentTranscriptSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadAgentTranscriptError"
+    }
+  ],
+  "agent.v1.ReadAgentTranscriptSuccess": [
+    {
+      "no": 1,
+      "name": "transcript",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "truncated",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadAgentTranscriptToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadAgentTranscriptArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadAgentTranscriptResult"
+    }
+  ],
+  "agent.v1.ReadCanvasArgs": [
+    {
+      "no": 1,
+      "name": "canvas_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadCanvasFailure": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "detail",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadCanvasResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadCanvasSuccess"
+    },
+    {
+      "no": 2,
+      "name": "failure",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadCanvasFailure"
+    }
+  ],
+  "agent.v1.ReadCanvasSuccess": [
+    {
+      "no": 1,
+      "name": "canvas_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "source",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadCanvasToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadCanvasArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadCanvasResult"
+    }
+  ],
+  "agent.v1.ReadLintsToolArgs": [
+    {
+      "no": 1,
+      "name": "paths",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.ReadLintsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadLintsToolArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadLintsToolResult"
+    }
+  ],
+  "agent.v1.ReadLintsToolError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadLintsToolResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadLintsToolSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadLintsToolError"
+    }
+  ],
+  "agent.v1.ReadLintsToolSuccess": [
+    {
+      "no": 1,
+      "name": "file_diagnostics",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.FileDiagnostics"
+    },
+    {
+      "no": 2,
+      "name": "total_files",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "total_diagnostics",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadMcpResourceError": [
+    {
+      "no": 1,
+      "name": "uri",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadMcpResourceExecArgs": [
+    {
+      "no": 1,
+      "name": "server",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "uri",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "download_path",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "smart_mode_approval",
+      "wire": 2,
+      "message": "agent.v1.SmartModeApproval"
+    }
+  ],
+  "agent.v1.ReadMcpResourceExecResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadMcpResourceSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadMcpResourceError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadMcpResourceRejected"
+    },
+    {
+      "no": 4,
+      "name": "not_found",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadMcpResourceNotFound"
+    }
+  ],
+  "agent.v1.ReadMcpResourceNotFound": [
+    {
+      "no": 1,
+      "name": "uri",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadMcpResourceRejected": [
+    {
+      "no": 1,
+      "name": "uri",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadMcpResourceSuccess": [
+    {
+      "no": 1,
+      "name": "uri",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "mime_type",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "text",
+      "wire": 2,
+      "oneof": "content"
+    },
+    {
+      "no": 6,
+      "name": "blob",
+      "wire": 2,
+      "oneof": "content"
+    },
+    {
+      "no": 7,
+      "name": "annotations",
+      "wire": 2,
+      "message": "agent.v1.ReadMcpResourceSuccess.annotationsEntry",
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "download_path",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    },
+    {
+      "no": 10,
+      "name": "meta_json",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadMcpResourceSuccess.annotationsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadMcpResourceToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadMcpResourceExecArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadMcpResourceExecResult"
+    }
+  ],
+  "agent.v1.ReadRange": [
+    {
+      "no": 1,
+      "name": "start_line",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "end_line",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadTodosArgs": [
+    {
+      "no": 1,
+      "name": "status_filter",
+      "wire": 0,
+      "repeated": true,
+      "packed": true
+    },
+    {
+      "no": 2,
+      "name": "id_filter",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.ReadTodosError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadTodosResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadTodosSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadTodosError"
+    }
+  ],
+  "agent.v1.ReadTodosSuccess": [
+    {
+      "no": 1,
+      "name": "todos",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TodoItem"
+    },
+    {
+      "no": 2,
+      "name": "total_count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadTodosToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadTodosArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadTodosResult"
+    }
+  ],
+  "agent.v1.ReadToolArgs": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "offset",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "limit",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "include_line_numbers",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ReadToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReadToolArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReadToolResult"
+    }
+  ],
+  "agent.v1.ReadToolError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReadToolResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadToolSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReadToolError"
+    }
+  ],
+  "agent.v1.ReadToolSuccess": [
+    {
+      "no": 1,
+      "name": "content",
+      "wire": 2,
+      "oneof": "output"
+    },
+    {
+      "no": 6,
+      "name": "data",
+      "wire": 2,
+      "oneof": "output"
+    },
+    {
+      "no": 9,
+      "name": "data_blob_id",
+      "wire": 2,
+      "oneof": "output"
+    },
+    {
+      "no": 10,
+      "name": "content_blob_id",
+      "wire": 2,
+      "oneof": "output"
+    },
+    {
+      "no": 2,
+      "name": "is_empty",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "exceeded_limit",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "total_lines",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "file_size",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "read_range",
+      "wire": 2,
+      "message": "agent.v1.ReadRange"
+    },
+    {
+      "no": 11,
+      "name": "include_line_numbers",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "related_cursor_rule_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 13,
+      "name": "related_cursor_rules",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.CursorRule"
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFinding": [
+    {
+      "no": 1,
+      "name": "check_name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "details_url",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "tldr",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "root_cause",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "failing_signal",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "suggested_next_step",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "diff_relation",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "diff_relation_evidence",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "flake_assessment",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "flake_evidence",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "rerun_available",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "rerun_evidence",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "recommended_action",
+      "wire": 2
+    },
+    {
+      "no": 14,
+      "name": "recommended_action_evidence",
+      "wire": 2
+    },
+    {
+      "no": 15,
+      "name": "confidence",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFindingsArgs": [
+    {
+      "no": 1,
+      "name": "findings",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.RecordCiInvestigationFinding"
+    },
+    {
+      "no": 2,
+      "name": "overall",
+      "wire": 2,
+      "message": "agent.v1.RecordCiInvestigationOverall"
+    },
+    {
+      "no": 3,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFindingsError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFindingsResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordCiInvestigationFindingsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordCiInvestigationFindingsError"
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFindingsSuccess": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordCiInvestigationFindingsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.RecordCiInvestigationFindingsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.RecordCiInvestigationFindingsResult"
+    }
+  ],
+  "agent.v1.RecordCiInvestigationOverall": [
+    {
+      "no": 1,
+      "name": "summary",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "themes",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "recommended_action",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "recommended_action_evidence",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "check_keys",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.RecordScreenArgs": [
+    {
+      "no": 1,
+      "name": "mode",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "save_as_filename",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordScreenDiscardSuccess": [],
+  "agent.v1.RecordScreenFailure": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RecordScreenResult": [
+    {
+      "no": 1,
+      "name": "start_success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordScreenStartSuccess"
+    },
+    {
+      "no": 2,
+      "name": "save_success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordScreenSaveSuccess"
+    },
+    {
+      "no": 3,
+      "name": "discard_success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordScreenDiscardSuccess"
+    },
+    {
+      "no": 4,
+      "name": "failure",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.RecordScreenFailure"
+    }
+  ],
+  "agent.v1.RecordScreenSaveSuccess": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "recording_duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "requested_file_path_rejected_reason",
+      "wire": 0
+    }
+  ],
+  "agent.v1.RecordScreenStartSuccess": [
+    {
+      "no": 1,
+      "name": "was_prior_recording_cancelled",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "was_save_as_filename_ignored",
+      "wire": 0
+    }
+  ],
+  "agent.v1.RecordScreenToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.RecordScreenArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.RecordScreenResult"
+    }
+  ],
+  "agent.v1.ReflectArgs": [
+    {
+      "no": 1,
+      "name": "unexpected_action_outcomes",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "relevant_instructions",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "scenario_analysis",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "critical_synthesis",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "next_steps",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReflectError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReflectResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReflectSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReflectError"
+    }
+  ],
+  "agent.v1.ReflectSuccess": [],
+  "agent.v1.ReflectToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReflectArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReflectResult"
+    }
+  ],
+  "agent.v1.ReplaceEnvArgs": [
+    {
+      "no": 1,
+      "name": "config",
+      "wire": 2,
+      "message": "agent.v1.ReplaceEnvConfig"
+    },
+    {
+      "no": 2,
+      "name": "mode",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "checkout_ref_overrides",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.RepoCheckoutRefOverride"
+    }
+  ],
+  "agent.v1.ReplaceEnvConfig": [
+    {
+      "no": 1,
+      "name": "install_script",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "dockerfile_contents",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReplaceEnvFailure": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "setup_logs",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReplaceEnvResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReplaceEnvSuccess"
+    },
+    {
+      "no": 2,
+      "name": "failure",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReplaceEnvFailure"
+    }
+  ],
+  "agent.v1.ReplaceEnvSuccess": [
+    {
+      "no": 1,
+      "name": "setup_logs",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReplaceEnvToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReplaceEnvArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReplaceEnvResult"
+    },
+    {
+      "no": 3,
+      "name": "associated_pod_key",
+      "wire": 2
+    }
+  ],
+  "agent.v1.RepoCheckoutRefOverride": [
+    {
+      "no": 1,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "ref",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReportBugArgs": [
+    {
+      "no": 1,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "file",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "start_line",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "end_line",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "severity",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "category",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "rationale",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReportBugError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReportBugResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReportBugSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReportBugError"
+    }
+  ],
+  "agent.v1.ReportBugSuccess": [
+    {
+      "no": 1,
+      "name": "output",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReportBugToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReportBugArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReportBugResult"
+    }
+  ],
+  "agent.v1.ReportBugfixResultsArgs": [
+    {
+      "no": 1,
+      "name": "summary",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "results",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.BugfixResultItem"
+    }
+  ],
+  "agent.v1.ReportBugfixResultsError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ReportBugfixResultsResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReportBugfixResultsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ReportBugfixResultsError"
+    }
+  ],
+  "agent.v1.ReportBugfixResultsSuccess": [
+    {
+      "no": 1,
+      "name": "results",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.BugfixResultItem"
+    }
+  ],
+  "agent.v1.ReportBugfixResultsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ReportBugfixResultsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ReportBugfixResultsResult"
+    }
+  ],
+  "agent.v1.ResolveCommentAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "comment_id",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "comment_reference",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SameMachineTarget": [],
+  "agent.v1.SandboxPolicy": [
+    {
+      "no": 1,
+      "name": "type",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "network_access",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "additional_readwrite_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 4,
+      "name": "additional_readonly_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "debug_output_dir",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "disable_tmp_write",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "allowlist_escalated",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "enable_shared_build_cache",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "network_policy",
+      "wire": 2,
+      "message": "agent.v1.NetworkPolicy"
+    },
+    {
+      "no": 11,
+      "name": "network_policy_strict",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "capture_denies",
+      "wire": 0
+    },
+    {
+      "no": 13,
+      "name": "skip_statsig_defaults",
+      "wire": 0
+    },
+    {
+      "no": 14,
+      "name": "read_boundary",
+      "wire": 0
+    },
+    {
+      "no": 15,
+      "name": "additional_read_paths",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 16,
+      "name": "allow_user_override_read_paths",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ScreenshotAction": [],
+  "agent.v1.ScrollAction": [
+    {
+      "no": 1,
+      "name": "coordinate",
+      "wire": 2,
+      "message": "agent.v1.Coordinate"
+    },
+    {
+      "no": 2,
+      "name": "direction",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "amount",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "modifier_keys",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SearchConversationsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ConversationSearchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ConversationSearchResult"
+    }
+  ],
+  "agent.v1.SelfHostedPoolTarget": [
+    {
+      "no": 1,
+      "name": "pool",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "labels",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.SelfHostedWorkerLabel"
+    }
+  ],
+  "agent.v1.SelfHostedWorkerLabel": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SelfHostedWorkerTarget": [
+    {
+      "no": 1,
+      "name": "worker_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SemSearchToolArgs": [
+    {
+      "no": 1,
+      "name": "query",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "target_directories",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 3,
+      "name": "explanation",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SemSearchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SemSearchToolArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SemSearchToolResult"
+    }
+  ],
+  "agent.v1.SemSearchToolError": [
+    {
+      "no": 1,
+      "name": "error_message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SemSearchToolResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SemSearchToolSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SemSearchToolError"
+    }
+  ],
+  "agent.v1.SemSearchToolSuccess": [
+    {
+      "no": 1,
+      "name": "results",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "code_results",
+      "wire": 2,
+      "repeated": true,
+      "message": "aiserver.v1.CodeResult"
+    }
+  ],
+  "agent.v1.SendFinalSummaryArgs": [
+    {
+      "no": 1,
+      "name": "final_summary",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendFinalSummaryError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendFinalSummaryResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendFinalSummarySuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendFinalSummaryError"
+    }
+  ],
+  "agent.v1.SendFinalSummarySuccess": [
+    {
+      "no": 1,
+      "name": "final_summary",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendFinalSummaryToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SendFinalSummaryArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SendFinalSummaryResult"
+    }
+  ],
+  "agent.v1.SendMessageArgs": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2,
+      "oneof": "message",
+      "message": "agent.v1.SendMessageText"
+    },
+    {
+      "no": 2,
+      "name": "attachment",
+      "wire": 2,
+      "oneof": "message",
+      "message": "agent.v1.SendMessageAttachment"
+    },
+    {
+      "no": 3,
+      "name": "reply_to",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "replace_previous_message",
+      "wire": 0
+    }
+  ],
+  "agent.v1.SendMessageAttachment": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "alt",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendMessageError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendMessageResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendMessageSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendMessageError"
+    }
+  ],
+  "agent.v1.SendMessageSuccess": [
+    {
+      "no": 1,
+      "name": "timestamp",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "message_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendMessageText": [
+    {
+      "no": 1,
+      "name": "content",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendMessageToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SendMessageArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SendMessageResult"
+    }
+  ],
+  "agent.v1.SendToAgentArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "delivery",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "model",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "tracked_task_keys",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.SendToAgentError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendToAgentRecipient": [
+    {
+      "no": 1,
+      "name": "kind",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "display_name",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendToAgentResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendToAgentSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendToAgentError"
+    }
+  ],
+  "agent.v1.SendToAgentSuccess": [
+    {
+      "no": 1,
+      "name": "worker_bc_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "delivered_as",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "recipient",
+      "wire": 2,
+      "message": "agent.v1.SendToAgentRecipient"
+    }
+  ],
+  "agent.v1.SendToAgentToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SendToAgentArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SendToAgentResult"
+    }
+  ],
+  "agent.v1.SendToUserArgs": [
+    {
+      "no": 1,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendToUserError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SendToUserResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendToUserSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SendToUserError"
+    }
+  ],
+  "agent.v1.SendToUserSuccess": [],
+  "agent.v1.SendToUserToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SendToUserArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SendToUserResult"
+    }
+  ],
+  "agent.v1.SetActiveBranchArgs": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SetActiveBranchError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SetActiveBranchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SetActiveBranchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SetActiveBranchError"
+    }
+  ],
+  "agent.v1.SetActiveBranchSuccess": [],
+  "agent.v1.SetActiveBranchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SetActiveBranchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SetActiveBranchResult"
+    }
+  ],
+  "agent.v1.SetPrStatusAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "status",
+      "wire": 0
+    }
+  ],
+  "agent.v1.SetupVmEnvironmentArgs": [
+    {
+      "no": 2,
+      "name": "install_command",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "start_command",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "dockerfile_contents",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SetupVmEnvironmentResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SetupVmEnvironmentSuccess"
+    }
+  ],
+  "agent.v1.SetupVmEnvironmentSuccess": [],
+  "agent.v1.SetupVmEnvironmentToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SetupVmEnvironmentArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SetupVmEnvironmentResult"
+    }
+  ],
+  "agent.v1.ShellArgs": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "timeout",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "simple_commands",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 6,
+      "name": "has_input_redirect",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "has_output_redirect",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "parsing_result",
+      "wire": 2,
+      "message": "agent.v1.ShellCommandParsingResult"
+    },
+    {
+      "no": 9,
+      "name": "requested_sandbox_policy",
+      "wire": 2,
+      "message": "agent.v1.SandboxPolicy"
+    },
+    {
+      "no": 10,
+      "name": "file_output_threshold_bytes",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "is_background",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "skip_approval",
+      "wire": 0
+    },
+    {
+      "no": 13,
+      "name": "timeout_behavior",
+      "wire": 0
+    },
+    {
+      "no": 14,
+      "name": "hard_timeout",
+      "wire": 0
+    },
+    {
+      "no": 15,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 16,
+      "name": "classifier_result",
+      "wire": 2,
+      "message": "agent.v1.CommandClassifierResult"
+    },
+    {
+      "no": 17,
+      "name": "close_stdin",
+      "wire": 0
+    },
+    {
+      "no": 18,
+      "name": "output_notification",
+      "wire": 2,
+      "message": "agent.v1.ShellOutputNotificationConfig"
+    },
+    {
+      "no": 19,
+      "name": "smart_mode_approval",
+      "wire": 2,
+      "message": "agent.v1.SmartModeApproval"
+    },
+    {
+      "no": 20,
+      "name": "hook_approval_requirement",
+      "wire": 2,
+      "message": "agent.v1.ShellHookApprovalRequirement"
+    },
+    {
+      "no": 21,
+      "name": "conversation_id",
+      "wire": 2
+    },
+    {
+      "no": 22,
+      "name": "admin_command_denylist",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 23,
+      "name": "request_id",
+      "wire": 2
+    },
+    {
+      "no": 24,
+      "name": "secret_scope_id",
+      "wire": 2
+    },
+    {
+      "no": 25,
+      "name": "smart_mode_classifier_allowed",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellCommandParsingResult": [
+    {
+      "no": 1,
+      "name": "parsing_failed",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "executable_commands",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ShellCommandParsingResult.ExecutableCommand"
+    },
+    {
+      "no": 3,
+      "name": "has_redirects",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "has_command_substitution",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "all_redirects_are_dev_null",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "redirects",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ShellCommandParsingResult.Redirect"
+    }
+  ],
+  "agent.v1.ShellCommandParsingResult.ExecutableCommand": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "args",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ShellCommandParsingResult.ExecutableCommandArg"
+    },
+    {
+      "no": 3,
+      "name": "full_text",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ShellCommandParsingResult.ExecutableCommandArg": [
+    {
+      "no": 1,
+      "name": "type",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ShellCommandParsingResult.Redirect": [
+    {
+      "no": 1,
+      "name": "operator",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "destination_fds",
+      "wire": 0,
+      "repeated": true,
+      "packed": true
+    },
+    {
+      "no": 3,
+      "name": "target_node_type",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "target_text",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ShellFailure": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "exit_code",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "signal",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "stdout",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "stderr",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "execution_time",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    },
+    {
+      "no": 9,
+      "name": "interleaved_output",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "abort_reason",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "aborted",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "local_execution_time_ms",
+      "wire": 0
+    },
+    {
+      "no": 13,
+      "name": "output_head",
+      "wire": 2
+    },
+    {
+      "no": 14,
+      "name": "output_tail",
+      "wire": 2
+    },
+    {
+      "no": 15,
+      "name": "elided_chars",
+      "wire": 0
+    },
+    {
+      "no": 16,
+      "name": "oom_kill",
+      "wire": 2,
+      "message": "agent.v1.ShellOomKill"
+    }
+  ],
+  "agent.v1.ShellHookApprovalRequirement": [
+    {
+      "no": 1,
+      "name": "kind",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ShellOomKill": [
+    {
+      "no": 1,
+      "name": "kind",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "memory_limit_bytes",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellOutputNotificationConfig": [
+    {
+      "no": 1,
+      "name": "pattern",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "debounce",
+      "wire": 1
+    },
+    {
+      "no": 4,
+      "name": "notification_limit",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellPermissionDenied": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "error",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellRejected": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "reason",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "is_readonly",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellSuccess"
+    },
+    {
+      "no": 2,
+      "name": "failure",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellFailure"
+    },
+    {
+      "no": 3,
+      "name": "timeout",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellTimeout"
+    },
+    {
+      "no": 4,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellRejected"
+    },
+    {
+      "no": 5,
+      "name": "spawn_error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellSpawnError"
+    },
+    {
+      "no": 7,
+      "name": "permission_denied",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.ShellPermissionDenied"
+    },
+    {
+      "no": 101,
+      "name": "sandbox_policy",
+      "wire": 2,
+      "message": "agent.v1.SandboxPolicy"
+    },
+    {
+      "no": 102,
+      "name": "is_background",
+      "wire": 0
+    },
+    {
+      "no": 103,
+      "name": "terminals_folder",
+      "wire": 2
+    },
+    {
+      "no": 104,
+      "name": "pid",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellSpawnError": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.ShellSuccess": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "exit_code",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "signal",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "stdout",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "stderr",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "execution_time",
+      "wire": 0
+    },
+    {
+      "no": 8,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    },
+    {
+      "no": 9,
+      "name": "shell_id",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "interleaved_output",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "pid",
+      "wire": 0
+    },
+    {
+      "no": 12,
+      "name": "ms_to_wait",
+      "wire": 0
+    },
+    {
+      "no": 13,
+      "name": "local_execution_time_ms",
+      "wire": 0
+    },
+    {
+      "no": 14,
+      "name": "background_reason",
+      "wire": 0
+    },
+    {
+      "no": 15,
+      "name": "output_head",
+      "wire": 2
+    },
+    {
+      "no": 16,
+      "name": "output_tail",
+      "wire": 2
+    },
+    {
+      "no": 17,
+      "name": "elided_chars",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellTimeout": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "working_directory",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "timeout_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ShellToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.ShellArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.ShellResult"
+    },
+    {
+      "no": 3,
+      "name": "description",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SmartModeApproval": [
+    {
+      "no": 1,
+      "name": "request_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartGrindExecutionArgs": [
+    {
+      "no": 1,
+      "name": "explanation",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartGrindExecutionError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartGrindExecutionResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartGrindExecutionSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartGrindExecutionError"
+    }
+  ],
+  "agent.v1.StartGrindExecutionSuccess": [],
+  "agent.v1.StartGrindExecutionToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.StartGrindExecutionArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.StartGrindExecutionResult"
+    }
+  ],
+  "agent.v1.StartGrindPlanningArgs": [
+    {
+      "no": 1,
+      "name": "explanation",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartGrindPlanningError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartGrindPlanningResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartGrindPlanningSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartGrindPlanningError"
+    }
+  ],
+  "agent.v1.StartGrindPlanningSuccess": [],
+  "agent.v1.StartGrindPlanningToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.StartGrindPlanningArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.StartGrindPlanningResult"
+    }
+  ],
+  "agent.v1.StartProjectUpdatesArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartProjectUpdatesError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartProjectUpdatesResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartProjectUpdatesSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StartProjectUpdatesError"
+    }
+  ],
+  "agent.v1.StartProjectUpdatesSuccess": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "until_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "was_on",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StartProjectUpdatesToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.StartProjectUpdatesArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.StartProjectUpdatesResult"
+    }
+  ],
+  "agent.v1.StopAgentArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopAgentError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopAgentResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StopAgentSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StopAgentError"
+    }
+  ],
+  "agent.v1.StopAgentSuccess": [
+    {
+      "no": 1,
+      "name": "worker_bc_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopAgentToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.StopAgentArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.StopAgentResult"
+    }
+  ],
+  "agent.v1.StopProjectUpdatesArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopProjectUpdatesError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopProjectUpdatesResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StopProjectUpdatesSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.StopProjectUpdatesError"
+    }
+  ],
+  "agent.v1.StopProjectUpdatesSuccess": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "was_on",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.StopProjectUpdatesToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.StopProjectUpdatesArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.StopProjectUpdatesResult"
+    }
+  ],
+  "agent.v1.SubagentType": [
+    {
+      "no": 1,
+      "name": "unspecified",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeUnspecified"
+    },
+    {
+      "no": 2,
+      "name": "computer_use",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeComputerUse"
+    },
+    {
+      "no": 3,
+      "name": "custom",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeCustom"
+    },
+    {
+      "no": 4,
+      "name": "explore",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeExplore"
+    },
+    {
+      "no": 5,
+      "name": "media_review",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeMediaReview"
+    },
+    {
+      "no": 6,
+      "name": "bash",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeBash"
+    },
+    {
+      "no": 7,
+      "name": "browser_use",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeBrowserUse"
+    },
+    {
+      "no": 8,
+      "name": "shell",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeShell"
+    },
+    {
+      "no": 9,
+      "name": "vm_setup_helper",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeVmSetupHelper"
+    },
+    {
+      "no": 10,
+      "name": "debug",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeDebug"
+    },
+    {
+      "no": 11,
+      "name": "cursor_guide",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeCursorGuide"
+    },
+    {
+      "no": 12,
+      "name": "watch_video",
+      "wire": 2,
+      "oneof": "type",
+      "message": "agent.v1.SubagentTypeWatchVideo"
+    }
+  ],
+  "agent.v1.SubagentTypeBash": [],
+  "agent.v1.SubagentTypeBrowserUse": [],
+  "agent.v1.SubagentTypeComputerUse": [],
+  "agent.v1.SubagentTypeCursorGuide": [],
+  "agent.v1.SubagentTypeCustom": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SubagentTypeDebug": [],
+  "agent.v1.SubagentTypeExplore": [],
+  "agent.v1.SubagentTypeMediaReview": [],
+  "agent.v1.SubagentTypeShell": [],
+  "agent.v1.SubagentTypeUnspecified": [],
+  "agent.v1.SubagentTypeVmSetupHelper": [],
+  "agent.v1.SubagentTypeWatchVideo": [],
+  "agent.v1.SwitchModeArgs": [
+    {
+      "no": 1,
+      "name": "target_mode_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "explanation",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SwitchModeError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SwitchModeRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SwitchModeResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SwitchModeSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SwitchModeError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.SwitchModeRejected"
+    }
+  ],
+  "agent.v1.SwitchModeSuccess": [
+    {
+      "no": 1,
+      "name": "from_mode_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "to_mode_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.SwitchModeToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.SwitchModeArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.SwitchModeResult"
+    }
+  ],
+  "agent.v1.SystemReminder": [
+    {
+      "no": 1,
+      "name": "body",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TargetMachine": [
+    {
+      "no": 1,
+      "name": "same_machine",
+      "wire": 2,
+      "oneof": "machine",
+      "message": "agent.v1.SameMachineTarget"
+    },
+    {
+      "no": 2,
+      "name": "new_cloud_vm",
+      "wire": 2,
+      "oneof": "machine",
+      "message": "agent.v1.NewCloudVmTarget"
+    },
+    {
+      "no": 3,
+      "name": "self_hosted_worker",
+      "wire": 2,
+      "oneof": "machine",
+      "message": "agent.v1.SelfHostedWorkerTarget"
+    },
+    {
+      "no": 4,
+      "name": "self_hosted_pool",
+      "wire": 2,
+      "oneof": "machine",
+      "message": "agent.v1.SelfHostedPoolTarget"
+    }
+  ],
+  "agent.v1.TaskArgs": [
+    {
+      "no": 1,
+      "name": "description",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "prompt",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "subagent_type",
+      "wire": 2,
+      "message": "agent.v1.SubagentType"
+    },
+    {
+      "no": 4,
+      "name": "model",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "resume",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "attachments",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "mode",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "responding_to_message_ids",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 10,
+      "name": "environment",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "machine",
+      "wire": 2,
+      "message": "agent.v1.TargetMachine"
+    }
+  ],
+  "agent.v1.TaskError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TaskResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.TaskSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.TaskError"
+    }
+  ],
+  "agent.v1.TaskSuccess": [
+    {
+      "no": 1,
+      "name": "conversation_steps",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.ConversationStep"
+    },
+    {
+      "no": 2,
+      "name": "agent_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "is_background",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "result_suffix",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "background_reason",
+      "wire": 0
+    },
+    {
+      "no": 7,
+      "name": "transcript_path",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TaskToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.TaskArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.TaskResult"
+    },
+    {
+      "no": 3,
+      "name": "cloud_agent_bc_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TerminalMetadata": [
+    {
+      "no": 1,
+      "name": "cwd",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "last_commands",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TerminalMetadata.Command"
+    },
+    {
+      "no": 3,
+      "name": "last_modified_ms",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "current_command",
+      "wire": 2,
+      "message": "agent.v1.TerminalMetadata.Command"
+    }
+  ],
+  "agent.v1.TerminalMetadata.Command": [
+    {
+      "no": 1,
+      "name": "command",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "exit_code",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "timestamp_ms",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "duration_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.ThinkingMessage": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "duration_ms",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "started_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "completed_at_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TodoItem": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "content",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "status",
+      "wire": 0
+    },
+    {
+      "no": 4,
+      "name": "created_at",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "updated_at",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "dependencies",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.ToolCall": [
+    {
+      "no": 1,
+      "name": "shell_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ShellToolCall"
+    },
+    {
+      "no": 3,
+      "name": "delete_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.DeleteToolCall"
+    },
+    {
+      "no": 4,
+      "name": "glob_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GlobToolCall"
+    },
+    {
+      "no": 5,
+      "name": "grep_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GrepToolCall"
+    },
+    {
+      "no": 8,
+      "name": "read_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadToolCall"
+    },
+    {
+      "no": 9,
+      "name": "update_todos_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdateTodosToolCall"
+    },
+    {
+      "no": 10,
+      "name": "read_todos_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadTodosToolCall"
+    },
+    {
+      "no": 12,
+      "name": "edit_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.EditToolCall"
+    },
+    {
+      "no": 13,
+      "name": "ls_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.LsToolCall"
+    },
+    {
+      "no": 14,
+      "name": "read_lints_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadLintsToolCall"
+    },
+    {
+      "no": 15,
+      "name": "mcp_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.McpToolCall"
+    },
+    {
+      "no": 16,
+      "name": "sem_search_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SemSearchToolCall"
+    },
+    {
+      "no": 17,
+      "name": "create_plan_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CreatePlanToolCall"
+    },
+    {
+      "no": 18,
+      "name": "web_search_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.WebSearchToolCall"
+    },
+    {
+      "no": 19,
+      "name": "task_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.TaskToolCall"
+    },
+    {
+      "no": 20,
+      "name": "list_mcp_resources_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ListMcpResourcesToolCall"
+    },
+    {
+      "no": 21,
+      "name": "read_mcp_resource_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadMcpResourceToolCall"
+    },
+    {
+      "no": 22,
+      "name": "apply_agent_diff_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ApplyAgentDiffToolCall"
+    },
+    {
+      "no": 23,
+      "name": "ask_question_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.AskQuestionToolCall"
+    },
+    {
+      "no": 24,
+      "name": "fetch_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.FetchToolCall"
+    },
+    {
+      "no": 25,
+      "name": "switch_mode_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SwitchModeToolCall"
+    },
+    {
+      "no": 28,
+      "name": "generate_image_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GenerateImageToolCall"
+    },
+    {
+      "no": 29,
+      "name": "record_screen_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.RecordScreenToolCall"
+    },
+    {
+      "no": 30,
+      "name": "computer_use_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ComputerUseToolCall"
+    },
+    {
+      "no": 31,
+      "name": "write_shell_stdin_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.WriteShellStdinToolCall"
+    },
+    {
+      "no": 32,
+      "name": "reflect_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReflectToolCall"
+    },
+    {
+      "no": 33,
+      "name": "setup_vm_environment_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SetupVmEnvironmentToolCall"
+    },
+    {
+      "no": 34,
+      "name": "truncated_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.TruncatedToolCall"
+    },
+    {
+      "no": 35,
+      "name": "start_grind_execution_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.StartGrindExecutionToolCall"
+    },
+    {
+      "no": 36,
+      "name": "start_grind_planning_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.StartGrindPlanningToolCall"
+    },
+    {
+      "no": 37,
+      "name": "web_fetch_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.WebFetchToolCall"
+    },
+    {
+      "no": 38,
+      "name": "report_bugfix_results_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReportBugfixResultsToolCall"
+    },
+    {
+      "no": 39,
+      "name": "ai_attribution_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.AiAttributionToolCall"
+    },
+    {
+      "no": 40,
+      "name": "pr_management_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.PrManagementToolCall"
+    },
+    {
+      "no": 41,
+      "name": "mcp_auth_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.McpAuthToolCall"
+    },
+    {
+      "no": 42,
+      "name": "await_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.AwaitToolCall"
+    },
+    {
+      "no": 43,
+      "name": "blame_by_file_path_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.BlameByFilePathToolCall"
+    },
+    {
+      "no": 44,
+      "name": "get_mcp_tools_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GetMcpToolsToolCall"
+    },
+    {
+      "no": 45,
+      "name": "report_bug_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReportBugToolCall"
+    },
+    {
+      "no": 46,
+      "name": "set_active_branch_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SetActiveBranchToolCall"
+    },
+    {
+      "no": 48,
+      "name": "communicate_update_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CommunicateUpdateToolCall"
+    },
+    {
+      "no": 49,
+      "name": "send_final_summary_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SendFinalSummaryToolCall"
+    },
+    {
+      "no": 51,
+      "name": "replace_env_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReplaceEnvToolCall"
+    },
+    {
+      "no": 52,
+      "name": "edit_pr_labels_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.EditPrLabelsToolCall"
+    },
+    {
+      "no": 53,
+      "name": "record_ci_investigation_findings_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.RecordCiInvestigationFindingsToolCall"
+    },
+    {
+      "no": 55,
+      "name": "send_message_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SendMessageToolCall"
+    },
+    {
+      "no": 56,
+      "name": "fetch_cloud_agent_data_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.FetchCloudAgentDataToolCall"
+    },
+    {
+      "no": 58,
+      "name": "send_to_user_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SendToUserToolCall"
+    },
+    {
+      "no": 68,
+      "name": "connect_scm_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ConnectScmToolCall"
+    },
+    {
+      "no": 69,
+      "name": "search_conversations_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SearchConversationsToolCall"
+    },
+    {
+      "no": 70,
+      "name": "create_goal_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CreateGoalToolCall"
+    },
+    {
+      "no": 71,
+      "name": "update_goal_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdateGoalToolCall"
+    },
+    {
+      "no": 73,
+      "name": "get_agent_status_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GetAgentStatusToolCall"
+    },
+    {
+      "no": 74,
+      "name": "send_to_agent_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.SendToAgentToolCall"
+    },
+    {
+      "no": 75,
+      "name": "read_agent_transcript_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadAgentTranscriptToolCall"
+    },
+    {
+      "no": 76,
+      "name": "create_agent_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CreateAgentToolCall"
+    },
+    {
+      "no": 77,
+      "name": "stop_agent_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.StopAgentToolCall"
+    },
+    {
+      "no": 79,
+      "name": "write_canvas_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.WriteCanvasToolCall"
+    },
+    {
+      "no": 80,
+      "name": "read_canvas_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ReadCanvasToolCall"
+    },
+    {
+      "no": 81,
+      "name": "generate_video_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GenerateVideoToolCall"
+    },
+    {
+      "no": 82,
+      "name": "x_search_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.XSearchToolCall"
+    },
+    {
+      "no": 83,
+      "name": "get_origin_pr_code_tour_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.GetPrCodeTourToolCall"
+    },
+    {
+      "no": 84,
+      "name": "update_origin_pr_code_tour_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdatePrCodeTourToolCall"
+    },
+    {
+      "no": 85,
+      "name": "list_tracked_tasks_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.ListTrackedTasksToolCall"
+    },
+    {
+      "no": 86,
+      "name": "create_tracked_tasks_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CreateTrackedTasksToolCall"
+    },
+    {
+      "no": 87,
+      "name": "update_tracked_tasks_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdateTrackedTasksToolCall"
+    },
+    {
+      "no": 88,
+      "name": "delete_tracked_tasks_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.DeleteTrackedTasksToolCall"
+    },
+    {
+      "no": 89,
+      "name": "update_tracked_task_statuses_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdateTrackedTaskStatusesToolCall"
+    },
+    {
+      "no": 90,
+      "name": "create_project_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.CreateProjectToolCall"
+    },
+    {
+      "no": 91,
+      "name": "update_tracked_task_tags_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.UpdateTrackedTaskTagsToolCall"
+    },
+    {
+      "no": 93,
+      "name": "stop_project_updates_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.StopProjectUpdatesToolCall"
+    },
+    {
+      "no": 94,
+      "name": "start_project_updates_tool_call",
+      "wire": 2,
+      "oneof": "tool",
+      "message": "agent.v1.StartProjectUpdatesToolCall"
+    },
+    {
+      "no": 54,
+      "name": "hook_additional_contexts",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.HookAdditionalContext"
+    },
+    {
+      "no": 57,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 59,
+      "name": "started_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 60,
+      "name": "completed_at_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskConflict": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "field",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "current_value",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "changed_by",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "changed_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 6,
+      "name": "current_version",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskCreated": [
+    {
+      "no": 1,
+      "name": "client_ref",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "version",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskDocumentInput": [
+    {
+      "no": 1,
+      "name": "path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TrackedTaskLinkInput": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2,
+      "oneof": "target"
+    },
+    {
+      "no": 2,
+      "name": "pr_url",
+      "wire": 2,
+      "oneof": "target"
+    },
+    {
+      "no": 3,
+      "name": "document",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.TrackedTaskDocumentInput"
+    },
+    {
+      "no": 4,
+      "name": "url",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.TrackedTaskUrlInput"
+    }
+  ],
+  "agent.v1.TrackedTaskLinkView": [
+    {
+      "no": 1,
+      "name": "agent_id",
+      "wire": 2,
+      "oneof": "target"
+    },
+    {
+      "no": 2,
+      "name": "pr",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.TrackedTaskPrLinkView"
+    },
+    {
+      "no": 3,
+      "name": "document",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.TrackedTaskDocumentInput"
+    },
+    {
+      "no": 4,
+      "name": "url",
+      "wire": 2,
+      "oneof": "target",
+      "message": "agent.v1.TrackedTaskUrlInput"
+    }
+  ],
+  "agent.v1.TrackedTaskMemberView": [
+    {
+      "no": 1,
+      "name": "name",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "session_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "is_you",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskPosition": [
+    {
+      "no": 1,
+      "name": "before_key",
+      "wire": 2,
+      "oneof": "anchor"
+    },
+    {
+      "no": 2,
+      "name": "after_key",
+      "wire": 2,
+      "oneof": "anchor"
+    }
+  ],
+  "agent.v1.TrackedTaskPrLinkView": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "opened_by_agent_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "counts_for_completion",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskStatusInput": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "icon",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "category",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TrackedTaskStatusView": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "category",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "task_count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskTagIds": [
+    {
+      "no": 1,
+      "name": "ids",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.TrackedTaskTagInput": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "color",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TrackedTaskTagView": [
+    {
+      "no": 1,
+      "name": "id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "color",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "task_count",
+      "wire": 0
+    }
+  ],
+  "agent.v1.TrackedTaskUpdate": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "status",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "owner",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "parent",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "position",
+      "wire": 2,
+      "message": "agent.v1.TrackedTaskPosition"
+    },
+    {
+      "no": 7,
+      "name": "add_links",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskLinkInput"
+    },
+    {
+      "no": 8,
+      "name": "remove_links",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskLinkInput"
+    },
+    {
+      "no": 9,
+      "name": "version",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "tag",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "internal_notes",
+      "wire": 2
+    },
+    {
+      "no": 12,
+      "name": "tags",
+      "wire": 2,
+      "message": "agent.v1.TrackedTaskTagIds"
+    }
+  ],
+  "agent.v1.TrackedTaskUpdated": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "version",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "status_label",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TrackedTaskUrlInput": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "label",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TrackedTaskView": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "status_id",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "status_label",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "owner",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "parent_key",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "links",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskLinkView"
+    },
+    {
+      "no": 8,
+      "name": "updated_at_ms",
+      "wire": 0
+    },
+    {
+      "no": 9,
+      "name": "owner_session_id",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "version",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "tag",
+      "wire": 2
+    },
+    {
+      "no": 12,
+      "name": "internal_notes",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "tags",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.TruncatedToolCall": [
+    {
+      "no": 1,
+      "name": "original_step_blob_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.TruncatedToolCallArgs"
+    },
+    {
+      "no": 3,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.TruncatedToolCallResult"
+    },
+    {
+      "no": 4,
+      "name": "original_step_size_bytes",
+      "wire": 0
+    },
+    {
+      "no": 5,
+      "name": "preview",
+      "wire": 2,
+      "message": "agent.v1.ToolCall"
+    }
+  ],
+  "agent.v1.TruncatedToolCallArgs": [],
+  "agent.v1.TruncatedToolCallError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.TruncatedToolCallResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.TruncatedToolCallSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.TruncatedToolCallError"
+    }
+  ],
+  "agent.v1.TruncatedToolCallSuccess": [],
+  "agent.v1.TypeAction": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateGoalArgs": [
+    {
+      "no": 1,
+      "name": "status",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdateGoalResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateGoalSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.GoalError"
+    }
+  ],
+  "agent.v1.UpdateGoalSuccess": [
+    {
+      "no": 1,
+      "name": "status",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdateGoalToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdateGoalArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdateGoalResult"
+    }
+  ],
+  "agent.v1.UpdatePrAction": [
+    {
+      "no": 1,
+      "name": "pr_url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "body",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "base_branch",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "branch_name",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "add_labels",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 7,
+      "name": "remove_labels",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 8,
+      "name": "repo_url",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "stack_on_pr_number",
+      "wire": 0
+    },
+    {
+      "no": 10,
+      "name": "clear_stack",
+      "wire": 0
+    },
+    {
+      "no": 11,
+      "name": "draft",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdatePrCodeTourArgs": [
+    {
+      "no": 1,
+      "name": "feedback",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "base_sha",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "head_sha",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "source_revision_id",
+      "wire": 2
+    },
+    {
+      "no": 6,
+      "name": "revision_id",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "markdown",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "heading",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "artifact_path",
+      "wire": 2
+    },
+    {
+      "no": 10,
+      "name": "artifact_alt",
+      "wire": 2
+    },
+    {
+      "no": 11,
+      "name": "scope_commit_hashes",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 12,
+      "name": "explicit_user_prompt",
+      "wire": 2
+    },
+    {
+      "no": 13,
+      "name": "pr_url",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdatePrCodeTourError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdatePrCodeTourResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdatePrCodeTourSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdatePrCodeTourError"
+    }
+  ],
+  "agent.v1.UpdatePrCodeTourSuccess": [
+    {
+      "no": 1,
+      "name": "revision_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "execution_mode",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdatePrCodeTourToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdatePrCodeTourArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdatePrCodeTourResult"
+    }
+  ],
+  "agent.v1.UpdateTodosArgs": [
+    {
+      "no": 1,
+      "name": "todos",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TodoItem"
+    },
+    {
+      "no": 2,
+      "name": "merge",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdateTodosError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTodosResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTodosSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTodosError"
+    }
+  ],
+  "agent.v1.UpdateTodosSuccess": [
+    {
+      "no": 1,
+      "name": "todos",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TodoItem"
+    },
+    {
+      "no": 2,
+      "name": "total_count",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "was_merge",
+      "wire": 0
+    }
+  ],
+  "agent.v1.UpdateTodosToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdateTodosArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdateTodosResult"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskStatusesArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "statuses",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskStatusInput"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskStatusesError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskStatusesResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTaskStatusesSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTaskStatusesError"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskStatusesSuccess": [
+    {
+      "no": 1,
+      "name": "statuses",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskStatusView"
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskStatusesToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTaskStatusesArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTaskStatusesResult"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskTagsArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tags",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskTagInput"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskTagsError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskTagsResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTaskTagsSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTaskTagsError"
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskTagsSuccess": [
+    {
+      "no": 1,
+      "name": "tags",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskTagView"
+    },
+    {
+      "no": 2,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTaskTagsToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTaskTagsArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTaskTagsResult"
+    }
+  ],
+  "agent.v1.UpdateTrackedTasksArgs": [
+    {
+      "no": 1,
+      "name": "tool_call_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "updates",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskUpdate"
+    }
+  ],
+  "agent.v1.UpdateTrackedTasksError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTasksResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTasksSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.UpdateTrackedTasksError"
+    }
+  ],
+  "agent.v1.UpdateTrackedTasksSuccess": [
+    {
+      "no": 1,
+      "name": "updated",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskUpdated"
+    },
+    {
+      "no": 2,
+      "name": "conflicts",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.TrackedTaskConflict"
+    },
+    {
+      "no": 3,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "agent.v1.UpdateTrackedTasksToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTasksArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.UpdateTrackedTasksResult"
+    }
+  ],
+  "agent.v1.WaitAction": [
+    {
+      "no": 1,
+      "name": "duration_ms",
+      "wire": 0
+    }
+  ],
+  "agent.v1.WebFetchArgs": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebFetchError": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebFetchRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebFetchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebFetchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebFetchError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebFetchRejected"
+    }
+  ],
+  "agent.v1.WebFetchSuccess": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "markdown",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "output_location",
+      "wire": 2,
+      "message": "agent.v1.OutputLocation"
+    }
+  ],
+  "agent.v1.WebFetchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.WebFetchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.WebFetchResult"
+    }
+  ],
+  "agent.v1.WebSearchArgs": [
+    {
+      "no": 1,
+      "name": "search_term",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "tool_call_id",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebSearchError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebSearchReference": [
+    {
+      "no": 1,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "chunk",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebSearchRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WebSearchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebSearchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebSearchError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WebSearchRejected"
+    }
+  ],
+  "agent.v1.WebSearchSuccess": [
+    {
+      "no": 1,
+      "name": "references",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.WebSearchReference"
+    }
+  ],
+  "agent.v1.WebSearchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.WebSearchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.WebSearchResult"
+    }
+  ],
+  "agent.v1.WriteCanvasArgs": [
+    {
+      "no": 1,
+      "name": "contents",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "canvas_id",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "title",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WriteCanvasFailure": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "diagnostics",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.CloudCanvasToolDiagnostic"
+    },
+    {
+      "no": 3,
+      "name": "detail",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WriteCanvasResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WriteCanvasSuccess"
+    },
+    {
+      "no": 2,
+      "name": "failure",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WriteCanvasFailure"
+    }
+  ],
+  "agent.v1.WriteCanvasSuccess": [
+    {
+      "no": 1,
+      "name": "canvas_id",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "page_url",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "audience_notice",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WriteCanvasToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.WriteCanvasArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.WriteCanvasResult"
+    }
+  ],
+  "agent.v1.WriteShellStdinArgs": [
+    {
+      "no": 1,
+      "name": "shell_id",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "chars",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WriteShellStdinError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.WriteShellStdinResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WriteShellStdinSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.WriteShellStdinError"
+    }
+  ],
+  "agent.v1.WriteShellStdinSuccess": [
+    {
+      "no": 1,
+      "name": "shell_id",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "terminal_file_length_before_input_written",
+      "wire": 0
+    }
+  ],
+  "agent.v1.WriteShellStdinToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.WriteShellStdinArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.WriteShellStdinResult"
+    }
+  ],
+  "agent.v1.XSearchArgs": [
+    {
+      "no": 1,
+      "name": "query",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "from_date",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "to_date",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "allowed_x_handles",
+      "wire": 2,
+      "repeated": true
+    },
+    {
+      "no": 5,
+      "name": "excluded_x_handles",
+      "wire": 2,
+      "repeated": true
+    }
+  ],
+  "agent.v1.XSearchCitation": [
+    {
+      "no": 1,
+      "name": "url",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "title",
+      "wire": 2
+    }
+  ],
+  "agent.v1.XSearchError": [
+    {
+      "no": 1,
+      "name": "error",
+      "wire": 2
+    }
+  ],
+  "agent.v1.XSearchRejected": [
+    {
+      "no": 1,
+      "name": "reason",
+      "wire": 2
+    }
+  ],
+  "agent.v1.XSearchResult": [
+    {
+      "no": 1,
+      "name": "success",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.XSearchSuccess"
+    },
+    {
+      "no": 2,
+      "name": "error",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.XSearchError"
+    },
+    {
+      "no": 3,
+      "name": "rejected",
+      "wire": 2,
+      "oneof": "result",
+      "message": "agent.v1.XSearchRejected"
+    }
+  ],
+  "agent.v1.XSearchSuccess": [
+    {
+      "no": 1,
+      "name": "answer",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "citations",
+      "wire": 2,
+      "repeated": true,
+      "message": "agent.v1.XSearchCitation"
+    }
+  ],
+  "agent.v1.XSearchToolCall": [
+    {
+      "no": 1,
+      "name": "args",
+      "wire": 2,
+      "message": "agent.v1.XSearchArgs"
+    },
+    {
+      "no": 2,
+      "name": "result",
+      "wire": 2,
+      "message": "agent.v1.XSearchResult"
+    }
+  ],
+  "aiserver.v1.CodeBlock": [
+    {
+      "no": 1,
+      "name": "relative_workspace_path",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "file_contents",
+      "wire": 2
+    },
+    {
+      "no": 9,
+      "name": "file_contents_length",
+      "wire": 0
+    },
+    {
+      "no": 3,
+      "name": "range",
+      "wire": 2,
+      "message": "aiserver.v1.CursorRange"
+    },
+    {
+      "no": 4,
+      "name": "contents",
+      "wire": 2
+    },
+    {
+      "no": 5,
+      "name": "signatures",
+      "wire": 2,
+      "message": "aiserver.v1.CodeBlock.Signatures"
+    },
+    {
+      "no": 6,
+      "name": "override_contents",
+      "wire": 2
+    },
+    {
+      "no": 7,
+      "name": "original_contents",
+      "wire": 2
+    },
+    {
+      "no": 8,
+      "name": "detailed_lines",
+      "wire": 2,
+      "repeated": true,
+      "message": "aiserver.v1.DetailedLine"
+    },
+    {
+      "no": 10,
+      "name": "file_git_context",
+      "wire": 2,
+      "message": "aiserver.v1.FileGit"
+    }
+  ],
+  "aiserver.v1.CodeBlock.Signatures": [
+    {
+      "no": 1,
+      "name": "ranges",
+      "wire": 2,
+      "repeated": true,
+      "message": "aiserver.v1.CursorRange"
+    }
+  ],
+  "aiserver.v1.CodeResult": [
+    {
+      "no": 1,
+      "name": "code_block",
+      "wire": 2,
+      "message": "aiserver.v1.CodeBlock"
+    },
+    {
+      "no": 2,
+      "name": "score",
+      "wire": 5
+    }
+  ],
+  "aiserver.v1.CursorPosition": [
+    {
+      "no": 1,
+      "name": "line",
+      "wire": 0
+    },
+    {
+      "no": 2,
+      "name": "column",
+      "wire": 0
+    }
+  ],
+  "aiserver.v1.CursorRange": [
+    {
+      "no": 1,
+      "name": "start_position",
+      "wire": 2,
+      "message": "aiserver.v1.CursorPosition"
+    },
+    {
+      "no": 2,
+      "name": "end_position",
+      "wire": 2,
+      "message": "aiserver.v1.CursorPosition"
+    }
+  ],
+  "aiserver.v1.DetailedLine": [
+    {
+      "no": 1,
+      "name": "text",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "line_number",
+      "wire": 5
+    },
+    {
+      "no": 3,
+      "name": "is_signature",
+      "wire": 0
+    }
+  ],
+  "aiserver.v1.FileGit": [
+    {
+      "no": 1,
+      "name": "commits",
+      "wire": 2,
+      "repeated": true,
+      "message": "aiserver.v1.GitCommit"
+    }
+  ],
+  "aiserver.v1.GitCommit": [
+    {
+      "no": 1,
+      "name": "commit",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "author",
+      "wire": 2
+    },
+    {
+      "no": 3,
+      "name": "date",
+      "wire": 2
+    },
+    {
+      "no": 4,
+      "name": "message",
+      "wire": 2
+    }
+  ],
+  "google.protobuf.ListValue": [
+    {
+      "no": 1,
+      "name": "values",
+      "wire": 2,
+      "repeated": true,
+      "message": "google.protobuf.Value"
+    }
+  ],
+  "google.protobuf.Struct": [
+    {
+      "no": 1,
+      "name": "fields",
+      "wire": 2,
+      "message": "google.protobuf.Struct.fieldsEntry",
+      "repeated": true
+    }
+  ],
+  "google.protobuf.Struct.fieldsEntry": [
+    {
+      "no": 1,
+      "name": "key",
+      "wire": 2
+    },
+    {
+      "no": 2,
+      "name": "value",
+      "wire": 2,
+      "message": "google.protobuf.Value"
+    }
+  ],
+  "google.protobuf.Value": [
+    {
+      "no": 1,
+      "name": "null_value",
+      "wire": 0,
+      "oneof": "kind"
+    },
+    {
+      "no": 2,
+      "name": "number_value",
+      "wire": 1,
+      "oneof": "kind"
+    },
+    {
+      "no": 3,
+      "name": "string_value",
+      "wire": 2,
+      "oneof": "kind"
+    },
+    {
+      "no": 4,
+      "name": "bool_value",
+      "wire": 0,
+      "oneof": "kind"
+    },
+    {
+      "no": 5,
+      "name": "struct_value",
+      "wire": 2,
+      "oneof": "kind",
+      "message": "google.protobuf.Struct"
+    },
+    {
+      "no": 6,
+      "name": "list_value",
+      "wire": 2,
+      "oneof": "kind",
+      "message": "google.protobuf.ListValue"
+    }
+  ]
+}

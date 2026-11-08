@@ -2,7 +2,7 @@
 
 This page records a review of `cursor-chat-transit-20261002-120124.zip` and the cleanup that followed it. The measurements below are from that review. They are not a current benchmark of archive format 5.
 
-The current transfer path writes format 5, reads formats 5 and 4, and uses bundled better-sqlite3. A committed agent-host session is copied as a validated snapshot. There is still no persistent payload cache and no full-database copy. The live contract is in [Architecture](architecture.md). The notes below explain why the October 2026 cleanup removed work instead of adding concurrency. They do not claim that every operation is maximally optimized.
+The current transfer path writes format 5, reads only format 5, and uses bundled better-sqlite3. A committed agent-host session is copied as a validated snapshot. There is still no persistent payload cache and no full-database copy. The live contract is in [Architecture](architecture.md). The notes below explain why the October 2026 cleanup removed work instead of adding concurrency. They do not claim that every operation is maximally optimized.
 
 ## Evidence from the supplied log
 

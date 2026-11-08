@@ -151,6 +151,17 @@ export interface ManagedDeleteRefusal {
   title: string;
   /** Modal detail. */
   detail: string;
+  /** Exact selected families to clear, never additional deletion consent. */
+  blocked?: Array<{
+    /** Physical workspace containing the selection. */
+    workspaceKey: string;
+    /** Original selected ids in the blocked connected family. */
+    ids: string[];
+    /** Human-readable family name. */
+    name: string;
+    /** Named ownership evidence. */
+    reason: string;
+  }>;
 }
 
 /** Read-only preflight result. */

@@ -490,6 +490,35 @@ test('export waits at each dialog and only reads selected chats after Save', asy
   assert.equal(state.runtime.uiState.status, 'completed');
 });
 
+test('sidebar export revalidates its selected physical source without another picker', async () => {
+  await run('export');
+  assert.equal(host.hostScans, 1);
+  assert.equal(host.events.includes('workspace'), false);
+  assert.equal(host.events[0], 'list');
+  assert.equal(host.exports, 1);
+});
+
+for (const kind of ['export', 'import'] as const) {
+  test(`${kind} fails for stale selected physical storage without substituting another`, async () => {
+    host.entries = [{ ...workspace, storageRoot: '/different-profile' }];
+    await run(kind);
+    assert.equal(host.hostScans, 1);
+    assert.equal(host.events.includes('workspace'), false);
+    assert.equal(host.events.includes('list'), false);
+    assert.equal(host.exports, 0);
+    assert.equal(host.imports, 0);
+    assert.equal(state.runtime.uiState.status, 'failed');
+    assert.match(state.runtime.uiState.statusDetail, /no longer available/);
+  });
+}
+
+test('sidebar import reuses its validated selection without another workspace picker', async () => {
+  await run('import');
+  assert.equal(host.hostScans, 1);
+  assert.deepEqual(host.events, ['open', 'progress', 'read']);
+  assert.equal(host.imports, 1);
+});
+
 test('an unresolved chat picker keeps the lock without claiming export progress', async () => {
   let release!: () => void;
   let entered!: () => void;

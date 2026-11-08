@@ -1,3 +1,5 @@
+import { visualizationScopeFiles } from './visualizations';
+import { historicalProjectRoot } from './historical-artifacts';
 import * as db from './db';
 import { pendingProblem } from './import-bundle-common';
 import { cleanUnpublishedBubbles } from './import-cleanup';
@@ -7,6 +9,8 @@ import {
   probeTargetComposer,
 } from './import-reconcile';
 import { JournalStore } from './journal-db';
+import { recoverNativeIntent } from './import-native-recovery';
+import { userDataDirFromGlobalDb } from './host-snapshots';
 import { canvasesDirOf, inspectPair, plansDirOf } from './transfer-context';
 import type { TransferContext, WorkspaceEntry } from './types';
 
@@ -32,8 +36,6 @@ export async function reconcile(
     : never = [];
 
   const chats = await journal.pendingChats(pending.operationId);
-
-  if (!chats.length) return () => journal.clearPending();
 
   const verified: typeof chats = [];
   const unpublishedTargets = new Set<string>();
@@ -106,7 +108,14 @@ export async function reconcile(
 
     const resources: Array<{
       /** Resource class recorded on the pending batch. */
-      kind: 'kv' | 'image' | 'plan' | 'canvas';
+      kind:
+        | 'kv'
+        | 'image'
+        | 'plan'
+        | 'canvas'
+        | 'visualization'
+        | 'transcript'
+        | 'terminal-history';
       /** Resource id recorded on the pending batch. */
       id: string;
       /** SHA-256 recorded on the pending batch. */
@@ -121,7 +130,10 @@ export async function reconcile(
           kind === 'kv' ||
           kind === 'image' ||
           kind === 'plan' ||
-          kind === 'canvas'
+          kind === 'canvas' ||
+          kind === 'visualization' ||
+          kind === 'transcript' ||
+          kind === 'terminal-history'
         ) {
           resources.push({ kind, id, sha256 });
         }
@@ -135,6 +147,19 @@ export async function reconcile(
         plansDir: plansDirOf(ctx),
         canvasesDir: canvasesDirOf(ctx, workspace),
         signal: ctx.signal,
+        historicalProjectRoot: historicalProjectRoot(ctx, workspace),
+        historicalOwner: chat.targetComposerId,
+        historicalOwnerMap: new Map(
+          chats.map((item) => [item.sourceComposerId, item.targetComposerId]),
+        ),
+        visualizationScopeFiles:
+          dep.kind === 'visualization'
+            ? await visualizationScopeFiles(
+                ctx,
+                workspace,
+                chat.targetComposerId,
+              )
+            : undefined,
       });
 
       if (!matches) {
@@ -164,15 +189,40 @@ export async function reconcile(
     observedHash?: string;
   }> = [];
 
-  await journal.forEachEffect(pending.operationId, async (effect) => {
+  const effects: import('./journal-db').JournalEffect[] = [];
+
+  await journal.forEachEffect(pending.operationId, (effect) => {
+    effects.push(effect);
+  });
+
+  for (const effect of effects) {
     ctx.signal?.throwIfAborted();
+
+    if (effect.kind === 'session') {
+      if (!verified.some((chat) => chat.targetComposerId === effect.target)) {
+        effectTransitions.push({
+          effectId: effect.effectId,
+          state: 'cleanup-pending',
+        });
+
+        continue;
+      }
+
+      await recoverNativeIntent(
+        journal,
+        effect,
+        userDataDirFromGlobalDb(workspace.globalDbPath),
+      );
+
+      continue;
+    }
 
     if (
       effect.state === 'verified' ||
       effect.state === 'committed' ||
       effect.state === 'cleanup-pending'
     )
-      return;
+      continue;
 
     if (effect.kind === 'db' && effect.target.startsWith('composerData:')) {
       const value = await db.readKvText(pair.connGl, effect.target);
@@ -187,7 +237,7 @@ export async function reconcile(
           state: 'cleanup-pending',
         });
 
-        return;
+        continue;
       }
 
       if (!observedHash || observedHash !== effect.desiredHash) {
@@ -203,7 +253,22 @@ export async function reconcile(
         observedHash,
       });
 
-      return;
+      continue;
+    }
+
+    // Planning records the intent before any destination write. A failed later
+    // chat must not wedge recovery on intents that were never installed.
+    if (
+      effect.kind === 'file' &&
+      effect.state === 'planned' &&
+      !effect.observedHash
+    ) {
+      effectTransitions.push({
+        effectId: effect.effectId,
+        state: 'cleanup-pending',
+      });
+
+      continue;
     }
 
     if (effect.observedHash === effect.desiredHash) {
@@ -213,13 +278,13 @@ export async function reconcile(
         observedHash: effect.observedHash,
       });
 
-      return;
+      continue;
     }
 
     throw new Error(
       `Pending import effect ${effect.effectId} requires deterministic recovery.`,
     );
-  });
+  }
 
   for (const transition of effectTransitions) {
     await journal.setEffectState(

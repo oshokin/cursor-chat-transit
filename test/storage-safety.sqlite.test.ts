@@ -1,5 +1,7 @@
 import { BundleWriter } from '../src/bundle-writer';
 import { importFromBundle } from '../src/import-bundle';
+import { rendererHeaderCollision } from '../src/import-reconcile';
+import { inspectPair } from '../src/transfer-context';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -28,7 +30,7 @@ const skip = executable ? false : 'sqlite3 CLI is required for safety tests';
 /** Format-3 export that depends on `key`. */
 function payload() {
   return {
-    formatVersion: 3,
+    formatVersion: 5,
     allComposers: [{ composerId: A, name: 'Fixture' }],
     composers: {
       [A]: JSON.stringify({
@@ -91,6 +93,45 @@ INSERT INTO ItemTable VALUES('composer.composerHeaders','{"allComposers":[]}');`
 
   return { ctx, workspace, gl };
 }
+
+test(
+  'header-only destination evidence reserves an otherwise empty composer id',
+  { skip },
+  async (t) => {
+    const { ctx, workspace, gl } = await setup(t);
+
+    await sql.execSqlScript({
+      ...gl,
+      sql: `UPDATE ItemTable SET value='{"allComposers":[{"composerId":"${A}"}]}' WHERE key='composer.composerHeaders';`,
+    });
+
+    const pair = await inspectPair(ctx, workspace);
+
+    assert.equal(
+      await rendererHeaderCollision({
+        targetComposerId: A,
+        workspace,
+        connWs: pair.connWs,
+        connGl: pair.connGl,
+        wsInfo: pair.wsInfo.layout,
+        glInfo: pair.glInfo.layout,
+      }),
+      true,
+    );
+
+    assert.equal(
+      await rendererHeaderCollision({
+        targetComposerId: '22222222-2222-4222-8222-222222222222',
+        workspace,
+        connWs: pair.connWs,
+        connGl: pair.connGl,
+        wsInfo: pair.wsInfo.layout,
+        glInfo: pair.glInfo.layout,
+      }),
+      false,
+    );
+  },
+);
 
 test(
   'resource collision after preflight must not commit composer records',
@@ -500,7 +541,7 @@ test(
 );
 
 test(
-  'v4 import remaps nested bubble references without replacing message text',
+  'v5 import remaps nested bubble references without replacing message text',
   { skip },
   async (t) => {
     const { ctx, workspace, gl } = await setup(t);

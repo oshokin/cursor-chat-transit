@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   matchesWorkspaceStorage,
   readGlobalHeaderSources,
+  workspaceBinding,
   type HeaderSource,
 } from './db-headers';
 import type { DeleteTarget } from './deletion-types';
@@ -70,6 +71,15 @@ export async function inspectDeletionOwnership(
       const set = owners.get(key) || new Set<string>();
 
       set.add(workspace.workspaceDbPath);
+
+      const binding = workspaceBinding(
+        row,
+        workspace.storageId,
+        workspace.identity,
+      );
+
+      if (binding === 'other' || binding === 'conflict')
+        set.add('conflicting-workspace-owner');
       owners.set(key, set);
     }
   }
@@ -95,8 +105,10 @@ export async function inspectDeletionOwnership(
       for (const row of source.records) {
         if (
           !row.workspaceIdentifier ||
-          profile.some((w) =>
-            matchesWorkspaceStorage(row, w.storageId, w.identity),
+          profile.some(
+            (w) =>
+              matchesWorkspaceStorage(row, w.storageId, w.identity) &&
+              workspaceBinding(row, w.storageId, w.identity) === 'match',
           )
         )
           continue;

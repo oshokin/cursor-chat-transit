@@ -35,10 +35,23 @@ function readVarint(bytes: Buffer, start: number): [bigint, number] {
   throw new Error('Unterminated varint');
 }
 
-/** Decode a `~` + canonical base64 conversationState payload. */
+/** Decode renderer state: `~` base64 or hex (9690.js S; main.js 20600). */
 export function decodeState(state: unknown): Buffer {
-  if (typeof state !== 'string' || !state.startsWith('~')) {
+  if (typeof state !== 'string') {
     throw new Error('Unsupported conversationState encoding');
+  }
+
+  if (!state.startsWith('~')) {
+    const hex = state.trim();
+
+    if (
+      hex.length > MAX_BYTES * 2 ||
+      hex.length % 2 !== 0 ||
+      !/^[0-9a-f]+$/i.test(hex)
+    )
+      throw new Error('Non-canonical or oversized hex');
+
+    return Buffer.from(hex, 'hex');
   }
 
   const encoded = state.slice(1);
@@ -101,7 +114,7 @@ export function field1Candidates(state: unknown): string[] {
     .map((row) => row.bytes.toString('hex'));
 }
 
-/** Exact UUID-valued protobuf strings, including strings in nested messages. */
+/** Composer ids only at typed subagent map keys, never arbitrary strings. */
 export function conversationStateIds(state: unknown): Set<string> {
   const ids = new Set<string>();
 
@@ -110,23 +123,26 @@ export function conversationStateIds(state: unknown): Set<string> {
   return ids;
 }
 
-/** Walk protobuf messages while treating arbitrary string fields as opaque. */
+/** ConversationStateStructure fields 16/31 are subagent-id keyed maps. */
 function collectIds(bytes: Buffer, ids: Set<string>, depth = 0): void {
   if (depth > 64) throw new Error('Conversation state nesting limit');
 
   for (const field of readFields(bytes)) {
     if (field.wire !== 2) continue;
-    const text = field.bytes.toString('utf8');
+    if (field.field !== 16 && field.field !== 31) continue;
 
-    if (UUID_TEXT.test(text)) {
-      ids.add(text);
-      continue;
-    }
+    for (const entry of readFields(field.bytes)) {
+      if (entry.wire !== 2) continue;
+      const text = entry.bytes.toString('utf8');
 
-    try {
-      collectIds(field.bytes, ids, depth + 1);
-    } catch {
-      // Length-delimited strings and raw bytes need not be nested messages.
+      if (entry.field === 1 && UUID_TEXT.test(text)) ids.add(text);
+
+      if (field.field === 16 && entry.field === 2) {
+        for (const persisted of readFields(entry.bytes)) {
+          if (persisted.field === 1 && persisted.wire === 2)
+            collectIds(persisted.bytes, ids, depth + 1);
+        }
+      }
     }
   }
 }
@@ -136,8 +152,7 @@ export function remapConversationStateIds(
   state: unknown,
   ids: ReadonlyMap<string, string>,
 ): unknown {
-  if (typeof state !== 'string' || !state.startsWith('~') || ids.size === 0)
-    return state;
+  if (typeof state !== 'string' || ids.size === 0) return state;
   const bytes = decodeState(state);
 
   const replacements = new Map(
@@ -157,10 +172,12 @@ export function remapConversationStateIds(
 
   remapMessage(bytes, replacements);
 
-  return `~${bytes.toString('base64')}`;
+  return state.startsWith('~')
+    ? `~${bytes.toString('base64')}`
+    : bytes.toString('hex');
 }
 
-/** Remap exact string fields while preserving unknown protobuf bytes. */
+/** Remap typed subagent map keys; opaque strings/bytes are never opened. */
 function remapMessage(
   bytes: Buffer,
   replacements: ReadonlyMap<string, Buffer>,
@@ -170,17 +187,21 @@ function remapMessage(
 
   for (const field of readFields(bytes)) {
     if (field.wire !== 2) continue;
-    const replacement = replacements.get(field.bytes.toString('hex'));
+    if (field.field !== 16 && field.field !== 31) continue;
 
-    if (replacement) {
-      replacement.copy(bytes, field.offset);
-      continue;
-    }
+    for (const entry of readFields(field.bytes)) {
+      if (entry.wire !== 2) continue;
 
-    try {
-      remapMessage(field.bytes, replacements, depth + 1);
-    } catch {
-      // An arbitrary string or byte field is not a nested protobuf message.
+      if (entry.field === 1) {
+        const replacement = replacements.get(entry.bytes.toString('hex'));
+
+        if (replacement) replacement.copy(field.bytes, entry.offset);
+      } else if (field.field === 16 && entry.field === 2) {
+        for (const persisted of readFields(entry.bytes)) {
+          if (persisted.field === 1 && persisted.wire === 2)
+            remapMessage(persisted.bytes, replacements, depth + 1);
+        }
+      }
     }
   }
 }

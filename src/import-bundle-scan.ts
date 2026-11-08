@@ -1,3 +1,13 @@
+import { visualizationFilenamesFromChat } from './artifact-support';
+import {
+  parseHistoricalResourceId,
+  MAX_HISTORICAL_ARTIFACT_BYTES,
+  assertDistinctTranscriptOwners,
+} from './historical-artifacts';
+import {
+  isVisualizationFilename,
+  MAX_VISUALIZATION_BYTES,
+} from './visualizations';
 import { coherentFamilyAssignment } from './chat-family';
 import { adjustFamilyPlan, type CatalogFamilyRow } from './import-family-plan';
 import { textRecovery } from './text-recovery';
@@ -39,7 +49,10 @@ import {
   decideImport,
   type Receipt,
 } from './import-policy';
-import { observeTargetComposer } from './import-reconcile';
+import {
+  observeTargetComposer,
+  rendererHeaderCollision,
+} from './import-reconcile';
 import { JournalStore } from './journal-db';
 import { readNdjson } from './ndjson-io';
 import { isPlanFilename, planFilenamesFromChat } from './plans';
@@ -89,6 +102,7 @@ export async function scanAll(opts: {
   const receipts = await opts.journal.receipts();
   const receiptsBySource = receiptsByComposer(receipts);
   const familyRows: CatalogFamilyRow[] = [];
+  const historicalOwners = new Set<string>();
 
   for (const file of await ndjsonFiles(path.join(opts.root, 'catalog'))) {
     for await (const row of readNdjson(
@@ -105,6 +119,9 @@ export async function scanAll(opts: {
       if (typeof ordinal !== 'number' || typeof sourceId !== 'string') {
         throw new Error('Catalog row is missing a chat id.');
       }
+
+      historicalOwners.add(sourceId);
+      assertDistinctTranscriptOwners(historicalOwners);
 
       let scanned: Awaited<ReturnType<typeof scanChat>>;
 
@@ -579,6 +596,14 @@ export async function scanChat(
 
     if (
       !collision &&
+      !(await rendererHeaderCollision({
+        targetComposerId: sourceId,
+        workspace: opts.workspace,
+        connWs: opts.pair.connWs,
+        connGl: opts.pair.connGl,
+        wsInfo: opts.pair.wsInfo.layout,
+        glInfo: opts.pair.glInfo.layout,
+      })) &&
       !(await hostSessionExists(
         userDataDirFromGlobalDb(opts.workspace.globalDbPath),
         sourceId,
@@ -598,7 +623,14 @@ export async function scanChat(
     string,
     {
       /** Resource class required by this chat. */
-      kind: 'kv' | 'image' | 'plan' | 'canvas';
+      kind:
+        | 'kv'
+        | 'image'
+        | 'plan'
+        | 'canvas'
+        | 'visualization'
+        | 'transcript'
+        | 'terminal-history';
       /** Resource id required by this chat. */
       id: string;
     }
@@ -606,7 +638,14 @@ export async function scanChat(
 
   /** Remember one resource identity for this chat. */
   const need = (
-    kind: 'kv' | 'image' | 'plan' | 'canvas',
+    kind:
+      | 'kv'
+      | 'image'
+      | 'plan'
+      | 'canvas'
+      | 'visualization'
+      | 'transcript'
+      | 'terminal-history',
     /** Resource id. */
     id: string,
   ) => needs.set(JSON.stringify([kind, id]), { kind, id });
@@ -688,6 +727,9 @@ export async function scanChat(
         need('plan', name);
       }
 
+      for (const name of visualizationFilenamesFromChat('{}', [one]))
+        need('visualization', name);
+
       for (const name of canvasFilenamesFromChat('{}', [one])) {
         need('canvas', name);
       }
@@ -740,6 +782,9 @@ export async function scanChat(
     need('plan', name);
   }
 
+  for (const name of visualizationFilenamesFromChat(bodyForDeps, []))
+    need('visualization', name);
+
   for (const name of canvasFilenamesFromChat(bodyForDeps, [])) {
     need('canvas', name);
   }
@@ -765,6 +810,45 @@ export async function scanChat(
       opts.ctx,
     )) {
       const ref = validateResourceRef(row.value);
+
+      if (ref.class === 'transcript' || ref.class === 'terminal-history') {
+        const manifest = JSON.parse(
+          await readFile(path.join(opts.root, 'manifest.json'), 'utf8'),
+        );
+
+        if (
+          manifest.formatVersion !== 5 ||
+          !manifest.capabilities?.required?.includes('historical-artifacts-v1')
+        )
+          throw new Error(
+            'Historical artifacts require historical-artifacts-v1 in a v5 bundle.',
+          );
+        const metadata = parseHistoricalResourceId(ref.id, ref.class);
+
+        if (
+          ref.class === 'transcript' &&
+          metadata.parent !== undefined &&
+          metadata.parent !==
+            (fields.subagentInfo as Record<string, unknown> | undefined)
+              ?.parentComposerId
+        )
+          throw new Error('Transcript parent differs from database ownership.');
+        need(ref.class, ref.id);
+      }
+
+      if (ref.class === 'visualization') {
+        const manifest = JSON.parse(
+          await readFile(path.join(opts.root, 'manifest.json'), 'utf8'),
+        ) as { formatVersion?: number; capabilities?: { required?: string[] } };
+
+        if (
+          manifest.formatVersion !== 5 ||
+          !manifest.capabilities?.required?.includes('visualization-html-v1')
+        )
+          throw new Error(
+            'Visualization resources require visualization-html-v1 in a v5 bundle.',
+          );
+      }
 
       if (ref.class === 'kv') kvRows.push({ id: ref.id, sha256: ref.sha256 });
 
@@ -849,7 +933,11 @@ export async function scanChat(
       : [];
 
     if (!found) {
-      const reused = await reusedSha(opts, need.kind, need.id);
+      const reused = await reusedSha(
+        { ...opts, targetComposerId: targetId },
+        need.kind,
+        need.id,
+      );
 
       dependencies.push({
         kind: need.kind,
@@ -925,7 +1013,17 @@ export async function noteReachableBlobs(
     sha256: string;
   }>,
   /** Called once for each reachable resource. */
-  note: (kind: 'kv' | 'image' | 'plan' | 'canvas', id: string) => void,
+  note: (
+    kind:
+      | 'kv'
+      | 'image'
+      | 'plan'
+      | 'canvas'
+      | 'visualization'
+      | 'transcript'
+      | 'terminal-history',
+    id: string,
+  ) => void,
   /** Transfer hooks and cancellation. */
   ctx: TransferContext,
 ): Promise<void> {
@@ -1000,7 +1098,15 @@ export function validateResourceRef(
     );
 
   if (
-    !['kv', 'image', 'plan', 'canvas'].includes(String(ref.class)) ||
+    ![
+      'kv',
+      'image',
+      'plan',
+      'canvas',
+      'visualization',
+      'transcript',
+      'terminal-history',
+    ].includes(String(ref.class)) ||
     typeof ref.id !== 'string' ||
     !ref.id ||
     typeof ref.sha256 !== 'string' ||
@@ -1031,10 +1137,26 @@ export function validateResourceRef(
     )
       throw new Error('Unexpected renderer KV registry metadata.');
   } else {
+    if (ref.class === 'transcript' || ref.class === 'terminal-history') {
+      parseHistoricalResourceId(String(ref.id), ref.class);
+      if (
+        Number(ref.byteLength) > MAX_HISTORICAL_ARTIFACT_BYTES ||
+        ref.filename !== ref.id
+      )
+        throw new Error('Invalid historical artifact metadata.');
+    }
+
     const filename =
       ref.filename ??
       (ref.class === 'image' ? `${ref.id}.${ref.extension}` : ref.id);
 
+    if (
+      ref.class === 'visualization' &&
+      (!isVisualizationFilename(String(filename)) ||
+        ref.id !== filename ||
+        Number(ref.byteLength) > MAX_VISUALIZATION_BYTES)
+    )
+      throw new Error('Invalid visualization metadata.');
     if (!basename(filename)) throw new Error('Invalid resource filename.');
     if (ref.class === 'plan' && !isPlanFilename(filename))
       throw new Error('Invalid plan filename.');

@@ -158,7 +158,7 @@ test('v5 rejects unknown required capabilities', async (t) => {
   );
 });
 
-test('reader retains v4 inventory compatibility', async (t) => {
+test('reader rejects v4 inventory archives', async (t) => {
   const root = await fixture(t);
   const payload = path.join(root, 'payload');
   const inventory = path.join(root, 'inventory.ndjson');
@@ -201,10 +201,10 @@ test('reader retains v4 inventory compatibility', async (t) => {
     { diskPath: payload, name: 'payload.bin' },
   ]);
 
-  const bundle = await openBundle(archive);
-
-  assert.equal(bundle.manifest.formatVersion, 4);
-  await bundle.close();
+  await assert.rejects(
+    () => openBundle(archive),
+    /Unsupported export formatVersion 4.*Export the chats again/,
+  );
 });
 
 test('cancelled packaging keeps the previous destination and removes partial files', async (t) => {

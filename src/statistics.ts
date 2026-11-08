@@ -9,10 +9,35 @@ import { execSql } from './sqlite';
 import { connOf } from './transfer-context';
 import { traceIO, transferEvent } from './transfer-events';
 import type { ComposerHeader, TransferContext, WorkspaceEntry } from './types';
+import { TransferError } from './types';
 import { WorkspaceHeaderReader } from './workspace-header-reader';
 
 /** Chats deep-checked within one stable database read view. */
 const STATISTICS_DEEP_CHECK_BATCH_ROWS = 32;
+
+/** Unsupported transfer formats do not invalidate independently readable metadata. */
+async function inspectTransferHealth(
+  ctx: TransferContext,
+  workspace: WorkspaceEntry,
+  conn: import('./types').SqliteConn,
+  header: ComposerHeader,
+): Promise<{ health: import('./chat-health').ChatHealth; detail: string }> {
+  try {
+    const health = await inspectChatHealth(ctx, workspace, conn, header);
+
+    return { health, detail: healthLabel[health] };
+  } catch (error) {
+    ctx.signal?.throwIfAborted();
+    if (!(error instanceof TransferError) || error.code !== 'UNSUPPORTED_STATE')
+      throw error;
+
+    return {
+      health: 'unknown',
+      detail:
+        'Transfer check unsupported — conversation state format not supported',
+    };
+  }
+}
 
 /** Only metadata crosses IPC; bodies stay in the worker. */
 export type StatisticsJob = Pick<
@@ -331,14 +356,14 @@ export async function runStatistics(
             });
 
             if (!size.trim()) {
-              const health = job.deepCheck
-                ? await inspectChatHealth(ctx, workspace, view.conn, row)
-                : 'missing';
+              const assessment = job.deepCheck
+                ? await inspectTransferHealth(ctx, workspace, view.conn, row)
+                : { health: 'missing' as const, detail: healthLabel.missing };
 
-              chatHealth = health;
+              chatHealth = assessment.health;
               eligible = false;
 
-              return healthLabel[health];
+              return assessment.detail;
             }
 
             if (Number(size.trim()) > MAX_SQLITE_VALUE_BYTES)
@@ -374,17 +399,17 @@ export async function runStatistics(
 
             if (!job.deepCheck) return detail;
 
-            const health = await inspectChatHealth(
+            const assessment = await inspectTransferHealth(
               ctx,
               workspace,
               view.conn,
               row,
             );
 
-            chatHealth = health;
-            eligible = health === 'ready';
+            chatHealth = assessment.health;
+            eligible = assessment.health === 'ready';
 
-            return `${detail} · ${healthLabel[health]}`;
+            return `${detail} · ${assessment.detail}`;
           } finally {
             await view.close();
           }

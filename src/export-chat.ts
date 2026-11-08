@@ -1,4 +1,9 @@
 import { imageBasenamesFromBubbles } from './attachments';
+import {
+  historicalProjectRoot,
+  terminalReferencesFromJson,
+} from './historical-artifacts';
+import { visualizationFilenamesFromChat } from './artifact-support';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import type { ExportChatWriter } from './bundle-writer';
 import { canvasFilenamesFromChat } from './canvases';
@@ -7,6 +12,9 @@ import * as db from './db';
 import { imageUuidsFromBubbles } from './dependencies';
 import { writeResources } from './export-resources';
 import { snapshotHostSession, userDataDirFromGlobalDb } from './host-snapshots';
+import { discoverHostSession, validateHostSnapshot } from './host-snapshots';
+import { requireRendererFallback } from './host-snapshot-contract';
+import path from 'node:path';
 import { splitConversation } from './import-policy';
 import { planFilenamesFromChat } from './plans';
 import { parseBoundedJson } from './record-json';
@@ -112,10 +120,26 @@ export async function readChatForExport(opts: {
 
   const issueStart = opts.issues.length;
 
-  await opts.writer.beginChat(opts.header as Record<string, unknown>);
+  const exportedHeader = { ...opts.header };
+
+  if (Array.isArray(split.fields.subagentComposerIds))
+    exportedHeader.subagentComposerIds =
+      split.fields.subagentComposerIds.filter(
+        (id): id is string => typeof id === 'string',
+      );
+
+  await opts.writer.beginChat(exportedHeader as Record<string, unknown>);
   await opts.writer.writeComposer(split.fields, layout);
 
   const remaining = new Set<string>();
+  const visualizations = new Set(visualizationFilenamesFromChat(body, []));
+  const projectRoot = historicalProjectRoot(opts.ctx, opts.workspace);
+  const terminalFiles = new Set<string>();
+
+  if (projectRoot)
+    for (const file of terminalReferencesFromJson(JSON.parse(body), projectRoot)
+      .files)
+      terminalFiles.add(file);
 
   for (const item of split.items) {
     await opts.writer.writeConversation(item);
@@ -158,6 +182,19 @@ export async function readChatForExport(opts: {
     )
       readableText = true;
     recovery?.bubble(bubble.bubbleId, payload);
+
+    if (projectRoot) {
+      const terminalRefs = terminalReferencesFromJson(payload, projectRoot);
+
+      for (const file of terminalRefs.files) terminalFiles.add(file);
+      if (terminalRefs.unsupportedLiveMentions)
+        opts.ctx.onNote?.(
+          'Live terminal mentions remain external; only explicit historical snapshot files are transferred.',
+        );
+    }
+
+    for (const filename of visualizationFilenamesFromChat(undefined, [bubble]))
+      visualizations.add(filename);
     await opts.writer.writeBubble(bubble.bubbleId, payload);
     remaining.delete(bubble.bubbleId);
 
@@ -241,25 +278,65 @@ export async function readChatForExport(opts: {
     );
   }
 
-  await writeResources({ ...opts, body, refs });
+  const rendererComplete = await writeResources({
+    ...opts,
+    body,
+    refs: { ...refs, visualizations, terminalFiles },
+  });
 
-  if (opts.tmp) {
-    const snapshot = await snapshotHostSession({
-      userDataDir: userDataDirFromGlobalDb(opts.workspace.globalDbPath),
-      sessionId: id,
-      stagingDir: opts.tmp,
-      signal: opts.ctx.signal,
-      timeoutMs: opts.ctx.timeoutMs,
-      busyTimeoutMs: opts.ctx.busyTimeoutMs,
-    });
+  if (
+    opts.issues.some(
+      (issue) =>
+        issue.reason === 'missing-visualizations' && issue.composerId === id,
+    ) &&
+    !opts.incomplete.includes(id)
+  )
+    opts.incomplete.push(id);
 
-    if (snapshot) {
-      await opts.writer.writeHostSnapshot(
-        snapshot.sessionId,
-        snapshot.database,
-        snapshot.meta,
+  try {
+    if (!opts.tmp) {
+      const source = await discoverHostSession(
+        userDataDirFromGlobalDb(opts.workspace.globalDbPath),
+        id,
       );
+
+      if (source)
+        await validateHostSnapshot(
+          {
+            sessionId: id,
+            database: path.join(source, 'session.sqlite'),
+            meta: path.join(source, 'meta.json'),
+          },
+          (parsed as Record<string, unknown>).conversationState ?? null,
+        );
+    } else {
+      const snapshot = await snapshotHostSession({
+        userDataDir: userDataDirFromGlobalDb(opts.workspace.globalDbPath),
+        sessionId: id,
+        stagingDir: opts.tmp,
+        signal: opts.ctx.signal,
+        timeoutMs: opts.ctx.timeoutMs,
+        busyTimeoutMs: opts.ctx.busyTimeoutMs,
+        rendererState:
+          (parsed as Record<string, unknown>).conversationState ?? null,
+      });
+
+      if (snapshot) {
+        await opts.writer.writeHostSnapshot(
+          snapshot.sessionId,
+          snapshot.database,
+          snapshot.meta,
+        );
+      }
     }
+  } catch (error) {
+    requireRendererFallback(error, rendererComplete);
+    opts.incomplete.push(id);
+    opts.issues.push(chatIssue(opts.header, 'unsupported-host-snapshot'));
+
+    opts.ctx.onNote?.(
+      `History-only chat ${chatLogLabel(opts.header)}: unsupported native snapshot omitted; renderer closure verified.`,
+    );
   }
 
   await opts.writer.endChat();

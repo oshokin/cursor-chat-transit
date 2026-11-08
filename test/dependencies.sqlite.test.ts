@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import * as db from '../src/db';
+import { readChatVisualization } from '../src/visualizations';
 import { formatImportNotice } from '../src/operation-ui';
 import { observeTransfer, type TransferEvent } from '../src/transfer-events';
 import * as transfer from '../src/transfer';
@@ -314,7 +315,7 @@ test(
     });
 
     const obj = {
-      formatVersion: 2,
+      formatVersion: 5,
       allComposers: [{ composerId: A, name: 'Legacy' }],
       composers: { [A]: composerBody(A, state) },
       bubbles: {
@@ -341,7 +342,7 @@ test(
     const { ctx, target } = await fixture(t);
 
     const obj = {
-      formatVersion: 3,
+      formatVersion: 5,
       allComposers: [{ composerId: A, name: 'Incomplete' }],
       composers: { [A]: composerBody(A, state) },
       bubbles: {
@@ -886,7 +887,7 @@ test(
     att.sha256 = '00'.repeat(32);
 
     const obj = {
-      formatVersion: 3,
+      formatVersion: 5,
       allComposers: [{ composerId: A, name: 'Bad' }],
       composers: { [A]: composerBody(A) },
       bubbles: {
@@ -935,7 +936,7 @@ test(
       ]).toString('base64');
 
     const obj = {
-      formatVersion: 3,
+      formatVersion: 5,
       allComposers: [{ composerId: A, name: 'Text blob' }],
       composers: { [A]: composerBody(A, textState) },
       bubbles: {
@@ -1280,7 +1281,7 @@ test(
 );
 
 test(
-  'format 2 can reuse a plan already on the destination',
+  'format 5 can reuse a plan already on the destination',
   { skip },
   async (t) => {
     const { root, ctx, target } = await fixture(t);
@@ -1290,7 +1291,7 @@ test(
     await fs.writeFile(path.join(targetPlans, PLAN_NAME), PLAN_MARKDOWN);
 
     const obj = {
-      formatVersion: 2,
+      formatVersion: 5,
       allComposers: [{ composerId: A, name: 'Legacy plan' }],
       composers: {
         [A]: JSON.stringify({
@@ -1473,6 +1474,242 @@ const CANVAS_NAME = 'dos-conan-migration-map.canvas.tsx';
 /** Canvas source that must round-trip. */
 const CANVAS_SOURCE =
   'export default function DosConanMigrationMap(){return null}\n';
+
+test(
+  'visualization lineage reads side-chat parent then nearest project, never unrelated stores',
+  { skip },
+  async (t) => {
+    const { root, ctx, source } = await fixture(t);
+
+    await seedChat(source.gl, source.ws, {
+      extra: {
+        subagentInfo: { parentComposerId: C, subagentTypeName: 'side-chat' },
+      },
+    });
+
+    await sql.execSqlScript({
+      ...source.gl,
+      sql: `INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${C}`)},${sqlText(JSON.stringify({ composerId: C, subagentInfo: { parentComposerId: D } }))}); INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${D}`)},${sqlText(JSON.stringify({ composerId: D, isProject: true }))});`,
+    });
+
+    const projectFiles = path.join(root, D);
+
+    await fs.mkdir(path.join(projectFiles, 'visualizations'), {
+      recursive: true,
+    });
+
+    await fs.writeFile(
+      path.join(projectFiles, 'visualizations', 'chart.html'),
+      'project',
+    );
+
+    const owners: string[] = [];
+
+    const context = {
+      ...ctx,
+      resolveVisualizationScopeFiles: ({ agentId }: { agentId: string }) => {
+        owners.push(agentId);
+
+        return path.join(root, agentId);
+      },
+    };
+
+    assert.equal(
+      (
+        await readChatVisualization(context, source.workspace, A, 'chart.html')
+      )?.bytes.toString(),
+      'project',
+    );
+
+    assert.deepEqual(owners, [A, C, D]);
+    owners.length = 0;
+    await fs.mkdir(path.join(root, C, 'visualizations'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(root, C, 'visualizations', 'chart.html'),
+      'parent',
+    );
+
+    assert.equal(
+      (
+        await readChatVisualization(context, source.workspace, A, 'chart.html')
+      )?.bytes.toString(),
+      'parent',
+    );
+
+    assert.deepEqual(owners, [A, C]);
+  },
+);
+
+test(
+  'visualization default store clean-profile A to B archive round-trip and recovery',
+  { skip },
+  async (t) => {
+    if (process.platform === 'win32') return;
+    const { root, ctx, source, target } = await fixture(t);
+    const previous = process.env.CURSOR_AGENT_STORE_DIR;
+
+    t.after(() => {
+      if (previous === undefined) delete process.env.CURSOR_AGENT_STORE_DIR;
+      else process.env.CURSOR_AGENT_STORE_DIR = previous;
+    });
+
+    const a = path.join(root, 'profile-a-store');
+    const b = path.join(root, 'profile-b-store');
+
+    const sourceHtml = path.join(
+      a,
+      'cursor_agent_stores',
+      A,
+      'files',
+      'visualizations',
+    );
+
+    await fs.mkdir(sourceHtml, { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(sourceHtml, 'chart.html'), 'opaque profile A');
+
+    await seedChat(source.gl, source.ws, {
+      extra: { reference: { kind: 'visualization', src: 'chart.html' } },
+    });
+
+    process.env.CURSOR_AGENT_STORE_DIR = a;
+    const archive = path.join(root, 'clean-default-store.zip');
+
+    await transfer.exportToFile(ctx, source.workspace, archive);
+    process.env.CURSOR_AGENT_STORE_DIR = b;
+    await assert.rejects(fs.stat(b), { code: 'ENOENT' });
+
+    const first = await transfer.importFromBundle(
+      ctx,
+      archive,
+      target.workspace,
+    );
+
+    assert.equal(first.imported, 1);
+    const { parsed } = await readImportedComposer(ctx, target.workspace);
+    const owner = String((parsed as { composerId: string }).composerId);
+
+    const html = path.join(
+      b,
+      'cursor_agent_stores',
+      owner,
+      'files',
+      'visualizations',
+      'chart.html',
+    );
+
+    assert.notEqual(owner, A);
+    assert.equal(await fs.readFile(html, 'utf8'), 'opaque profile A');
+
+    assert.equal(
+      (await transfer.importFromBundle(ctx, archive, target.workspace))
+        .alreadyImported,
+      1,
+    );
+
+    await assert.rejects(fs.stat(path.join(b, 'cursor_agent_stores', A)), {
+      code: 'ENOENT',
+    });
+
+    await assert.rejects(
+      fs.stat(path.join(path.dirname(path.dirname(html)), '.sync')),
+      { code: 'ENOENT' },
+    );
+  },
+);
+
+test(
+  'visualization opaque bytes round-trip to target owner, collide safely, and reuse',
+  { skip },
+  async (t) => {
+    const { root, ctx, source, target } = await fixture(t);
+    const sourceFiles = path.join(root, 'source-files');
+    const targetFiles = path.join(root, 'target-files');
+
+    const html = Buffer.from([
+      0,
+      255,
+      ...Buffer.from('<script>throw 1</script>'),
+    ]);
+
+    await fs.mkdir(path.join(sourceFiles, 'visualizations'), {
+      recursive: true,
+    });
+
+    await fs.writeFile(
+      path.join(sourceFiles, 'visualizations', 'chart.html'),
+      html,
+    );
+
+    await seedChat(source.gl, source.ws, {
+      extra: { reference: { kind: 'visualization', src: 'chart.html' } },
+    });
+
+    const archive = path.join(root, 'visualizations.zip');
+
+    const exported = await transfer.exportToFile(
+      { ...ctx, resolveVisualizationScopeFiles: () => sourceFiles },
+      source.workspace,
+      archive,
+    );
+
+    assert.equal('complete' in exported && exported.complete, true);
+    const owners: string[] = [];
+
+    const targetCtx = {
+      ...ctx,
+      resolveVisualizationScopeFiles: ({ agentId }: { agentId: string }) => {
+        owners.push(agentId);
+
+        return path.join(targetFiles, agentId);
+      },
+    };
+
+    await transfer.importFromBundle(targetCtx, archive, target.workspace);
+    const { parsed } = await readImportedComposer(targetCtx, target.workspace);
+    const owner = String((parsed as { composerId: string }).composerId);
+
+    assert.notEqual(owner, A);
+    assert.ok(owners.includes(owner));
+
+    const installed = path.join(
+      targetFiles,
+      owner,
+      'visualizations',
+      'chart.html',
+    );
+
+    assert.deepEqual(await fs.readFile(installed), html);
+    await transfer.importFromBundle(targetCtx, archive, target.workspace);
+    assert.deepEqual(await fs.readFile(installed), html);
+    const collision = path.join(root, 'collision');
+
+    await fs.mkdir(path.join(collision, 'visualizations'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(collision, 'visualizations', 'chart.html'),
+      'different',
+    );
+
+    const collisionTarget = (await fixture(t, 'collision')).target;
+
+    await assert.rejects(
+      transfer.importFromBundle(
+        { ...ctx, resolveVisualizationScopeFiles: () => collision },
+        archive,
+        collisionTarget.workspace,
+      ),
+    );
+
+    assert.equal(
+      await fs.readFile(
+        path.join(collision, 'visualizations', 'chart.html'),
+        'utf8',
+      ),
+      'different',
+    );
+  },
+);
 
 test(
   'export copies a canvas from canvasesDir and import rewrites the URI',

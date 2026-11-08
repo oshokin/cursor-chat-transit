@@ -1,11 +1,8 @@
 /** Public archive label. */
 export const BUNDLE_FORMAT = 'cursor-chat-transit';
 
-/** Current on-disk writer format. Readers also accept version 4. */
+/** Only supported on-disk archive format, for both reading and writing. */
 export const EXPORT_FORMAT_VERSION = 5;
-
-/** Oldest seekable bundle version accepted by this build. */
-export const MIN_BUNDLE_FORMAT_VERSION = 4;
 
 /** Semantic snapshot algorithm stored with new receipts. */
 export const FINGERPRINT_ALGORITHM = 'cct-snapshot-v2';

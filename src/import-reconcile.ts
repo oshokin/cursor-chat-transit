@@ -1,3 +1,6 @@
+import { readVisualizationFile } from './visualizations';
+import { historicalDestination } from './historical-artifacts';
+import { assertVisualizationScope } from './visualizations';
 import path from 'node:path';
 import { attachmentDirectory, isAttachmentBasename } from './attachments';
 import { readCanvasFile } from './canvases';
@@ -65,6 +68,10 @@ export async function pendingResourceMatches(
     /** Destination workspace used to resolve attachment files. */
     workspace: WorkspaceEntry;
     connGl: SqliteConn;
+    visualizationScopeFiles?: string;
+    historicalProjectRoot?: string | null;
+    historicalOwner?: string;
+    historicalOwnerMap?: ReadonlyMap<string, string>;
     /** Directory that should still hold pending plan files. */
     plansDir: string;
     /** Directory that should still hold pending canvas files. */
@@ -77,6 +84,22 @@ export async function pendingResourceMatches(
     const stored = await db.readKvBytes(opts.connGl, dep.id);
 
     return Boolean(stored && sha256Hex(stored.bytes) === dep.sha256);
+  }
+
+  if (dep.kind === 'transcript' || dep.kind === 'terminal-history') {
+    if (!opts.historicalProjectRoot || !opts.historicalOwner) return false;
+
+    const destination = historicalDestination(
+      opts.historicalProjectRoot,
+      dep.kind,
+      dep.id,
+      opts.historicalOwner,
+      opts.historicalOwnerMap,
+    );
+
+    await assertVisualizationScope(path.dirname(destination));
+
+    return imageChecksum(destination, dep.sha256, opts.signal);
   }
 
   if (dep.kind === 'image') {
@@ -103,6 +126,20 @@ export async function pendingResourceMatches(
     const found = await readPlanFile(opts.plansDir, dep.id);
 
     return Boolean(found && found.sha256 === dep.sha256);
+  }
+
+  if (dep.kind === 'visualization') {
+    if (!opts.visualizationScopeFiles) return false;
+
+    return (
+      (
+        await readVisualizationFile(
+          opts.visualizationScopeFiles,
+          dep.id,
+          opts.signal,
+        )
+      )?.sha256 === dep.sha256
+    );
   }
 
   if (dep.kind === 'canvas') {
@@ -689,6 +726,22 @@ export async function observeTargetComposer(opts: {
     references: assessed.references,
     metadata: metadataInvalid ? 'invalid' : 'ok',
   };
+}
+
+/** Probe whether a target composer is live, gone, detached, or damaged. */
+export async function rendererHeaderCollision(
+  opts: Parameters<typeof observeTargetComposer>[0],
+): Promise<boolean> {
+  const facts = await observeTargetComposer(opts);
+
+  return (
+    facts.metadata === 'invalid' ||
+    facts.workspaceList === 'present' ||
+    facts.workspaceHeaders === 'present' ||
+    facts.workspaceSelected === 'present' ||
+    facts.globalHeader === 'present' ||
+    facts.globalHeadersTable === 'present'
+  );
 }
 
 /** Probe whether a target composer is live, gone, detached, or damaged. */

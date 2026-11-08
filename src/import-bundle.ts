@@ -17,9 +17,11 @@ import {
 import { reconcile } from './import-bundle-reconcile';
 import { isPreflightKvConflict } from './import-bundle-resources';
 import { scanAll } from './import-bundle-scan';
-import { hashFile } from './hash-file';
 import {
-  publishHostSnapshot,
+  prepareNativeIntent,
+  recoverNativeIntent,
+} from './import-native-recovery';
+import {
   userDataDirFromGlobalDb,
   validateHostSnapshot,
 } from './host-snapshots';
@@ -36,11 +38,11 @@ import { inChat } from './transfer-events';
 import type { ImportResult, TransferContext, WorkspaceEntry } from './types';
 import { TransferError } from './types';
 
-/** Import a v4 archive. JSON exports from older builds are rejected. */
+/** Import a v5 archive. JSON exports from older builds are rejected. */
 export async function importFromBundle(
   /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
-  /** Path of the v4 archive. */
+  /** Path of the v5 archive. */
   zipPath: string,
   workspace: WorkspaceEntry,
   options?: {
@@ -91,7 +93,7 @@ export async function importFromBundle(
 export async function runImport(
   /** Transfer hooks, timeouts, and cancellation. */
   ctx: TransferContext,
-  /** Path of the v4 archive. */
+  /** Path of the v5 archive. */
   zipPath: string,
   workspace: WorkspaceEntry,
   options: {
@@ -360,6 +362,10 @@ CREATE TABLE dep (
             }),
         };
 
+        const nativeIntent = hostSnapshot
+          ? await prepareNativeIntent(journal, operationId, hostSnapshot)
+          : undefined;
+
         try {
           await inChat(row.sourceId, chatName, () =>
             writeOne({
@@ -393,37 +399,12 @@ CREATE TABLE dep (
 
         written.push(row.targetId);
 
-        if (hostSnapshot) {
-          const sessionEffectId = `session:${row.sourceId}`;
-          const sessionHash = await hashFile(hostSnapshot.database);
-
-          await journal.planEffect({
-            operationId,
-            effectId: sessionEffectId,
-            kind: 'session',
-            target: row.sourceId,
-            desiredHash: sessionHash.sha256,
-          });
-
-          await journal.setEffectState(
-            operationId,
-            sessionEffectId,
-            'prepared',
+        if (nativeIntent)
+          await recoverNativeIntent(
+            journal,
+            nativeIntent,
+            userDataDirFromGlobalDb(workspace.globalDbPath),
           );
-
-          await publishHostSnapshot({
-            userDataDir: userDataDirFromGlobalDb(workspace.globalDbPath),
-            snapshot: hostSnapshot,
-            rendererCollision: row.targetId !== row.sourceId,
-          });
-
-          await journal.setEffectState(
-            operationId,
-            sessionEffectId,
-            'verified',
-            sessionHash.sha256,
-          );
-        }
 
         if (row.quality === 'history-only') historyOnlyIds.push(row.targetId);
 

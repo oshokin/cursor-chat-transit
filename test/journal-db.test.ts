@@ -50,7 +50,7 @@ INSERT INTO receipts VALUES('source','hash','target','complete','now');`,
           sql: 'PRAGMA user_version;',
         })
       ).trim(),
-      '2',
+      '3',
     );
   } finally {
     await journal.close();

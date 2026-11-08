@@ -2555,7 +2555,7 @@ test('issue counts ignore descendants that were added only to keep the family', 
   }
 });
 
-test('a failed or unknown descendant of an empty parent is still selected', async () => {
+test('failed or unknown descendants are not selected as disposable issues', async () => {
   const lines: string[] = [];
 
   const manager = await selectIssueFamily(
@@ -2571,12 +2571,7 @@ test('a failed or unknown descendant of an empty parent is still selected', asyn
   );
 
   try {
-    assert.deepEqual(composerIds(manager), [
-      'ack',
-      'child',
-      'grand',
-      'sibling',
-    ]);
+    assert.deepEqual(composerIds(manager), ['ack', 'sibling']);
 
     assert.match(lines.at(-1) || '', /could not be checked/);
   } finally {

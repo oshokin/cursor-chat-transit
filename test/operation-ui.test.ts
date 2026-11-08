@@ -183,6 +183,23 @@ test('selected workspace is reused and a missing pair is not replaced', () => {
   assert.equal(resolveSelectedWorkspace(undefined, [selected]).status, 'none');
 });
 
+test('export source re-resolution keeps shell and history storages separate', () => {
+  const shell = { ...entry('shell'), key: 'same-folder', mtime: 1 };
+  const history = { ...entry('history'), key: 'same-folder', mtime: 100 };
+  const refreshed = { ...shell, mtime: 2 };
+  const foreign = { ...shell, storageRoot: '/other-profile' };
+
+  assert.deepEqual(resolveSelectedWorkspace(shell, [history, refreshed]), {
+    status: 'ok',
+    workspace: refreshed,
+  });
+
+  assert.equal(
+    resolveSelectedWorkspace(shell, [history, foreign]).status,
+    'missing',
+  );
+});
+
 test('completion notification does not have to be awaited', async () => {
   let seen: string | undefined;
   let started = false;

@@ -6,7 +6,7 @@ import { journalPathFor } from './journal';
 import { TransferError } from './types';
 
 /** Current SQLite schema. Version zero is the pre-versioned receipt journal. */
-const JOURNAL_SCHEMA_VERSION = 2;
+const JOURNAL_SCHEMA_VERSION = 3;
 
 /** External side-effect class recorded by the recovery ledger. */
 export type EffectKind = 'db' | 'file' | 'session';
@@ -581,7 +581,7 @@ ON CONFLICT(operation_id,effect_id) DO UPDATE SET
   kind=excluded.kind,target=excluded.target,desired_hash=excluded.desired_hash,
   detail=excluded.detail,updated_at=excluded.updated_at
 WHERE effects.kind=excluded.kind AND effects.target=excluded.target
-  AND effects.desired_hash=excluded.desired_hash;
+  AND effects.desired_hash=excluded.desired_hash AND coalesce(effects.detail,'')=excluded.detail;
 INSERT INTO effect_events(operation_id,effect_id,state,created_at)
 SELECT ${sqlText(effect.operationId)},${sqlText(effect.effectId)},'planned',${sqlText(now)}
 WHERE changes() > 0;
@@ -591,7 +591,8 @@ COMMIT;`);
       await this.session.exec(
         `SELECT count(*) FROM effects WHERE operation_id=${sqlText(effect.operationId)}
          AND effect_id=${sqlText(effect.effectId)} AND kind=${sqlText(effect.kind)}
-         AND target=${sqlText(effect.target)} AND desired_hash=${sqlText(effect.desiredHash)};`,
+         AND target=${sqlText(effect.target)} AND desired_hash=${sqlText(effect.desiredHash)}
+         AND coalesce(detail,'')=${sqlText(effect.detail || '')};`,
       )
     ).trim();
 
@@ -874,7 +875,10 @@ DELETE FROM effects;`);
               kind === 'kv' ||
               kind === 'image' ||
               kind === 'plan' ||
-              kind === 'canvas'
+              kind === 'canvas' ||
+              kind === 'visualization' ||
+              kind === 'transcript' ||
+              kind === 'terminal-history'
             ) {
               expectedResources!.push({ kind, id, sha256 });
             }

@@ -29,11 +29,307 @@ import { listWorkspaceEntries } from '../src/paths';
 import { execSql, execSqlScript } from '../src/sqlite';
 import { findSqliteExecutable } from './support/sqlite-cli';
 import type { TransferContext, WorkspaceEntry } from '../src/types';
+import { confirmationCopy } from '../src/managed-delete-plan';
+import { WorkspaceHeaderReader } from '../src/workspace-header-reader';
 
 const executable = findSqliteExecutable(process.env.SQLITE3_PATH);
 const skip = executable ? false : 'sqlite3 required';
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
+
+for (const missing of ['parent', 'child'] as const) {
+  test(
+    `missing ${missing} deselection preserves independent selected families`,
+    { skip },
+    async () => {
+      const { root, ctx, one, empty, shared } = await profile();
+      const sibling = '33333333-3333-4333-8333-333333333333';
+      const unknown = '44444444-4444-4444-8444-444444444444';
+      const parent = '55555555-5555-4555-8555-555555555555';
+
+      try {
+        const rows = [
+          {
+            composerId: A,
+            name: 'Blocked child',
+            workspaceIdentifier: { id: 'one' },
+            subagentInfo: {
+              parentComposerId: missing === 'parent' ? unknown : parent,
+            },
+          },
+          {
+            composerId: sibling,
+            name: 'Blocked sibling',
+            workspaceIdentifier: { id: 'one' },
+            subagentInfo: {
+              parentComposerId: missing === 'parent' ? unknown : parent,
+            },
+          },
+          {
+            composerId: B,
+            name: 'Independent safe family',
+            workspaceIdentifier: { id: 'one' },
+          },
+          ...(missing === 'child'
+            ? [
+                {
+                  composerId: parent,
+                  name: 'Hidden parent',
+                  workspaceIdentifier: { id: 'one' },
+                  subagentComposerIds: [A, sibling, unknown],
+                },
+              ]
+            : []),
+        ];
+
+        await execSqlScript({
+          database: one.workspaceDbPath,
+          sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [A, sibling, B].map((composerId) => ({ composerId })) }))} WHERE key='composer.composerData';`,
+        });
+
+        await execSqlScript({
+          database: one.globalDbPath,
+          sql: rows
+            .map(
+              (row) =>
+                `INSERT OR REPLACE INTO cursorDiskKV VALUES (${sqlText(`composerData:${row.composerId}`)},${sqlText(JSON.stringify(row))});`,
+            )
+            .join('\n'),
+        });
+
+        const before = await readFile(one.globalDbPath);
+
+        const prepared = await prepareManagedDelete(ctx, {
+          kind: 'prepare-managed-delete',
+          userDataRoot: root,
+          requests: [{ kind: 'chats', workspace: one, ids: [B, A, sibling] }],
+          workspaces: [one, empty, shared],
+          emptyWindow: true,
+        });
+
+        assert.equal(prepared.ok, false);
+        if (prepared.ok) return;
+        assert.deepEqual(prepared.blocked?.[0].ids, [A, sibling]);
+        assert.equal(prepared.blocked?.[0].workspaceKey, one.workspaceDbPath);
+        assert.match(prepared.detail, /Blocked child|Hidden parent/);
+        assert.deepEqual(await readFile(one.globalDbPath), before);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+}
+
+test(
+  'body hydration never claims a reused folder URI for another physical store',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const parent = '33333333-3333-4333-8333-333333333333';
+      const duplicate = { ...empty, identity: one.identity };
+      const uri = one.identity!.uri;
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('composerData:${parent}',${sqlText(JSON.stringify({ name: 'Hidden named parent', workspaceIdentifier: { id: one.storageId, uri }, subagentComposerIds: [A] }))}); UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ name: 'Named child', workspaceIdentifier: { id: one.storageId, uri }, subagentInfo: { parentComposerId: parent } }))} WHERE key='composerData:${A}';`,
+      });
+
+      const reader = new WorkspaceHeaderReader(ctx);
+
+      assert.equal(
+        (await reader.read(duplicate, true)).some(
+          (row) => row.composerId === parent,
+        ),
+        false,
+      );
+
+      const prepared = await prepareManagedDelete(ctx, {
+        kind: 'prepare-managed-delete',
+        userDataRoot: root,
+        requests: [{ kind: 'chats', workspace: one, ids: [A] }],
+        workspaces: [one, duplicate, shared],
+        emptyWindow: true,
+      });
+
+      assert.equal(prepared.ok, true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'hidden body-owned family is expanded before confirmation without crossing workspace ownership',
+  { skip },
+  async () => {
+    const { root, ctx, one, empty, shared } = await profile();
+
+    try {
+      const parent = '9e0467cb-e4e3-498d-8bda-b7d1e411fcbd';
+
+      const body = {
+        composerId: parent,
+        workspaceIdentifier: { id: 'one' },
+        subagentComposerIds: [A],
+      };
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES (${sqlText(`composerData:${parent}`)},${sqlText(JSON.stringify(body))}); UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ composerId: A, workspaceIdentifier: { id: 'one' }, subagentInfo: { parentComposerId: parent } }))} WHERE key='composerData:${A}';`,
+      });
+
+      const job = {
+        kind: 'prepare-managed-delete' as const,
+        userDataRoot: root,
+        requests: [{ kind: 'chats' as const, workspace: one, ids: [A] }],
+        workspaces: [one, empty, shared],
+        emptyWindow: true,
+      };
+
+      const prepared = await prepareManagedDelete(ctx, job);
+
+      assert.equal(prepared.ok, true);
+      if (!prepared.ok) return;
+
+      assert.deepEqual(
+        new Set(prepared.plan.targets[0].ids),
+        new Set([A, parent]),
+      );
+
+      assert.match(confirmationCopy(prepared.plan).title, /2 selected chats/);
+
+      await execSqlScript({
+        database: empty.workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ selectedComposerIds: [parent], lastFocusedComposerIds: [parent] }))} WHERE key='composer.composerData';`,
+      });
+
+      const staleFocus = await prepareManagedDelete(ctx, job);
+
+      assert.equal(
+        staleFocus.ok,
+        true,
+        'foreign focus hint is not a shared owner',
+      );
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(
+          JSON.stringify({
+            allComposers: [
+              { composerId: A, workspaceIdentifier: { id: 'one' } },
+              { composerId: B, workspaceIdentifier: { id: 'shared' } },
+              { composerId: parent, workspaceIdentifier: { id: 'empty' } },
+            ],
+          }),
+        )} WHERE key='composer.composerHeaders';`,
+      });
+
+      const staleGlobal = await prepareManagedDelete(ctx, job);
+
+      assert.equal(
+        staleGlobal.ok,
+        true,
+        'body binding outranks stale global-only catalogue',
+      );
+
+      // A second local catalogue is a shared global owner, not permission to
+      // delete its records through the first workspace's hidden-parent closure.
+      await execSqlScript({
+        database: shared.workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A }] }))} WHERE key='composer.composerData';`,
+      });
+
+      const sharedRefusal = await prepareManagedDelete(ctx, job);
+
+      assert.equal(sharedRefusal.ok, false);
+
+      if (!sharedRefusal.ok) {
+        assert.match(sharedRefusal.detail, /shared|unverified/);
+        assert.match(sharedRefusal.detail, /shared \(shared\)/);
+
+        assert.equal(
+          sharedRefusal.blocked?.[0].workspaceKey,
+          one.workspaceDbPath,
+        );
+
+        assert.deepEqual(sharedRefusal.blocked?.[0].ids, [A]);
+      }
+
+      await execSqlScript({
+        database: shared.workspaceDbPath,
+        sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: B }] }))} WHERE key='composer.composerData';`,
+      });
+
+      // A child appearing after consent must invalidate, never expand execution.
+      const late = '33333333-3333-4333-8333-333333333333';
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ ...body, subagentComposerIds: [A, late] }))} WHERE key='composerData:${parent}';`,
+      });
+
+      const raced = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        plan: prepared.plan,
+        workspaces: job.workspaces,
+        emptyWindow: true,
+      });
+
+      assert.ok(raced.error);
+
+      assert.equal(
+        raced.outcomes.reduce((sum, row) => sum + row.chatIdsDeleted.length, 0),
+        0,
+      );
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify(body))} WHERE key='composerData:${parent}';`,
+      });
+
+      const refreshed = await prepareManagedDelete(ctx, job);
+
+      assert.equal(refreshed.ok, true);
+      if (!refreshed.ok) return;
+
+      const result = await executeManagedDelete(ctx, {
+        kind: 'delete-managed-data',
+        plan: refreshed.plan,
+        workspaces: job.workspaces,
+        emptyWindow: true,
+      });
+
+      assert.equal(result.error, undefined);
+      assert.equal(result.outcomes[0].chatIdsDeleted.length, 2);
+
+      await execSqlScript({
+        database: one.globalDbPath,
+        sql: `INSERT INTO cursorDiskKV VALUES ('composerData:${A}',${sqlText(JSON.stringify({ composerId: A, workspaceIdentifier: { id: 'one' }, subagentInfo: { parentComposerId: parent } }))}),('composerData:${parent}',${sqlText(JSON.stringify({ ...body, workspaceIdentifier: { id: 'shared' } }))});`,
+      });
+
+      const refused = await prepareManagedDelete(ctx, job);
+
+      assert.equal(refused.ok, false);
+      if (!refused.ok)
+        assert.match(
+          refused.detail,
+          /outside this workspace|cannot be verified/,
+        );
+
+      assert.match(
+        await execSql({
+          database: one.globalDbPath,
+          sql: `SELECT key FROM cursorDiskKV WHERE key='composerData:${parent}';`,
+        }),
+        /composerData:/,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 async function profile(): Promise<{
   root: string;

@@ -6,6 +6,8 @@ export interface BundleCapabilities {
 
 /** Capabilities implemented by this reader. */
 export const SUPPORTED_BUNDLE_CAPABILITIES = new Set([
+  'visualization-html-v1',
+  'historical-artifacts-v1',
   'sqlite-index-v1',
   'content-addressed-blobs-v1',
 ]);

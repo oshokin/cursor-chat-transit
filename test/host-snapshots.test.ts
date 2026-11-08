@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import {
   discoverHostSession,
   hostStorageRoot,
@@ -13,7 +14,7 @@ import {
 import { SqliteSession } from '../src/sqlite-session';
 
 const id = '11111111-2222-4333-8444-555555555555';
-const rootHex = 'ab'.repeat(32);
+const rootHex = createHash('sha256').update(Buffer.alloc(0)).digest('hex');
 
 async function fixture(root: string, sessionId = id): Promise<string> {
   const dir = path.join(hostStorageRoot(root), 'sessions', sessionId);
@@ -43,7 +44,7 @@ CREATE TABLE cursorDiskKV(key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);`);
 
     await db.exec('INSERT INTO cursorDiskKV(key,value) VALUES (?,?);', [
       `agentKv:blob:${rootHex}`,
-      Buffer.from('opaque root'),
+      Buffer.alloc(0),
     ]);
 
     await db.exec('INSERT INTO cursorDiskKV(key,value) VALUES (?,?);', [
@@ -115,6 +116,36 @@ test('discovers and snapshots a compatible host store through SQLite', async (t)
   assert.equal(
     (await fs.readdir(path.dirname(snapshot.database))).includes('data.sqlite'),
     false,
+  );
+});
+
+test('lagging listing root is allowed but renderer mismatch is not', async (t) => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'cct-host-consistency-'),
+  );
+
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const dir = await fixture(root);
+  const metaPath = path.join(dir, 'meta.json');
+  const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+
+  meta.latestRootBlobIdHex = 'cd'.repeat(32);
+  await fs.writeFile(metaPath, JSON.stringify(meta));
+  const stagingDir = path.join(root, 'staging');
+
+  await fs.mkdir(stagingDir);
+  const options = { userDataDir: root, sessionId: id, stagingDir };
+
+  assert.ok(await snapshotHostSession({ ...options, rendererState: '~' }));
+
+  await assert.rejects(
+    snapshotHostSession({ ...options, rendererState: '~CAE=' }),
+    /roots differ/,
+  );
+
+  await assert.rejects(
+    snapshotHostSession({ ...options, rendererState: null }),
+    /Unsupported conversationState/,
   );
 });
 
@@ -222,7 +253,7 @@ test('validation enforces the installed Cursor manifest v1 and v2 contracts', as
       conversionEpoch: 0,
     });
 
-    await validateHostSnapshot(snapshot);
+    await assert.rejects(validateHostSnapshot(snapshot), /root header/);
 
     for (const invalid of [
       { ...base, manifestVersion: 1, migratedBlobCount: undefined },

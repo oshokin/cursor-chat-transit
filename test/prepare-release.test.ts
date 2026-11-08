@@ -183,6 +183,32 @@ test('commits do not change the version, and several fixes are one patch', async
   assert.equal(git(repo, ['ls-remote', origin, 'refs/tags/v1.0.1']), '');
 });
 
+test('npm version does not rewrite escaped package.json text', () => {
+  const { repo } = fixture();
+  const file = path.join(repo, 'package.json');
+  const original = fs.readFileSync(file, 'utf8');
+
+  fs.writeFileSync(
+    file,
+    original.replace(
+      '"private": true',
+      '"private": true,\n  "title": "Name (A\\u2013Z)"',
+    ),
+  );
+
+  git(repo, ['add', 'package.json']);
+  commit(repo, 'chore: keep an escaped title');
+  commit(repo, 'fix: correct a path');
+  const result = runPrepare(repo, ['prepare']);
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const written = fs.readFileSync(file, 'utf8');
+
+  assert.match(written, /"version": "1\.0\.1"/);
+  assert.match(written, /Name \(A\\u2013Z\)/);
+  assert.doesNotMatch(written, /A–Z/);
+});
+
 test('preview writes nothing', () => {
   const { repo } = fixture();
 

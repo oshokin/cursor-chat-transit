@@ -6,33 +6,21 @@ import { operationTempDir } from './operation-temp';
 import {
   BUNDLE_FORMAT,
   EXPORT_FORMAT_VERSION,
-  MIN_BUNDLE_FORMAT_VERSION,
   MAX_MANIFEST_BYTES,
 } from './bundle-limits';
 import { extractZip, type ExtractedEntry } from './bundle-zip';
 import { hashFile } from './hash-file';
-import { readNdjson } from './ndjson-io';
 import { parseBoundedJson } from './record-json';
 import {
   validateBundleCapabilities,
   type BundleCapabilities,
 } from './bundle-capabilities';
 import { visitBundleIndex } from './bundle-index';
-import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
 
 /** Checked manifest for a supported seekable bundle. */
 export interface BundleManifest {
   format: typeof BUNDLE_FORMAT;
-  formatVersion: number;
-  /** v4 NDJSON inventory or v5 SQLite index hash. */
-  inventory?: {
-    /** Relative path of the inventory file. */
-    path: string;
-    /** Byte length of that file. */
-    bytes: number;
-    /** SHA-256 of that file. */
-    sha256: string;
-  };
+  formatVersion: 5;
   index?: {
     path: 'index.sqlite';
     bytes: number;
@@ -90,11 +78,7 @@ export async function openBundle(
 
     transferProgress('validate', {});
 
-    if (manifest.formatVersion === 4) {
-      await verifyInventory(root, manifest, byName, signal);
-    } else {
-      await verifyIndex(root, manifest, byName, signal);
-    }
+    await verifyIndex(root, manifest, byName, signal);
 
     transferEvent({
       action: 'Extract and verify archive',
@@ -140,10 +124,7 @@ async function readManifest(
     throw new Error('This file is not a Cursor Chat Transit export.');
   }
 
-  if (
-    rec.formatVersion !== MIN_BUNDLE_FORMAT_VERSION &&
-    rec.formatVersion !== EXPORT_FORMAT_VERSION
-  ) {
+  if (rec.formatVersion !== EXPORT_FORMAT_VERSION) {
     throw new Error(
       `Unsupported export formatVersion ${String(rec.formatVersion)}. Export the chats again with the current extension.`,
     );
@@ -172,130 +153,26 @@ async function readManifest(
     summary: rec.summary,
   };
 
-  if (rec.formatVersion === 4) {
-    const inventory = rec.inventory as Record<string, unknown> | undefined;
-
-    if (
-      !inventory ||
-      inventory.path !== 'inventory.ndjson' ||
-      typeof inventory.sha256 !== 'string' ||
-      typeof inventory.bytes !== 'number'
-    ) {
-      throw new Error('Export manifest is missing its inventory.');
-    }
-
-    manifest.inventory = {
-      path: 'inventory.ndjson',
-      bytes: inventory.bytes,
-      sha256: inventory.sha256,
-    };
-  } else {
-    const index = rec.index as Record<string, unknown> | undefined;
-
-    if (
-      !index ||
-      index.path !== 'index.sqlite' ||
-      typeof index.sha256 !== 'string' ||
-      typeof index.bytes !== 'number'
-    ) {
-      throw new Error('Export manifest is missing its index.');
-    }
-
-    manifest.index = {
-      path: 'index.sqlite',
-      bytes: index.bytes,
-      sha256: index.sha256,
-    };
-
-    manifest.capabilities = validateBundleCapabilities(rec.capabilities);
-  }
-
-  return manifest;
-}
-
-/** Check `inventory.ndjson` against the manifest hash and extracted entries. */
-async function verifyInventory(
-  /** Directory that contains the extracted or staged archive. */
-  root: string,
-  /** Archive manifest. */
-  manifest: BundleManifest,
-  /** Entries to turn into picker rows. */
-  entries: Map<string, ExtractedEntry>,
-  signal?: AbortSignal,
-): Promise<void> {
-  const inventoryPath = path.join(root, 'inventory.ndjson');
-  const inventory = manifest.inventory;
-
-  if (!inventory) throw new Error('Export manifest is missing its inventory.');
-  const hashed = await hashFile(inventoryPath, signal);
-
-  if (hashed.sha256 !== inventory.sha256 || hashed.bytes !== inventory.bytes) {
-    throw new Error('Export inventory does not match the manifest.');
-  }
-
-  const seen = new Set<string>();
-  let contentBytes = 0;
-  let lastProgress = performance.now();
-
-  /** Report progress for this step. */
-  const report = () =>
-    transferProgress('validate', {
-      scope: 'inventory',
-      processed: seen.size,
-      total: manifest.counts.files,
-      unit: 'files',
-    });
-
-  report();
-
-  for await (const row of readNdjson(
-    inventoryPath,
-    'inventory.ndjson',
-    signal,
-  )) {
-    const rec = row.value as Record<string, unknown>;
-    const name = rec.path;
-
-    if (typeof name !== 'string' || typeof rec.sha256 !== 'string') {
-      throw new Error('Export inventory row is invalid.');
-    }
-
-    if (name === 'manifest.json' || name === 'inventory.ndjson') {
-      throw new Error('Export inventory lists its own manifest.');
-    }
-
-    if (seen.has(name))
-      throw new Error(`Inventory lists ${name} more than once.`);
-    seen.add(name);
-    const entry = entries.get(name);
-
-    if (!entry || entry.sha256 !== rec.sha256 || entry.bytes !== rec.bytes) {
-      throw new Error(`Inventory does not match archive entry ${name}.`);
-    }
-
-    contentBytes += entry.bytes;
-
-    if (performance.now() - lastProgress >= TRANSFER_PROGRESS_THROTTLE_MS) {
-      lastProgress = performance.now();
-      report();
-    }
-  }
-
-  for (const name of entries.keys()) {
-    if (name === 'manifest.json' || name === 'inventory.ndjson') continue;
-
-    if (!seen.has(name))
-      throw new Error(`Archive entry ${name} is not in the inventory.`);
-  }
+  const index = rec.index as Record<string, unknown> | undefined;
 
   if (
-    seen.size !== manifest.counts.files ||
-    contentBytes !== manifest.counts.contentBytes
+    !index ||
+    index.path !== 'index.sqlite' ||
+    typeof index.sha256 !== 'string' ||
+    typeof index.bytes !== 'number'
   ) {
-    throw new Error('Export manifest counts do not match the inventory.');
+    throw new Error('Export manifest is missing its index.');
   }
 
-  report();
+  manifest.index = {
+    path: 'index.sqlite',
+    bytes: index.bytes,
+    sha256: index.sha256,
+  };
+
+  manifest.capabilities = validateBundleCapabilities(rec.capabilities);
+
+  return manifest;
 }
 
 /** Verify v5 metadata directly from the immutable on-disk SQLite index. */

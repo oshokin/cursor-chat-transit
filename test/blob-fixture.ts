@@ -49,27 +49,63 @@ export function agentChatFixture() {
   const fileId = digest(fileBody);
   const initialId = digest(initial);
   const summaryId = digest(summary);
+  const selectedBody = Buffer.from('selected context payload\u0000');
+  const selectedId = digest(selectedBody);
+  const nestedBody = Buffer.from('nested read payload\u0000');
+  const nestedId = digest(nestedBody);
+  const originalStep = field(1, field(1, Buffer.from('original step')));
+  const originalId = digest(originalStep);
+  const read = field(8, field(2, field(1, blob(10, nestedId))));
+
+  const truncated = field(
+    34,
+    Buffer.concat([blob(1, originalId), field(5, read)]),
+  );
+
+  const inline = Buffer.alloc(32, 0xef);
+
+  const calls = [
+    field(1, field(2, field(1, field(5, inline)))),
+    field(12, field(2, field(1, field(7, inline)))),
+    field(15, field(2, field(1, field(1, field(1, field(1, inline)))))),
+    field(
+      19,
+      field(
+        2,
+        field(
+          1,
+          Buffer.concat([
+            field(1, field(2, read)),
+            field(1, field(2, truncated)),
+          ]),
+        ),
+      ),
+    ),
+  ];
+
+  const toolSteps = calls.map((call) => field(2, call));
+  const toolIds = toolSteps.map(digest);
 
   const user = Buffer.concat([
     field(1, Buffer.from('update the packaging scripts')),
+    field(3, field(1, blob(1, selectedId))),
     blob(18, textId),
   ]);
 
-  const step = Buffer.concat([
-    field(1, field(1, Buffer.from('I edited publish_deb.sh'))),
-    field(
-      2,
-      Buffer.concat([
-        field(1, Buffer.from('read')),
-        field(4, Buffer.from('a'.repeat(32))),
-        blob(5, toolId),
-      ]),
-    ),
-  ]);
+  const step = field(1, field(1, Buffer.from('I edited publish_deb.sh')));
 
   const userId = digest(user);
   const stepId = digest(step);
-  const turn = field(1, Buffer.concat([blob(1, userId), blob(2, stepId)]));
+
+  const turn = field(
+    1,
+    Buffer.concat([
+      blob(1, userId),
+      blob(2, stepId),
+      ...toolIds.map((id) => blob(2, id)),
+    ]),
+  );
+
   const turnId = digest(turn);
   const archive = blob(4, summaryId);
   const archiveId = digest(archive);
@@ -99,6 +135,10 @@ export function agentChatFixture() {
     [initialId, initial],
     [summaryId, summary],
     [archiveId, archive],
+    [selectedId, selectedBody],
+    [nestedId, nestedBody],
+    [originalId, originalStep],
+    ...toolSteps.map((bytes, i): [string, Buffer] => [toolIds[i]!, bytes]),
   ]);
 
   return {
@@ -113,7 +153,10 @@ export function agentChatFixture() {
       stepId,
       summaryId,
       textId,
-      toolId,
+      selectedId,
+      nestedId,
+      originalId,
+      ...toolIds,
     ],
     missing: todoId,
     decoy: Buffer.from('a'.repeat(32)).toString('hex'),

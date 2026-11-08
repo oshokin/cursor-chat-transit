@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.1
+
+### Changed
+
+- Show the storage id in the sidebar and in the export chat pickers. Chat descriptions keep the date and duplicate-title distinction; Cursor's edited-file subtitle is not treated as identity.
+- Selecting chats with transfer issues skips a descendant whose check failed or is still unknown.
+
+### Fixed
+
+- Distinguish an unsupported native snapshot codec from corruption. A history-only renderer fallback is allowed only when that omission is explicit and the renderer dependency closure is present, supported, and complete. A corrupt native snapshot stays fatal, including during read-only inspection.
+- Follow the Cursor 3.29.9 typed wrappers for read-success, truncated calls, and selected context. Traversal stays bounded. Unimplemented variants and malformed wrappers are rejected. A matching digest is not evidence of a dependency.
+- Report structured visualization HTML that is omitted from an export. The HTML is not read, exported, executed, or restored. Arbitrary text and paths do not imply ownership.
+- Validate supported native roots, manifest list ranges, and content hashes. A root that merely exists is not a complete snapshot. Unsupported structured closure is rejected instead of guessed.
+- Record the native publication intent and the exact hashed recovery bytes before the renderer is published. An interrupted import checks the database and metadata hashes and does not replace an occupied or changed native destination. A header-only renderer catalogue entry still reserves its destination id.
+- Decode canonical hex renderer state as well as `~`-prefixed base64. Protobuf identity remapping stays limited to evidenced subagent map-key fields. A UUID-shaped value or an unrelated 32-byte value is not an identity or a blob dependency just because a matching record exists.
+- Leave unknown native stores, the profile-global agent-host database, and remote-session state in place when deleting a renderer chat. Contradictory workspace ownership stops that deletion. Read-only profile inspection and disposable-profile acceptance are documented separately.
+
 ## 1.1.0
 
 ### Added

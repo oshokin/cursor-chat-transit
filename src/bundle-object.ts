@@ -29,6 +29,8 @@ export async function readBundleObject(
       attachments: [],
       plans: [],
       canvases: [],
+      visualizations: [],
+      historicalArtifacts: [],
     };
 
     const seen = new Set<string>();
@@ -156,8 +158,24 @@ export async function readBundleObject(
                 byteLength: ref.byteLength,
                 sha256: ref.sha256,
               });
+            } else if (
+              ref.class === 'transcript' ||
+              ref.class === 'terminal-history'
+            ) {
+              resources.historicalArtifacts!.push({
+                owner: id,
+                kind: ref.class,
+                id: ref.id,
+                filename: ref.id,
+                base64,
+                byteLength: ref.byteLength,
+                sha256: ref.sha256,
+              });
             } else {
-              resources.canvases!.push({
+              (ref.class === 'visualization'
+                ? resources.visualizations!
+                : resources.canvases!
+              ).push({
                 filename: ref.filename || ref.id,
                 base64,
                 byteLength: ref.byteLength,
@@ -170,7 +188,7 @@ export async function readBundleObject(
     }
 
     return {
-      formatVersion: 4,
+      formatVersion: 5,
       allComposers,
       composers,
       bubbles,

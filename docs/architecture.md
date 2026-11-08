@@ -15,7 +15,7 @@ For setup, validation, packaging, and releases, see [Development](development.md
 | Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                                        | Isolated work, incremental IPC events, and cancellation                              |
 | Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts`                  | Header resolution, consistent database reads, and archive creation                   |
 | Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                                      | Validation, preparation, bounded writes, and interrupted-import reconciliation       |
-| Archive          | `bundle-*.ts`, `blob-store.ts`, `ndjson-io.ts`                                                     | Format 5 index and content-addressed payloads; format 4 NDJSON remains readable      |
+| Archive          | `bundle-*.ts`, `blob-store.ts`, `ndjson-io.ts`                                                     | Format 5 index and content-addressed payloads; older archives are rejected           |
 | Host sessions    | `host-snapshots.ts`                                                                                | WAL snapshot and exact restore of a committed agent-host session                     |
 | Renderer keys    | `chat-kv-registry.ts`                                                                              | Classify and remap portable per-chat KV families                                     |
 | Artifacts        | `artifact-source.ts`, `artifact-support.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`           | Stable file reads and the supported, degraded, and unsupported artifact boundary     |
@@ -53,11 +53,14 @@ The storage id Cursor assigns when a workspace opens is a separate fact from dat
 
 The adapter inspects the actual schema before operating. A Cursor version string alone does not establish support.
 
-### Dual storage authority in Cursor 3.27
+### Dual storage authority
 
-Inspection of the installed Cursor 3.27.22 agent-host code revealed a second,
-private persistence path. This is observed implementation behavior, not a public API
-or a promise about another build:
+Inspection of Cursor's agent-host code revealed a second, private persistence
+path. The current compatibility investigation targets installed Cursor 3.29.9,
+build `306d153d51d714882ab7b1bc49649cab624e8a30`. This is observed implementation
+behavior, not a public API or a promise about another build. See
+[Storage compatibility](storage-compatibility.md) for investigation boundaries and
+manual acceptance requirements:
 
 - A renderer-owned chat uses `User/globalStorage/state.vscdb` as its durable local
   authority. This is the representation Transit reads and writes.
@@ -91,12 +94,15 @@ Transit never synthesizes, rewrites, merges, or remotely recreates host-owned
 stores. When a supported committed store exists, export takes a WAL-aware SQLite
 snapshot plus its validated `meta.json`. Import restores that component only under
 its original session/composer ID, only when both renderer and host destinations are
-free, and only after schema, manifest, root, and identity validation. The staged
-directory is then published by rename and the matching renderer projection is
-published through the normal journaled path. Any collision or unsupported layout
-falls back to a remapped renderer-owned copy; Transit does not rewrite private
-protobuf/CAS state. Profile-global agent-host `data.sqlite` is never copied or
-merged.
+free, and only after schema, manifest, root, and identity validation. Supported
+native bytes are retained with a durable journal intent before the matching
+renderer projection is published. Native publication then uses a staged directory
+rename; reconciliation verifies recorded database and metadata hashes before
+accepting an existing destination or publishing into an absent one. Foreign or
+changed sessions are not overwritten. A collision can require a remapped
+renderer-owned copy; unsupported native closure is rejected rather than rewritten
+or declared complete. Transit does not rewrite private protobuf/CAS state.
+Profile-global agent-host `data.sqlite` is never copied or merged.
 
 | Table             | Relevant columns                                                              | Use                                                      |
 | ----------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
@@ -127,7 +133,7 @@ Global header enumeration gives an explicit storage ID priority over the URI: a 
 | `composerRootWriterDiagnostic:<composerId>` | Delete this exact key with the composer. A longer suffix is left in place                                                                                                                        |
 | `fullConversationHeadersOnly`               | Preserve conversation order and references to stored messages                                                                                                                                    |
 | `bubbleId:<composerId>:<bubbleId>`          | Read by an indexed key range; preserve payload text and remap known IDs                                                                                                                          |
-| `conversationState`                         | Inspect supported `~`-prefixed protobuf state to discover blob dependencies                                                                                                                      |
+| `conversationState`                         | Inspect supported `~`-prefixed base64 or canonical hex protobuf state to discover typed blob dependencies                                                                                        |
 | `agentKv:blob:<sha256>`                     | Preserve bytes and SQLite storage class; verify content and references                                                                                                                           |
 | `headerLog` plus `composerConvHeaders:*`    | Materialize a valid chunked header log into `fullConversationHeadersOnly` for export; do not invent missing chunks                                                                               |
 | Portable renderer KV                        | `chat-kv-registry.ts` copies drafts, conversation state, checkpoints, code-block diffs, and recognized artifact and bubble-checkpoint keys that belong to the chat. Unknown keys are left behind |
@@ -170,7 +176,7 @@ different Cursor profiles would require scoped archive identities and is rejecte
 
 1. Acquire the extension's process lock for the target global database.
 2. Extract the archive incrementally into private temporary storage. Reject unsafe paths, duplicate members, invalid hashes, unsupported formats, and oversized records.
-3. Verify the archive inventory, then use a SQLite working index in the extracted copy for chat, message, and resource planning. Calculate canonical `cct-snapshot-v2` fingerprints. Resolve repeat-import decisions and resource conflicts before writing chat data. For format 5, verification uses the hashed `index.sqlite` before those planning tables are added to the extracted copy. For format 4, verification uses `inventory.ndjson`, and the working index is created in the extract directory.
+3. Verify the archive inventory, then use a SQLite working index in the extracted copy for chat, message, and resource planning. Calculate canonical `cct-snapshot-v2` fingerprints. Resolve repeat-import decisions and resource conflicts before writing chat data. Verification uses the hashed `index.sqlite` before those planning tables are added to the extracted copy.
 4. Record pending identities and expected hashes in the private journal.
 5. Remap known IDs and prepare message/resource rows in a private SQLite database, outside Cursor's write transactions.
 6. Install prepared rows in bounded transactions, normally at most 128 rows or 8 MiB. A permitted single value can exceed the batch budget, up to the 32 MiB value limit.
@@ -356,9 +362,9 @@ The transfer scope owns cancellation subscriptions and timers. Terminal results 
 
 `import-bundle.ts` coordinates a transfer. `import-bundle-scan.ts` validates and indexes source chats and determines recovery availability; `import-bundle-resources.ts` resolves and verifies resources; `import-bundle-publish.ts` prepares and publishes chat rows and a validated host snapshot when that path applies; `import-bundle-reconcile.ts` handles deferred reconciliation. Shared plan shapes and small helpers live in `import-bundle-common.ts`. All modules use the existing journal and conflict checks; there is one write path.
 
-`export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. This build writes format 5 and still reads format 4. Annotated partial text uses the streamed record layout and the same integrity checks.
+`export-bundle.ts` owns the archive lifecycle, `export-chat.ts` reads a chat, and `export-resources.ts` walks its supported resource closure. The same small streaming sink contract supports archive writing and read-only inspection. This build writes and reads only format 5. Annotated partial text uses the streamed record layout and the same integrity checks.
 
-`artifact-support.ts` marks images, plans, and canvases as supported filesystem artifacts. Structured visualization references are recognized, and their HTML is not restored. Terminal files and transcript files have no supported chat-owned artifact reference. A chunked header log is conversation metadata, not that transcript artifact. `artifact-source.ts` reads an allowlisted file twice and accepts it only when device, inode, size, and timestamps still match.
+`artifact-support.ts` marks images, plans, canvases, and supported visualization HTML as filesystem artifacts. See [Artifact support and limitations](artifacts.md) for visualization discovery, provisioning, and historical terminal snapshots and external transcript support. `artifact-source.ts` reads an allowlisted file twice and accepts it only when device, inode, size, and timestamps still match.
 
 `host-snapshots.ts` accepts a committed session only when `meta.json` has `schemaVersion` 1 and an origin of `migrated-from-renderer-cas` or `host-native`, the database `user_version` is 1, and both `ItemTable` and `cursorDiskKV` are `key TEXT, value BLOB`. The `agentHost:sessionManifest` value must have `manifestVersion` 1 or 2, and its root blob must be present and equal to `latestRootBlobIdHex`. Publication copies the snapshot into a private `sessions/.cct-…` directory and renames that directory onto `sessions/<sessionId>` only when the destination does not already exist. `journal-db.ts` schema 2 records `db`, `file`, and `session` effects. A host restore is a `session` effect, not an edit of both authorities.
 

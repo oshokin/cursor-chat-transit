@@ -35,7 +35,14 @@ export interface PendingImportChat {
   /** Present on new pending records. Absent means the write cannot be fully verified. */
   expectedResources?: Array<{
     /** Resource class in the pending record. */
-    kind: 'kv' | 'image' | 'plan' | 'canvas';
+    kind:
+      | 'kv'
+      | 'image'
+      | 'plan'
+      | 'canvas'
+      | 'visualization'
+      | 'transcript'
+      | 'terminal-history';
     /** Key, image UUID, plan basename, or canvas basename. */
     id: string;
     sha256: string;

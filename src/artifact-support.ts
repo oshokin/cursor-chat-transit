@@ -25,19 +25,20 @@ export const ARTIFACT_SUPPORT: Readonly<Record<ArtifactKind, ArtifactSupport>> =
     canvas: { kind: 'canvas', status: 'supported' },
     visualization: {
       kind: 'visualization',
-      status: 'degraded',
-      reason:
-        'Structured Cursor visualization references are recognized, but HTML is not restored until the archive resource contract can carry it inertly.',
+      status: 'supported',
+      reason: 'Visualization HTML is transferred as inert opaque bytes.',
     },
     terminal: {
       kind: 'terminal',
-      status: 'unsupported',
-      reason: 'No stable chat-owned terminal artifact reference is known.',
+      status: 'supported',
+      reason:
+        'Explicit snapshots transfer as historical attachments outside live terminals; process sessions remain external.',
     },
     transcript: {
       kind: 'transcript',
-      status: 'unsupported',
-      reason: 'No stable chat-owned transcript artifact reference is known.',
+      status: 'supported',
+      reason:
+        'DB-owned legacy, canonical and nested JSONL/TXT variants transfer as exact opaque bytes without regeneration.',
     },
   };
 
@@ -86,6 +87,33 @@ export function visualizationFilenamesFromChat(
     }
 
     const rec = value as Record<string, unknown>;
+
+    // Cursor 3.29.9 workbench: the visualization renderer receives a typed
+    // reference and ePr accepts only a basename or visualizations/basename.
+    const reference =
+      rec.attribs &&
+      typeof rec.attribs === 'object' &&
+      !Array.isArray(rec.attribs)
+        ? (rec.attribs as Record<string, unknown>)
+        : rec.properties &&
+            typeof rec.properties === 'object' &&
+            !Array.isArray(rec.properties)
+          ? (rec.properties as Record<string, unknown>)
+          : rec;
+
+    if (
+      reference.kind === 'visualization' &&
+      typeof reference.src === 'string' &&
+      reference.src.length <= ARTIFACT_REFERENCE_TEXT_CHARS
+    ) {
+      const source = reference.src.trim();
+
+      const filename = source.startsWith('visualizations/')
+        ? source.slice('visualizations/'.length)
+        : source;
+
+      if (VISUALIZATION_FILENAME.test(filename)) found.add(filename);
+    }
 
     const params =
       rec.params && typeof rec.params === 'object' && !Array.isArray(rec.params)

@@ -77,7 +77,7 @@ INSERT INTO ItemTable VALUES('composer.composerHeaders','{"allComposers":[]}');`
 /** Mixed complete and history-only export used by recovery tests. */
 function mixedExport(): ExportObject {
   return {
-    formatVersion: 3,
+    formatVersion: 5,
     allComposers: [
       { composerId: A, name: 'Complete' },
       { composerId: C, name: 'History only' },
@@ -179,7 +179,7 @@ test('allowPartial does not treat a wholly unusable file as a zero-chat success'
       transfer.importFromObject(
         ctx,
         {
-          formatVersion: 3,
+          formatVersion: 5,
           allComposers: [{ composerId: A, name: 'Broken' }],
           composers: { [A]: '{not-json' },
           bubbles: { [A]: [] },

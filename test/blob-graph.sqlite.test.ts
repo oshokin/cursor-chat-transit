@@ -13,7 +13,7 @@ import type {
   WorkspaceEntry,
   WorkspaceIdentity,
 } from '../src/types';
-import { agentChatFixture } from './blob-fixture';
+import { agentChatFixture, digest } from './blob-fixture';
 
 /** Synthetic local workspace identity. */
 const identity: WorkspaceIdentity = {
@@ -196,6 +196,35 @@ test('export writes the turn closure and reports a missing todo', async (t) => {
       `agentKv:blob:${id}`,
     );
 
-    assert.deepEqual(stored?.bytes, bytes);
+    assert.deepEqual(
+      stored?.bytes,
+      chat.present.includes(id) ? bytes : undefined,
+    );
+
+    if (stored) assert.equal(digest(stored.bytes), id);
   }
+
+  const reexport = path.join(root, 'reexport.cursor-chat.zip');
+  const reexportSummary = await transfer.exportToFile(ctx, target, reexport);
+
+  assert.ok('complete' in reexportSummary);
+  assert.equal(reexportSummary.complete, true);
+
+  const roundtrip = (await readJsonFile(reexport)) as {
+    resources: { kv: Array<{ key: string; value: unknown }> };
+  };
+
+  const original = (await readJsonFile(completeZip)) as typeof roundtrip;
+
+  const rows = (value: typeof roundtrip) =>
+    value.resources.kv
+      .filter((row) => row.key.startsWith('agentKv:blob:'))
+      .sort((a, b) => a.key.localeCompare(b.key));
+
+  assert.deepEqual(rows(roundtrip), rows(original));
+  await transfer.importFromBundle(ctx, reexport, target);
+  const repeated = await transfer.importFromBundle(ctx, reexport, target);
+
+  assert.equal(repeated.imported, 0);
+  assert.equal(repeated.alreadyImported, 1);
 });

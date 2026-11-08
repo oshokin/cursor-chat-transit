@@ -46,9 +46,45 @@ test('visualizations reject arbitrary paths and unsafe basenames', () => {
   );
 });
 
-test('terminal and transcript artifacts have explicit unsupported status', () => {
-  assert.equal(ARTIFACT_SUPPORT.visualization.status, 'degraded');
-  assert.equal(ARTIFACT_SUPPORT.terminal.status, 'unsupported');
-  assert.equal(ARTIFACT_SUPPORT.transcript.status, 'unsupported');
-  assert.match(ARTIFACT_SUPPORT.terminal.reason || '', /stable chat-owned/i);
+test('terminal and transcript artifacts have explicit historical support status', () => {
+  assert.equal(ARTIFACT_SUPPORT.visualization.status, 'supported');
+  assert.equal(ARTIFACT_SUPPORT.terminal.status, 'supported');
+  assert.equal(ARTIFACT_SUPPORT.transcript.status, 'supported');
+
+  assert.match(
+    ARTIFACT_SUPPORT.terminal.reason || '',
+    /historical attachments/i,
+  );
+
+  assert.match(
+    ARTIFACT_SUPPORT.transcript.reason || '',
+    /legacy, canonical and nested/i,
+  );
+});
+
+test('renderer visualization src references are typed, bounded, and deduplicated', () => {
+  assert.deepEqual(
+    visualizationFilenamesFromChat(
+      JSON.stringify({
+        references: [
+          { kind: 'visualization', src: ' chart.html ' },
+          {
+            attribs: {
+              kind: 'visualization',
+              src: 'visualizations/chart.html',
+            },
+          },
+          { properties: { kind: 'visualization', src: 'chart.html' } },
+          { kind: 'visualization', src: '/tmp/visualizations/private.html' },
+          { kind: 'visualization', src: '../escape.html' },
+          { type: 'visualization', src: 'not-the-discriminator.html' },
+          { type: 'image', src: 'image.html' },
+          { src: 'arbitrary.html' },
+        ],
+        text: 'visualizations/mentioned.html',
+      }),
+      [],
+    ),
+    ['chart.html'],
+  );
 });

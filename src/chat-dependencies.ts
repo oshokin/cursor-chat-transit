@@ -4,7 +4,8 @@ import { resourceError as fail } from './resource-bytes';
 import type { BubbleRecord, DependencyAssessment } from './types';
 
 /**
- * Composer `_v` values whose `conversationState` is the walked `~` protobuf.
+ * Composer `_v` values whose `conversationState` is walked protobuf.
+ * Installed Cursor's 9690.js accepts `~` base64 and legacy hex bytes.
  * 13 through 18 were compared on a live Cursor database: same encoding and
  * the same field numbers. 10 has no state. 11 uses a different encoding.
  */

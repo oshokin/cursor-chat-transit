@@ -1,3 +1,4 @@
+import { decodeVisualization } from './visualizations';
 import { rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { operationTempDir } from './operation-temp';
@@ -13,7 +14,7 @@ import { parseBoundedJson } from './record-json';
 import type { ExportObject } from './types';
 
 /**
- * Spill an in-memory fixture into a v4 archive.
+ * Spill an in-memory fixture into a v5 archive.
  * This is not a reader for old export files.
  */
 export async function writeObjectBundle(
@@ -60,7 +61,7 @@ export async function writeObjectBundle(
         await writer.writeBubble(bubble.bubbleId, payload);
       }
 
-      await writeFixtureResources(writer, tmp, exportObj);
+      await writeFixtureResources(writer, tmp, exportObj, header.composerId);
       await writer.endChat();
     }
 
@@ -74,7 +75,7 @@ export async function writeObjectBundle(
   }
 }
 
-/** Copy v3 resource rows into the v4 writer. */
+/** Copy current resource rows into the v5 writer. */
 async function writeFixtureResources(
   /** Archive writer receiving the fixture. */
   writer: BundleWriter,
@@ -82,6 +83,7 @@ async function writeFixtureResources(
   tmp: string,
   /** In-memory export being spilled. */
   exportObj: ExportObject,
+  owner: string,
 ): Promise<void> {
   const resources = exportObj.resources;
 
@@ -148,6 +150,41 @@ async function writeFixtureResources(
       class: 'canvas',
       id: row.filename,
       filename: row.filename,
+      sha256: row.sha256,
+      byteLength: row.byteLength,
+    });
+  }
+
+  for (const row of resources.visualizations || []) {
+    const bytes = decodeVisualization(row);
+    const file = await spill(tmp, row.sha256, bytes);
+
+    await writer.addBlob(row.sha256, file);
+
+    await writer.writeResource({
+      class: 'visualization',
+      id: row.filename,
+      filename: row.filename,
+      sha256: row.sha256,
+      byteLength: row.byteLength,
+    });
+  }
+
+  for (const row of resources.historicalArtifacts || []) {
+    if (row.owner !== owner) continue;
+
+    const file = await spill(
+      tmp,
+      row.sha256,
+      Buffer.from(row.base64, 'base64'),
+    );
+
+    await writer.addBlob(row.sha256, file);
+
+    await writer.writeResource({
+      class: row.kind,
+      id: row.id,
+      filename: row.id,
       sha256: row.sha256,
       byteLength: row.byteLength,
     });

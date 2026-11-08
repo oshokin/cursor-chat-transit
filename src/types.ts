@@ -227,6 +227,13 @@ export interface TransferContext {
    * Unset uses `~/.cursor/projects/{slug}/canvases` for the workspace.
    */
   canvasesDir?: string;
+  /** Override Cursor's workspace project root for external historical artifacts. */
+  projectArtifactsDir?: string;
+  /** Resolve the owning agent's files scope, including remote/project scopes. */
+  resolveVisualizationScopeFiles?: (input: {
+    agentId: string;
+    workspace: WorkspaceEntry;
+  }) => string | Promise<string>;
 }
 
 /** Table names and PRAGMA table_info snapshots for layout detection. */
@@ -342,6 +349,15 @@ export interface ExportResources {
   plans: PlanResource[];
   /** Canvas files. Omitted by older exports. */
   canvases?: CanvasResource[];
+  visualizations?: CanvasResource[];
+  /** Opaque external artifact resources, metadata encoded in id. */
+  historicalArtifacts?: Array<
+    CanvasResource & {
+      id: string;
+      owner: string;
+      kind: 'transcript' | 'terminal-history';
+    }
+  >;
 }
 
 /** Why one chat was exported incomplete; counts are facts, not guesses. */
@@ -357,6 +373,9 @@ export interface ExportChatIssue {
     | 'missing-messages'
     | 'missing-dependencies'
     | 'unsupported-state'
+    | 'unsupported-host-snapshot'
+    | 'unsupported-visualizations'
+    | 'missing-visualizations'
     | 'invalid-attachment-id';
   /** Referenced messages with no stored body. */
   missingMessages?: number;
@@ -368,6 +387,8 @@ export interface ExportChatIssue {
   missingPlans?: number;
   /** Missing canvas count when that is the reason. */
   missingCanvases?: number;
+  /** Recognized visualization HTML files deliberately not exported. */
+  omittedVisualizations?: number;
 }
 
 /** Partial workspace pointer some older exports stored instead of a full identity. */
@@ -398,7 +419,7 @@ export interface SkippedChatRef {
   reason: string;
 }
 
-/** Internal compatibility DTO for transfer helpers and tests; archives use ZIP v4. */
+/** Internal compatibility DTO for transfer helpers and tests; archives use ZIP v5. */
 export interface ExportObject {
   /** Internal DTO version; not the on-disk ZIP format version. */
   formatVersion?: number;
@@ -415,7 +436,7 @@ export interface ExportObject {
   composers: Record<string, string>;
   /** Bubble groups keyed by composer id. */
   bubbles?: Record<string, BubbleRecord[]>;
-  /** Portable resources for format 3. */
+  /** Portable resources for format 5. */
   resources?: ExportResources;
   /** Export totals and incomplete ids. */
   summary?: {

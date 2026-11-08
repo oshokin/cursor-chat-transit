@@ -263,6 +263,7 @@ async function main(): Promise<void> {
 
   for (const required of [
     ...modules,
+    'out/cursor-tool-schemas.json',
     'package.json',
     'README.md',
     'changelog.md',

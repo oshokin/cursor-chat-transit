@@ -136,24 +136,20 @@ test('_v 18 without conversationState has no blob dependencies', () => {
   assert.deepEqual(found.keys, []);
 });
 
-test('legacy format 2 remains readable and format 3 is accepted', () => {
-  const base = {
-    allComposers: [{ composerId: '11111111-1111-4111-8111-111111111111' }],
-    composers: {},
-    bubbles: {},
-  };
+test('only format 5 objects are accepted', () => {
+  const base = { allComposers: [], composers: {}, bubbles: {} };
+
+  for (const formatVersion of [undefined, 1, 2, 3, 4, 6]) {
+    assert.throws(
+      () => assertExportShape({ ...base, formatVersion }),
+      /Unsupported export formatVersion/,
+    );
+  }
 
   assert.equal(
-    assertExportShape({ ...base, formatVersion: 2 }).formatVersion,
-    2,
+    assertExportShape({ ...base, formatVersion: 5 }).formatVersion,
+    5,
   );
-
-  assert.equal(
-    assertExportShape({ ...base, formatVersion: 3 }).formatVersion,
-    3,
-  );
-
-  assert.throws(() => assertExportShape({ ...base, formatVersion: 1 }));
 });
 
 test('disallowed resource keys are rejected', () => {

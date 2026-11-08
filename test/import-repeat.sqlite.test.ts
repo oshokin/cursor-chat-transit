@@ -46,7 +46,7 @@ function payload(
   }> = [{ id: A, name: 'Original title' }],
 ) {
   return {
-    formatVersion: 3,
+    formatVersion: 5,
     allComposers: ids.map((row) => ({ composerId: row.id, name: row.name })),
     composers: Object.fromEntries(
       ids.map((row) => [
@@ -1332,7 +1332,7 @@ test('history-only then a complete snapshot is a new copy, not a skip', async (t
     );
 
   const base = {
-    formatVersion: 3,
+    formatVersion: 5,
     allComposers: [{ composerId: A, name: 'With blob' }],
     composers: {
       [A]: JSON.stringify({
@@ -1666,7 +1666,7 @@ function familyPayload(extra = '') {
   return result;
 }
 
-/** New Cursor state fixture with embedded composer and bubble UUID strings. */
+/** Opaque state content deliberately containing composer and bubble UUID strings. */
 function stateFamilyPayload() {
   const result = familyPayload() as unknown as ExportObject;
   const bubble = X;
@@ -1701,7 +1701,7 @@ function stateFamilyPayload() {
   return result;
 }
 
-test('new Cursor state remaps parent, child, and bubble ids together', async (t) => {
+test('opaque state UUID content stays unchanged while family and bubble identities remap', async (t) => {
   const { ctx, workspace, gl } = await setup(t);
 
   const result = await transfer.importFromObject(
@@ -1734,12 +1734,12 @@ test('new Cursor state remaps parent, child, and bubble ids together', async (t)
     (await db.readKvText(gl, `composerData:${child}`)) || '{}',
   ) as { subagentInfo?: { parentComposerId?: string } };
 
-  assert.equal(state.includes(parent), true);
-  assert.equal(state.includes(child), true);
-  assert.equal(state.includes(bubble), true);
-  assert.equal(state.includes(A), false);
-  assert.equal(state.includes(B), false);
-  assert.equal(state.includes(X), false);
+  assert.equal(state.includes(parent), false);
+  assert.equal(state.includes(child), false);
+  assert.equal(state.includes(bubble), false);
+  assert.equal(state.includes(A), true);
+  assert.equal(state.includes(B), true);
+  assert.equal(state.includes(X), true);
   assert.equal(childBody.subagentInfo?.parentComposerId, parent);
 
   const taskRows: Array<Record<string, unknown>> = [];

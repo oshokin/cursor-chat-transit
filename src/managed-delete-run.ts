@@ -3,6 +3,10 @@ import { bubbleRange } from './core';
 import { keptParentNote, narrowDeletion, parentsToUpdate } from './chat-family';
 import { chatSelectionFingerprint } from './chat-fingerprint';
 import { deleteSelectedChats } from './chat-deletion';
+import { detachDeletedSubagents } from './deletion-sql';
+import { SqliteSession } from './sqlite-session';
+import { sqlText } from './core';
+import { connOf } from './transfer-context';
 import { inspectDeletionOwnership } from './deletion-ownership';
 import type {
   DeletionJob,
@@ -11,6 +15,7 @@ import type {
   ManagedDeleteResult,
   ManagedPlanTarget,
   ManagedPrepareResult,
+  ManagedDeleteRefusal,
 } from './deletion-types';
 import { workspacePresentation } from './workspace-presentation';
 import { assessWorkspaceHistory } from './workspace-history';
@@ -274,6 +279,189 @@ export async function prepareManagedDelete(
     (target) => target.kind === 'workspace-data' && target.ids.length,
   );
 
+  const blockedFamilies: NonNullable<ManagedDeleteRefusal['blocked']> = [];
+
+  // A stale catalogue may omit a real parent while exposing its children.
+  // Hydrate only physically bound records, and require consent for the full
+  // connected family in the prepared preview; never cross workspace ownership.
+  for (const target of targets) {
+    const originalIds = [...target.ids];
+    const headers = await reader.read(target.workspace, true);
+
+    const catalogue = new Set(
+      (await reader.read(target.workspace)).map((row) => row.composerId),
+    );
+
+    const byId = new Map(headers.map((row) => [row.composerId, row]));
+
+    // This undirected metadata closure only scopes deselection. It grants no
+    // ownership and never adds records to a destructive plan. Missing endpoints
+    // still connect siblings that explicitly name the same unknown parent.
+    const affectedSelection = (seeds: string[]): string[] => {
+      const affected = new Set(seeds);
+      let grew = true;
+
+      while (grew) {
+        grew = false;
+
+        for (const row of headers) {
+          const links = [
+            row.subagentInfo?.parentComposerId,
+            ...(row.subagentComposerIds || []),
+          ].filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          );
+
+          if (
+            affected.has(row.composerId) ||
+            links.some((id) => affected.has(id))
+          ) {
+            for (const id of [row.composerId, ...links]) {
+              if (!affected.has(id)) {
+                affected.add(id);
+                grew = true;
+              }
+            }
+          }
+        }
+      }
+
+      return originalIds.filter((id) => affected.has(id));
+    };
+
+    const selected = new Set(target.ids);
+    const expanded = new Set<string>();
+    let changed = true;
+
+    while (changed) {
+      changed = false;
+
+      for (const id of [...selected]) {
+        const row = byId.get(id);
+        const parent = row?.subagentInfo?.parentComposerId;
+
+        if (typeof parent !== 'string' || !parent || selected.has(parent))
+          continue;
+        if (!byId.has(parent))
+          return {
+            ok: false,
+            title: 'Cannot delete the selected family',
+            detail: `Chat “${row?.name || 'Untitled chat'}” (${id}) in “${target.name}” references parent ${parent}, whose ownership is outside this workspace or cannot be verified. Deselect this child; open the owning workspace and select the complete family. No data was deleted.`,
+            blocked: [
+              {
+                workspaceKey: target.workspace.workspaceDbPath,
+                ids: affectedSelection([id, parent]),
+                name: row?.name || 'Untitled chat',
+                reason: `Parent ${parent} is outside this workspace or cannot be verified.`,
+              },
+            ],
+          };
+
+        if (!catalogue.has(parent)) {
+          selected.add(parent);
+          expanded.add(parent);
+          changed = true;
+        }
+      }
+
+      for (const row of headers) {
+        const parent = row.subagentInfo?.parentComposerId;
+
+        if (
+          typeof parent === 'string' &&
+          selected.has(parent) &&
+          !selected.has(row.composerId) &&
+          expanded.has(parent)
+        ) {
+          selected.add(row.composerId);
+          expanded.add(row.composerId);
+          changed = true;
+        }
+
+        if (
+          selected.has(row.composerId) &&
+          (!catalogue.has(row.composerId) || expanded.has(row.composerId))
+        )
+          for (const child of row.subagentComposerIds || []) {
+            if (selected.has(child)) continue;
+            if (!byId.has(child))
+              return {
+                ok: false,
+                title: 'Cannot delete the selected family',
+                detail: `Hidden parent “${row.name || 'Untitled chat'}” (${row.composerId}) in “${target.name}” references child ${child} with unverified or external ownership. Deselect this family. No data was deleted.`,
+                blocked: [
+                  {
+                    workspaceKey: target.workspace.workspaceDbPath,
+                    ids: affectedSelection([row.composerId, child]),
+                    name: row.name || 'Untitled chat',
+                    reason: `Child ${child} has unverified or external ownership.`,
+                  },
+                ],
+              };
+            selected.add(child);
+            expanded.add(child);
+            changed = true;
+          }
+      }
+    }
+
+    target.ids = [...selected];
+
+    if (expanded.size) {
+      const ownership = await inspectDeletionOwnership(ctx, job.workspaces, [
+        { workspace: target.workspace, ids: target.ids },
+      ]);
+
+      if (!exclusivelyOwned(ownership.owners, target.workspace, target.ids)) {
+        const blockedIds = target.ids.filter(
+          (id) => !exclusivelyOwned(ownership.owners, target.workspace, [id]),
+        );
+
+        const reasons = blockedIds.map((id) => {
+          const row = byId.get(id);
+
+          const owners = ownership.owners.get(
+            JSON.stringify([target.workspace.globalDbPath, id]),
+          );
+
+          const labels = [...(owners || [])].map((owner) => {
+            const entry = job.workspaces.find(
+              (workspace) => workspace.workspaceDbPath === owner,
+            );
+
+            return entry
+              ? `${workspacePresentation(entry).name} (${entry.storageId})`
+              : owner === 'conflicting-workspace-owner'
+                ? 'body and catalogue workspace bindings disagree'
+                : 'workspace ownership cannot be verified';
+          });
+
+          return `“${row?.name || 'Untitled chat'}” (${id}): ${labels.join(', ') || 'no verified owner'}`;
+        });
+
+        // Only clear selected members connected to a blocked record. Independent
+        // families in this same workspace must remain checked for a fresh preview.
+        const ids = affectedSelection(blockedIds);
+        const name = byId.get(ids[0])?.name || target.name;
+
+        blockedFamilies.push({
+          workspaceKey: target.workspace.workspaceDbPath,
+          ids,
+          name,
+          reason: `Shared or unverified family in “${target.name}”:\n${reasons.join('\n')}`,
+        });
+      }
+    }
+  }
+
+  if (blockedFamilies.length)
+    return {
+      ok: false,
+      title: 'Cannot delete the selected families',
+      detail: `${blockedFamilies.map((family) => `“${family.name}”: ${family.reason}`).join('\n\n')}\nDeselect the blocked selection, review the remaining checked chats, then choose Delete again. No data was deleted.`,
+      blocked: blockedFamilies,
+    };
+
   if (owned.length) {
     const ownership = await inspectDeletionOwnership(
       ctx,
@@ -307,7 +495,7 @@ export async function prepareManagedDelete(
   const keptNotes: string[] = [];
 
   for (const target of targets) {
-    const headers = await reader.read(target.workspace);
+    const headers = await reader.read(target.workspace, true);
 
     if (target.kind === 'chats') {
       const narrowed = narrowDeletion(headers, target.ids);
@@ -330,6 +518,41 @@ export async function prepareManagedDelete(
       target.workspace.globalDbPath,
       watched,
     );
+  }
+
+  // Run the same retained-parent validation before showing destructive consent.
+  // TEMP selections belong to this private read-only connection, never the profile.
+  for (const target of targets) {
+    if (!target.ids.length) continue;
+
+    const session = await SqliteSession.open({
+      ...connOf(ctx, target.workspace.globalDbPath, true),
+      readOnly: true,
+    });
+
+    try {
+      await session.exec(
+        `ATTACH DATABASE ${sqlText(target.workspace.workspaceDbPath)} AS workspace; CREATE TEMP TABLE selected(id TEXT PRIMARY KEY);`,
+      );
+
+      for (const id of target.ids)
+        await session.exec(`INSERT INTO selected VALUES (${sqlText(id)});`);
+
+      await detachDeletedSubagents(
+        session,
+        new Set(target.ids),
+        ctx.signal,
+        true,
+      );
+    } catch (cause) {
+      return {
+        ok: false,
+        title: 'Cannot delete the selected family',
+        detail: `${cause instanceof Error ? cause.message : String(cause)} Deselect the affected child, or explicitly select its complete family in the owning workspace. No data was deleted.`,
+      };
+    } finally {
+      await session.close();
+    }
   }
 
   transferEvent({

@@ -176,7 +176,9 @@ export function setSource(
     workspaceDetail: explanation
       ? `${label.path} — ${explanation}`
       : label.path,
-    workspaceLocation: [mark, label.location].filter(Boolean).join(' · '),
+    workspaceLocation: [mark, label.location, `Storage ${entry.storageId}`]
+      .filter(Boolean)
+      .join(' · '),
     sourceAvailable: true,
   });
 }

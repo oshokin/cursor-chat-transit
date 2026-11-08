@@ -1,8 +1,13 @@
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import { withoutDeletedSubagents } from './chat-family';
+import { conversationStateIds } from './conversation-state';
 import { bubbleRange, sqlText } from './core';
 import { inspectDatabase } from './db';
-import { resolveComposers, type HeaderSource } from './db-headers';
+import {
+  resolveComposers,
+  workspaceBinding,
+  type HeaderSource,
+} from './db-headers';
 import { verifyGlobalSelection } from './deletion-ownership';
 import { openReadTransaction } from './read-transaction';
 import type { SqliteSession } from './sqlite-session';
@@ -75,6 +80,39 @@ export async function checkDeletionTransaction(
       strictMetadata: true,
       includeSelectionReferences: true,
     });
+
+    for (const id of ids) {
+      const text = await kvText(session, `composerData:${id}`);
+
+      if (!text) continue;
+      const body = JSON.parse(text) as ComposerHeader;
+
+      const binding = workspaceBinding(
+        body,
+        workspace.storageId,
+        workspace.identity,
+      );
+
+      const index = current.findIndex((row) => row.composerId === id);
+
+      if (binding === 'unbound') continue;
+      if (binding !== 'match')
+        throw new Error(
+          'Hidden family ownership changed; deletion rolled back.',
+        );
+
+      const hydrated = {
+        ...(index < 0 ? {} : current[index]),
+        composerId: id,
+        workspaceIdentifier: body.workspaceIdentifier,
+        name: body.name ?? null,
+        subagentInfo: body.subagentInfo ?? null,
+        subagentComposerIds: body.subagentComposerIds ?? null,
+      } as unknown as ComposerHeader;
+
+      if (index < 0) current.push(hydrated);
+      else current[index] = hydrated;
+    }
 
     /** Stable JSON of the selected composer headers. */
     const selected = (
@@ -193,6 +231,20 @@ export async function deleteHeaderReferences(
     await session.exec(
       `UPDATE ${schema}.ItemTable SET value=${sqlText(JSON.stringify(value))} WHERE key=${sqlText(key)};`,
     );
+  }
+
+  if (layout.composerHeaders && layout.headerColumns.includes('value')) {
+    const parents: string[] = [];
+
+    await session.rows(
+      `SELECT composerId FROM ${schema}.composerHeaders WHERE composerId NOT IN (SELECT id FROM selected);`,
+      [],
+      (row) => {
+        if (typeof row[0] === 'string') parents.push(row[0]);
+      },
+    );
+
+    await updateHeaderMembership(session, schema, parents, ids);
   }
 
   if (layout.composerHeaders)
@@ -347,8 +399,99 @@ export async function detachDeletedSubagents(
   /** Composer ids selected for this operation. */
   ids: Set<string>,
   signal?: AbortSignal,
+  validateOnly = false,
 ): Promise<void> {
   const parents = new Set<string>();
+
+  // Only composerData's indexed key range, never message/agent KV payloads.
+  // Project membership in SQLite: unrelated bodies never cross IPC or JSON.parse.
+  // A hard candidate budget bounds work and retained parent IDs; exceeding it
+  // refuses deletion instead of treating an incomplete ownership pass as safe.
+  let candidates = 0;
+  const bodyParents = new Set<string>();
+
+  await session.rows(
+    `SELECT key, length(CAST(value AS BLOB)),
+      CASE WHEN length(CAST(value AS BLOB)) > ${MAX_SQLITE_VALUE_BYTES} THEN -1 WHEN json_valid(value) THEN
+        CASE WHEN json_type(value) <> 'object' THEN -1
+          WHEN (json_type(value,'$.subagentComposerIds') IS NOT NULL AND json_type(value,'$.subagentComposerIds') <> 'array')
+            OR (json_type(value,'$.subComposerIds') IS NOT NULL AND json_type(value,'$.subComposerIds') <> 'array') THEN -1
+          WHEN EXISTS(SELECT 1 FROM json_each(kv.value,'$.subagentComposerIds') WHERE type <> 'text')
+            OR EXISTS(SELECT 1 FROM json_each(kv.value,'$.subComposerIds') WHERE type <> 'text') THEN -1
+          WHEN EXISTS(SELECT 1 FROM json_each(kv.value,'$.subComposerIds') AS member JOIN selected ON selected.id=member.value) THEN -1
+          WHEN EXISTS(SELECT 1 FROM json_each(kv.value,'$.subagentComposerIds') AS member JOIN selected ON selected.id=member.value) THEN 1
+          ELSE 0 END
+        ELSE -1 END
+      FROM main.cursorDiskKV AS kv
+      WHERE value IS NOT NULL AND key >= 'composerData:' AND key < 'composerData;'
+        AND length(key)=49 AND substr(key,22,1)='-' AND substr(key,27,1)='-'
+        AND substr(key,32,1)='-' AND substr(key,37,1)='-'
+        AND substr(key,14) NOT IN (SELECT id FROM selected)
+      LIMIT 10001;`,
+    [],
+    (row) => {
+      signal?.throwIfAborted();
+      if (++candidates > 10_000)
+        throw new Error(
+          'Composer ownership candidate budget exceeded; deletion rolled back.',
+        );
+      if (Number(row[1]) > MAX_SQLITE_VALUE_BYTES || Number(row[2]) < 0)
+        throw new Error(
+          'Cannot verify retained composer ownership; deletion rolled back.',
+        );
+
+      if (Number(row[2]) === 1) {
+        bodyParents.add(String(row[0]).slice(13));
+      }
+    },
+  );
+
+  // Migrated profiles store family membership in composerHeaders rather than
+  // ItemTable. A child need not carry a backlink, so consult both header indexes
+  // before touching any composer bodies. Never scan cursorDiskKV values.
+  for (const schema of ['main', 'workspace'] as const) {
+    const columns: string[] = [];
+
+    await session.rows(
+      `PRAGMA ${schema}.table_info(composerHeaders);`,
+      [],
+      (row) => {
+        if (typeof row[1] === 'string') columns.push(row[1]);
+      },
+    );
+
+    if (!columns.includes('composerId') || !columns.includes('value')) continue;
+
+    await session.rows(
+      `SELECT composerId, CAST(value AS BLOB) FROM ${schema}.composerHeaders WHERE composerId NOT IN (SELECT id FROM selected);`,
+      [],
+      (row) => {
+        if (typeof row[0] !== 'string' || row[1] === null) return;
+
+        const raw = Buffer.isBuffer(row[1])
+          ? row[1]
+          : Buffer.from(String(row[1]), 'utf8');
+
+        if (raw.length > MAX_SQLITE_VALUE_BYTES)
+          throw new Error(
+            'Header metadata exceeds the supported record limit.',
+          );
+
+        const header = JSON.parse(raw.toString('utf8')) as Record<
+          string,
+          unknown
+        >;
+
+        if (
+          Array.isArray(header.subagentComposerIds) &&
+          header.subagentComposerIds.some(
+            (child) => typeof child === 'string' && ids.has(child),
+          )
+        )
+          parents.add(row[0]);
+      },
+    );
+  }
 
   for (const [schema, key] of [
     ['main', 'composer.composerHeaders'],
@@ -398,6 +541,12 @@ export async function detachDeletedSubagents(
       parents.add(parent);
   }
 
+  for (const parent of bodyParents)
+    if (!parents.has(parent))
+      throw new Error(
+        'Retained composer body references a selected child; deletion rolled back. Delete the complete family together.',
+      );
+
   for (const parent of parents) {
     signal?.throwIfAborted();
     const key = `composerData:${parent}`;
@@ -405,9 +554,39 @@ export async function detachDeletedSubagents(
 
     if (!text) continue;
     const body = JSON.parse(text) as Record<string, unknown>;
+
+    // Membership metadata is not the conversation: persisted subagent state
+    // remains a typed reference even after subagentComposerIds is pruned.
+    // Never rewrite that history or delete its target behind a kept parent.
+    if (
+      body.conversationState !== undefined &&
+      body.conversationState !== null
+    ) {
+      const state = body.conversationState;
+
+      if (state !== '' && state !== '~') {
+        let references: Set<string>;
+
+        try {
+          references = conversationStateIds(state);
+        } catch (cause) {
+          throw new Error(
+            `Cannot verify retained parent ${parent}: unsupported conversation state; deletion rolled back.`,
+            { cause },
+          );
+        }
+
+        for (const child of references)
+          if (ids.has(child))
+            throw new Error(
+              `Retained parent ${parent} references selected subagent ${child} in conversation state; delete the complete family together. Deletion rolled back.`,
+            );
+      }
+    }
+
     const next = withoutDeletedSubagents(body, ids);
 
-    if (next === body) continue;
+    if (validateOnly || next === body) continue;
 
     await session.exec(
       `UPDATE main.cursorDiskKV SET value=${sqlText(JSON.stringify(next))} WHERE key=${sqlText(key)};`,

@@ -1,3 +1,4 @@
+import { visualizationFilenamesFromChat } from './artifact-support';
 import { createHash } from 'node:crypto';
 import {
   blobKeysFromComposerBody,
@@ -31,7 +32,14 @@ export interface SnapshotInput {
   bubbles: SnapshotBubble[];
   /** Reachable kv, image, and plan bytes. */
   dependencies: Array<{
-    kind: 'kv' | 'image' | 'plan' | 'canvas';
+    kind:
+      | 'kv'
+      | 'image'
+      | 'plan'
+      | 'canvas'
+      | 'visualization'
+      | 'transcript'
+      | 'terminal-history';
     /** Key, image UUID, plan basename, or canvas basename. */
     id: string;
     /** SQLite storage class when this is a kv value. */
@@ -321,6 +329,37 @@ export function snapshotInputFromChat(opts: {
         : { kind: 'canvas', id: name, sha256: null },
     );
   }
+
+  const visualizationsByName = new Map(
+    (opts.resources.visualizations || []).map((row) => [row.filename, row]),
+  );
+
+  for (const name of visualizationFilenamesFromChat(
+    opts.bodyText,
+    opts.bubbles,
+  )) {
+    const resource = visualizationsByName.get(name);
+
+    dependencies.push(
+      resource
+        ? {
+            kind: 'visualization',
+            id: name,
+            sha256: resource.sha256,
+            byteLength: resource.byteLength,
+          }
+        : { kind: 'visualization', id: name, sha256: null },
+    );
+  }
+
+  for (const resource of opts.resources.historicalArtifacts || [])
+    if (resource.owner === opts.header.composerId)
+      dependencies.push({
+        kind: resource.kind,
+        id: resource.id,
+        sha256: resource.sha256,
+        byteLength: resource.byteLength,
+      });
 
   return {
     sourceComposerId: opts.header.composerId,

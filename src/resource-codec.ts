@@ -1,3 +1,8 @@
+import { decodeVisualization } from './visualizations';
+import {
+  parseHistoricalResourceId,
+  MAX_HISTORICAL_ARTIFACT_BYTES,
+} from './historical-artifacts';
 import { decodeAttachment, encodeAttachment } from './attachments';
 import { decodeCanvas, encodeCanvas } from './canvases';
 import { isBlobKey } from './chat-dependencies';
@@ -266,5 +271,101 @@ export function parseExportResources(
     canvases.push(encodeCanvas(item.filename, bytes));
   }
 
-  return { kv, attachments, plans, canvases };
+  const visualizations: CanvasResource[] = [];
+  const seenVisualization = new Set<string>();
+
+  const visualizationRows =
+    rec.visualizations === undefined ? [] : rec.visualizations;
+
+  if (!Array.isArray(visualizationRows)) {
+    fail('INVALID_RESOURCE', 'Invalid export resources.');
+  }
+
+  for (const row of visualizationRows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      fail('INVALID_RESOURCE', 'Invalid export canvas record.');
+    }
+
+    const item = row as CanvasResource;
+    let bytes: Buffer;
+
+    try {
+      bytes = decodeVisualization(item);
+    } catch (err) {
+      if (opts?.skipInvalidPayloads) continue;
+
+      throw err;
+    }
+
+    if (seenVisualization.has(item.filename)) {
+      fail('INVALID_RESOURCE', 'Duplicate canvas filename.');
+    }
+
+    seenVisualization.add(item.filename);
+    total += bytes.length;
+
+    if (
+      kv.length +
+        attachments.length +
+        plans.length +
+        visualizations.length +
+        1 >
+        MAX_RESOURCE_COUNT ||
+      total > MAX_TOTAL_RESOURCE_BYTES
+    ) {
+      fail('INVALID_RESOURCE', 'Resource set exceeds size limit.');
+    }
+
+    visualizations.push(item);
+  }
+
+  const historicalArtifacts: NonNullable<
+    ExportResources['historicalArtifacts']
+  > = [];
+
+  const historicalRows = rec.historicalArtifacts ?? [];
+
+  if (!Array.isArray(historicalRows))
+    fail('INVALID_RESOURCE', 'Invalid historical artifacts.');
+  const seenHistory = new Set<string>();
+
+  for (const row of historicalRows) {
+    const item = row as NonNullable<
+      ExportResources['historicalArtifacts']
+    >[number];
+
+    if (!item || typeof item !== 'object')
+      fail('INVALID_RESOURCE', 'Invalid historical artifact.');
+    parseHistoricalResourceId(item.id, item.kind);
+    if (typeof item.owner !== 'string' || !item.owner)
+      fail('INVALID_RESOURCE', 'Historical owner missing.');
+    const identity = `${item.owner}:${item.kind}:${item.id}`;
+
+    if (seenHistory.has(identity) || item.filename !== item.id)
+      fail('INVALID_RESOURCE', 'Duplicate or invalid historical artifact.');
+    seenHistory.add(identity);
+    const bytes = decodeCanonicalBase64(item.base64, item.byteLength);
+
+    if (
+      bytes.length > MAX_HISTORICAL_ARTIFACT_BYTES ||
+      sha256Hex(bytes) !== item.sha256
+    )
+      fail('INVALID_RESOURCE', 'Invalid historical artifact checksum or size.');
+    total += bytes.length;
+    if (
+      total > MAX_TOTAL_RESOURCE_BYTES ||
+      historicalArtifacts.length >= MAX_RESOURCE_COUNT
+    )
+      fail('INVALID_RESOURCE', 'Historical resources exceed limit.');
+    historicalArtifacts.push(item);
+  }
+
+  return {
+    kv,
+    attachments,
+    plans,
+    canvases,
+    visualizations,
+    historicalArtifacts,
+  };
 }

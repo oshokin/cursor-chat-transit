@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   buildFamily,
+  applyBodyFamily,
   exportFamilyIds,
   familyRecordIds,
   familyImportAdjustments,
@@ -73,6 +74,55 @@ test('a child hangs under its direct parent, including a grandchild', () => {
   assert.equal(graph.nodes.get(C)?.relation, 'child');
   assert.deepEqual(exportFamilyIds(headers, [A]).ids.sort(), [A, B, C].sort());
   assert.deepEqual(exportFamilyIds(headers, [C]).ids.sort(), [A, B, C].sort());
+});
+
+test('a linked child with an absent contradictory root stays unresolved', () => {
+  const headers = [
+    header(A, { subagentComposerIds: [B] }),
+    header(B, {
+      isSubagent: true,
+      subagentInfo: { parentComposerId: A, rootParentConversationId: C },
+    }),
+  ];
+
+  const graph = buildFamily(headers);
+
+  assert.equal(graph.nodes.get(B)?.relation, 'unresolved');
+
+  assert.ok(
+    graph.diagnostics.some((item) => item.code === 'contradictory-root'),
+  );
+});
+
+test('a nonempty stale header does not hide body children from export closure', () => {
+  const parent = applyBodyFamily(header(A, { subagentComposerIds: [B] }), {
+    children: [B, C],
+  });
+
+  const headers = [
+    parent,
+    header(B, { subagentInfo: { parentComposerId: A } }),
+    header(C, { subagentInfo: { parentComposerId: A } }),
+  ];
+
+  assert.deepEqual(parent.subagentComposerIds, [B, C]);
+  assert.deepEqual(exportFamilyIds(headers, [A]).ids.sort(), [A, B, C].sort());
+  assert.deepEqual(exportFamilyIds(headers, [C]).ids.sort(), [A, B, C].sort());
+});
+
+test('import membership cannot expose unmapped source children', () => {
+  const mapping = new Map([[B, 'imported-child']]);
+
+  const source = {
+    subagentComposerIds: [B, C],
+    additionalData: { subagentComposerId: C },
+  };
+
+  const imported = remapFamilyRecord(source, mapping, true);
+
+  assert.deepEqual(imported.subagentComposerIds, ['imported-child']);
+  assert.deepEqual(imported.additionalData, { subagentComposerId: C });
+  assert.deepEqual(source.subagentComposerIds, [B, C]);
 });
 
 test('a cycle and a missing parent stay unresolved', () => {

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
+import type { WorkspaceEntry } from '../src/types';
 import {
+  canvasesDirectoryForWorkspace,
   canvasFilenameFromRef,
   canvasFilenamesFromChat,
   cursorProjectSlug,
@@ -9,6 +13,36 @@ import {
 
 /** Canvas basename from the RocksDB chat. */
 const NAME = 'dos-conan-migration-map.canvas.tsx';
+
+test('canvas resolution requires workspace identity, not just database paths', () => {
+  const workspace: WorkspaceEntry = {
+    storageRoot: '/synthetic/workspaceStorage',
+    storageId: 'fixture',
+    key: 'fixture',
+    mtime: 0,
+    workspaceDbPath: '/synthetic/workspaceStorage/fixture/state.vscdb',
+    globalDbPath: '/synthetic/globalStorage/state.vscdb',
+  };
+
+  assert.equal(canvasesDirectoryForWorkspace(workspace), null);
+
+  assert.equal(
+    canvasesDirectoryForWorkspace({
+      ...workspace,
+      identity: {
+        kind: 'folder',
+        uri: { scheme: 'file', authority: '', path: '/synthetic/project.name' },
+      },
+    }),
+    path.join(
+      os.homedir(),
+      '.cursor',
+      'projects',
+      'synthetic-project-name',
+      'canvases',
+    ),
+  );
+});
 
 test('cursorProjectSlug matches Cursor project directory names', () => {
   assert.equal(

@@ -115,7 +115,7 @@ export async function writeSelectedChats(opts: {
   }
 }
 
-/** Stream the selected chats into one v4 archive. */
+/** Stream the selected chats into one v5 archive. */
 export async function exportBundle(opts: {
   /** Transfer context. */
   ctx: TransferContext;

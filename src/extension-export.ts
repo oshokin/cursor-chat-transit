@@ -86,13 +86,26 @@ export async function doExport(opts: {
   try {
     const { entries, identity } = await hostState();
 
+    const selectedSource = resolveSelectedWorkspace(
+      opts.workspace || runtime.sourceWorkspace,
+      entries,
+    );
+
+    if (!opts.preferCurrent && selectedSource.status === 'missing') {
+      throw new Error(
+        'Selected source storage is no longer available. Choose a workspace again.',
+      );
+    }
+
     let workspace = opts.preferCurrent
       ? resolveAutomaticWorkspace(
           entries,
           currentWorkspaceDatabase(opts.context),
           identity,
         )
-      : opts.workspace || runtime.sourceWorkspace;
+      : selectedSource.status === 'ok'
+        ? selectedSource.workspace
+        : undefined;
 
     if (!workspace) {
       setUi({
@@ -171,7 +184,10 @@ export async function doExport(opts: {
               { label: 'Export all chats', value: 'all' as const },
               { label: 'Select chats…', value: 'select' as const },
             ],
-            { title: 'Choose chats to export', ignoreFocusOut: true },
+            {
+              title: `Choose chats to export · Storage ${workspace.storageId}`,
+              ignoreFocusOut: true,
+            },
           );
 
     if (!mode) {
@@ -201,16 +217,19 @@ export async function doExport(opts: {
         items: chatPickItems(conversations).map((item) => {
           const count = descendantCount(family, item.id);
 
-          return count
-            ? {
-                ...item,
-                description: `${count} subagent${count === 1 ? '' : 's'} included`,
-              }
-            : item;
+          return {
+            ...item,
+            // Cursor's subtitle is an edited-file/source preview, not identity.
+            // Keep dates and duplicate-title disambiguation in description.
+            detail: '',
+            description: count
+              ? `${item.description} · ${count} subagent${count === 1 ? '' : 's'} included`
+              : item.description,
+          };
         }),
         key: (item) => item.id,
         many: true,
-        title: 'Select chats to export',
+        title: `Select chats to export · Storage ${workspace.storageId}`,
         placeholder:
           'Subagent chats are included with their parent conversation.',
         buttonLabel: 'Count user messages and identify chat formats',

@@ -1,3 +1,10 @@
+import { readChatVisualization } from './visualizations';
+import {
+  historicalProjectRoot,
+  historicalResourceId,
+  readOwnedTranscripts,
+  readReferencedTerminalHistory,
+} from './historical-artifacts';
 import { createHash } from 'node:crypto';
 import { lstat, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -60,8 +67,10 @@ export async function writeResources(opts: {
     plans: Set<string>;
     /** Canvas basenames referenced by this chat. */
     canvases: Set<string>;
+    visualizations?: Set<string>;
+    terminalFiles?: Set<string>;
   };
-}): Promise<void> {
+}): Promise<boolean> {
   const blobs = blobKeysFromComposerBody(opts.body);
 
   if (blobs.status === 'unsupported') {
@@ -205,7 +214,7 @@ export async function writeResources(opts: {
       `Incomplete chat ${chatLogLabel(opts.header)}: an attachment id could not be read`,
     );
 
-    return;
+    return false;
   }
 
   let missingPlans = 0;
@@ -232,6 +241,108 @@ export async function writeResources(opts: {
     });
 
     if (sha.file) await rm(sha.file, { force: true });
+  }
+
+  let missingVisualizations = 0;
+  const projectRoot = historicalProjectRoot(opts.ctx, opts.workspace);
+
+  if (projectRoot) {
+    const body = JSON.parse(opts.body) as ComposerHeader;
+    const parent = body.subagentInfo?.parentComposerId;
+
+    const artifacts = await readOwnedTranscripts({
+      projectRoot,
+      owner: opts.header.composerId,
+      parent: typeof parent === 'string' ? parent : undefined,
+      signal: opts.ctx.signal,
+    });
+
+    const terminals = await readReferencedTerminalHistory({
+      projectRoot,
+      owner: opts.header.composerId,
+      references: opts.refs.terminalFiles || [],
+      signal: opts.ctx.signal,
+    });
+
+    artifacts.push(...terminals.artifacts);
+
+    for (const artifact of artifacts) {
+      const id = historicalResourceId(
+        artifact.kind === 'transcript'
+          ? {
+              layout: artifact.layout,
+              extension: artifact.extension,
+              parent: artifact.parent,
+              sourceRoot: projectRoot,
+            }
+          : {
+              terminalName: artifact.terminalName,
+              sourceRoot: projectRoot,
+              sourceFile: artifact.sourceFile,
+            },
+      );
+
+      const sha = await writeTempBytes(opts.tmp, artifact.source.bytes);
+
+      if (sha.file) await opts.writer.addBlob(artifact.source.sha256, sha.file);
+
+      await opts.writer.writeResource({
+        class: artifact.kind,
+        id,
+        filename: id,
+        sha256: artifact.source.sha256,
+        byteLength: artifact.source.byteLength,
+      });
+
+      if (sha.file) await rm(sha.file, { force: true });
+    }
+
+    if (terminals.missing.length)
+      opts.ctx.onNote?.(
+        `${terminals.missing.length} referenced terminal snapshot files are missing; references remain external.`,
+      );
+  }
+
+  for (const filename of opts.refs.visualizations || []) {
+    const resource = await readChatVisualization(
+      opts.ctx,
+      opts.workspace,
+      opts.header.composerId,
+      filename,
+    );
+
+    if (!resource) {
+      missingVisualizations++;
+      continue;
+    }
+
+    const sha = await writeTempBytes(opts.tmp, resource.bytes);
+
+    if (sha.file) await opts.writer.addBlob(resource.sha256, sha.file);
+
+    await opts.writer.writeResource({
+      class: 'visualization',
+      id: filename,
+      filename,
+      sha256: resource.sha256,
+      byteLength: resource.byteLength,
+    });
+
+    if (sha.file) await rm(sha.file, { force: true });
+  }
+
+  if (missingVisualizations) {
+    opts.issues.push(
+      chatIssue(opts.header, 'missing-visualizations', {
+        omittedVisualizations: missingVisualizations,
+      }),
+    );
+
+    opts.ctx.onNote?.(
+      `Incomplete chat ${chatLogLabel(opts.header)}: ${missingVisualizations} referenced visualization HTML files are missing.`,
+    );
+
+    return false;
   }
 
   const canvasesDir = canvasesDirOf(opts.ctx, opts.workspace);
@@ -277,6 +388,9 @@ export async function writeResources(opts: {
       `Incomplete chat ${chatLogLabel(opts.header)} missingBlobs=${missingBlobs} missingImages=${missingImages} missingPlans=${missingPlans} missingCanvases=${missingCanvases}`,
     );
   }
+
+  // An absent state is history, not proof of a complete renderer closure.
+  return typeof state === 'string' && state.trim() !== '' && missingBlobs === 0;
 }
 
 /** Export the closed graph of renderer records owned by this composer. */

@@ -4,6 +4,8 @@ Move Cursor chats between workspaces and devices. Export selected conversations,
 
 Cursor's chat storage is private. A Cursor update can break export, import, or the ability to continue a chat. An archive can contain prompts, source, tool output, paths, and secrets. Treat it as sensitive. This extension does not back up your profile. You use it at your own risk.
 
+Supported visualization HTML can also be transferred. See [artifact support and limitations](docs/artifacts.md), including platform restrictions and files that are not migrated.
+
 ## Install
 
 Install **Cursor Chat Transit** (`oshokin`) from a registry, or from a GitHub Release:

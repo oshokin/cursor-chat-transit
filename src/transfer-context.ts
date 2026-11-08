@@ -29,6 +29,7 @@ export function chatIssue(
     | 'missingImages'
     | 'missingPlans'
     | 'missingCanvases'
+    | 'omittedVisualizations'
     | 'missingMessages'
   >,
 ): ExportChatIssue {

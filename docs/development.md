@@ -82,7 +82,7 @@ Users install from the [Visual Studio Marketplace](https://marketplace.visualstu
 
 CI publishes the GitHub Release: a version tag, the VSIX, and a SHA-256 checksum. The same checked VSIX is then published to Open VSX with `HaaLeo/publish-vscode-extension` v2.1.0, which needs the repository secret `OPEN_VSX_TOKEN`, and to the Visual Studio Marketplace with `vsce publish --oidc` under the Trusted Publishing policy for `ci.yml`. A version already on a registry is left in place.
 
-This build writes archive format 5 and reads formats 5 and 4. `package.json` is `1.1.0`. The local tags are `v1.0.0` and `v1.0.1`. `scripts/acceptance-cursor.sh` records a real Cursor executable and a manual checklist. It does not open chat databases.
+This build writes archive format 5 and reads only format 5. `package.json` is `1.1.0`. The local tags are `v1.0.0` and `v1.0.1`. `scripts/acceptance-cursor.sh` records a real Cursor executable and a manual checklist. It does not open chat databases.
 
 ## Release
 
@@ -175,7 +175,7 @@ Ordered steps use `cmds`, because Task dependencies run in parallel. `npm run pa
 
 On Windows 10/11, `task setup` downloads the official Node.js zip when npm is missing. The watch script runs TypeScript via Node.
 
-Settings and command IDs use `cursorChatTransit.*`. New exports are format 5 ZIP archives. Imports accept formats 5 and 4. Receipts are SQLite files named `import-v4-<hash>.sqlite` under `<user-data>/cursor-chat-transit`. That filename prefix is historical; the journal schema is version 2.
+Settings and command IDs use `cursorChatTransit.*`. New exports are format 5 ZIP archives. Imports accept only format 5; re-export older archives. Receipts are SQLite files named `import-v4-<hash>.sqlite` under `<user-data>/cursor-chat-transit`. That filename prefix is historical; the journal schema is version 2.
 
 ## Opt-in performance checks
 

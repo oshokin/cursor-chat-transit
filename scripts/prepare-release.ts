@@ -161,6 +161,31 @@ function packageVersion(cwd: string): string {
   return version;
 }
 
+/**
+ * Keep every byte of package.json except its version.
+ * `npm version` rewrites the file and turns `\u2013` into a raw character.
+ */
+function keepPackageJsonBytes(
+  cwd: string,
+  previous: string,
+  next: string,
+): void {
+  const before = git(cwd, ['show', 'HEAD:package.json']);
+  const needle = `"version": "${previous}"`;
+  const count = before.split(needle).length - 1;
+
+  if (count !== 1) {
+    fail(
+      `HEAD package.json has ${count} occurrences of ${needle}. Not rewriting unrelated package.json text.`,
+    );
+  }
+
+  fs.writeFileSync(
+    path.join(cwd, 'package.json'),
+    before.replace(needle, `"version": "${next}"`),
+  );
+}
+
 /** Both lockfile version fields must equal the package version. */
 function assertLock(cwd: string, version: string): void {
   const lock = JSON.parse(
@@ -321,6 +346,7 @@ function main(): void {
     return;
   }
 
+  keepPackageJsonBytes(cwd, current, next);
   assertLock(cwd, next);
   const names = git(cwd, ['diff', '--name-only']);
 

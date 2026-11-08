@@ -13,6 +13,8 @@ import type {
 } from '../src/types';
 import { openBundle } from '../src/bundle-reader';
 import { sqlText } from '../src/core';
+import { readBundleObject } from '../src/bundle-object';
+import { buildFamily } from '../src/chat-family';
 
 /** Composer transferred in these schema tests. */
 const A = '11111111-1111-4111-8111-111111111111';
@@ -43,7 +45,7 @@ const header = {
 /** Format-2 export whose composer JSON points at bubbles X and Y. */
 function payload(ids = [A]) {
   return {
-    formatVersion: 2,
+    formatVersion: 5,
     allComposers: ids.map((composerId) => ({
       composerId,
       name: 'Synthetic fixture',
@@ -122,6 +124,64 @@ ${opts.globalExtra || ''}`,
 
   return { dir, ctx, workspace, gl, ws };
 }
+
+test('stale family export imports into another workspace sharing global storage without source leakage', async (t) => {
+  const { dir, ctx, workspace, gl } = await fixture(t);
+  const B = '22222222-2222-4222-8222-222222222222';
+  const C = '33333333-3333-4333-8333-333333333333';
+
+  const sourceHeaders = [
+    { ...header, subagentComposerIds: [B] },
+    ...[B, C].map((composerId) => ({
+      ...header,
+      composerId,
+      isSubagent: true,
+      subagentInfo: { parentComposerId: A, rootParentConversationId: A },
+    })),
+  ];
+
+  await sql.execSqlScript({
+    ...gl,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: sourceHeaders }))} WHERE key='composer.composerHeaders';
+${sourceHeaders.map((h) => `INSERT INTO cursorDiskKV VALUES(${sqlText(`composerData:${h.composerId}`)},${sqlText(JSON.stringify({ ...h, subagentComposerIds: h.composerId === A ? [B, C] : [], conversation: [] }))});`).join('\n')}`,
+  });
+
+  const target: WorkspaceEntry = {
+    ...workspace,
+    storageId: 'target',
+    key: 'target',
+    workspaceDbPath: path.join(dir, 'target.vscdb'),
+    identity: { ...identity, uri: { ...identity.uri, path: '/target' } },
+  };
+
+  await sql.execSqlScript({
+    ...ctx,
+    database: target.workspaceDbPath,
+    sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+  });
+
+  const archive = path.join(dir, 'family.cursor-chat.zip');
+
+  await transfer.exportToFile(ctx, workspace, archive, [A]);
+  const exported = await readBundleObject(archive);
+
+  assert.equal(exported.allComposers.length, 3);
+  const imported = await transfer.importFromObject(ctx, exported, target);
+  const catalogue = await transfer.listWorkspaceChats(ctx, target);
+  const ids = catalogue.allComposers.map((h) => h.composerId);
+
+  assert.equal(imported.imported, 3);
+  assert.deepEqual(new Set(ids), new Set(imported.composerIds));
+  assert.ok(ids.every((id) => ![A, B, C].includes(id)));
+  const graph = buildFamily(catalogue.allComposers);
+
+  assert.equal(graph.diagnostics.length, 0);
+
+  assert.equal(
+    [...graph.nodes.values()].filter((n) => n.relation === 'child').length,
+    2,
+  );
+});
 
 test('combined export writes selected chats from same-profile workspace scopes once', async (t) => {
   const { dir, ctx, workspace, gl } = await fixture(t);
@@ -395,7 +455,7 @@ test('imported ordered headers resolve to stored bubbles', async (t) => {
   const { ctx, workspace, gl } = await fixture(t);
 
   const obj = {
-    formatVersion: 2,
+    formatVersion: 5,
     allComposers: [{ composerId: A, name: 'Fixture' }],
     composers: {
       [A]: JSON.stringify({

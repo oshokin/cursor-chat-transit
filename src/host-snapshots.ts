@@ -10,6 +10,12 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { SqliteSession } from './sqlite-session';
+import {
+  verifyHostRoot,
+  UnsupportedHostSnapshotError,
+} from './host-snapshot-contract';
+import { createHash } from 'node:crypto';
+import { decodeState } from './conversation-state';
 
 const HOST_DIR = 'anysphere.cursor-agent-host';
 const MANIFEST_KEY = 'agentHost:sessionManifest';
@@ -64,6 +70,8 @@ export async function snapshotHostSession(opts: {
   signal?: AbortSignal;
   timeoutMs?: number;
   busyTimeoutMs?: number;
+  /** Renderer root from the same immutable renderer export read. */
+  rendererState?: unknown;
 }): Promise<HostSnapshot | undefined> {
   const source = await discoverHostSession(opts.userDataDir, opts.sessionId);
 
@@ -101,7 +109,53 @@ export async function snapshotHostSession(opts: {
   });
 
   try {
-    await validateHostSnapshot({ sessionId: opts.sessionId, database, meta });
+    // Delay only codec limitations: consistency and structural corruption still
+    // take precedence over a renderer-only fallback.
+    let unsupported: unknown;
+
+    try {
+      await validateHostSnapshot({ sessionId: opts.sessionId, database, meta });
+    } catch (error) {
+      if (!(error instanceof UnsupportedHostSnapshotError)) throw error;
+      unsupported = error;
+    }
+
+    if (opts.rendererState !== undefined) {
+      const rendererHash = createHash('sha256')
+        .update(decodeState(opts.rendererState))
+        .digest('hex');
+
+      const copy = await SqliteSession.open({
+        database,
+        readOnly: true,
+        mustExist: true,
+      });
+
+      try {
+        const manifest = JSON.parse(
+          (
+            await copy.text(
+              'SELECT CAST(value AS TEXT) FROM ItemTable WHERE key=?;',
+              [MANIFEST_KEY],
+            )
+          ).trim(),
+        ) as Record<string, unknown>;
+
+        if (
+          rendererHash !==
+          (manifest.manifestVersion === 2
+            ? manifest.latestStructureIdHex
+            : manifest.latestRootBlobIdHex)
+        )
+          throw new Error(
+            'Host snapshot and renderer export roots differ; export consistency is unproven.',
+          );
+      } finally {
+        await copy.close();
+      }
+    }
+
+    if (unsupported) throw unsupported;
 
     return { sessionId: opts.sessionId, database, meta };
   } catch (error) {
@@ -114,6 +168,7 @@ export async function snapshotHostSession(opts: {
 /** Fail closed unless the native component is internally complete and owned by id. */
 export async function validateHostSnapshot(
   snapshot: HostSnapshot,
+  rendererState?: unknown,
 ): Promise<void> {
   if (!ID.test(snapshot.sessionId) || snapshot.sessionId.includes('..'))
     throw new Error('Invalid host session id.');
@@ -200,9 +255,9 @@ export async function validateHostSnapshot(
       manifest.sessionId !== snapshot.sessionId ||
       typeof root !== 'string' ||
       !HEX.test(root) ||
-      root !== meta.latestRootBlobIdHex ||
       manifest.origin !== meta.origin ||
       manifest.createdAtMs !== meta.createdAtMs ||
+      !isNonnegativeInteger(manifest.createdAtMs) ||
       !isNonnegativeInteger(manifest.migratedBlobCount) ||
       (manifestVersion === 2 && !isListHeads(manifest.listHeads)) ||
       (manifestVersion === 2 &&
@@ -223,6 +278,24 @@ export async function validateHostSnapshot(
     ).trim();
 
     if (present !== '1') throw new Error('Host snapshot root is missing.');
+    let unsupported: unknown;
+
+    try {
+      await verifyHostRoot(db, manifest);
+    } catch (error) {
+      if (!(error instanceof UnsupportedHostSnapshotError)) throw error;
+      unsupported = error;
+    }
+
+    if (
+      rendererState !== undefined &&
+      createHash('sha256').update(decodeState(rendererState)).digest('hex') !==
+        (manifestVersion === 2 ? manifest.latestStructureIdHex : root)
+    )
+      throw new Error(
+        'Host snapshot and renderer export roots differ; export consistency is unproven.',
+      );
+    if (unsupported) throw unsupported;
   } finally {
     await db.close();
   }
@@ -316,7 +389,10 @@ function isListHeads(value: unknown): boolean {
   return (
     Object.keys(heads).length === 3 &&
     isNonnegativeInteger(heads.turns) &&
+    heads.turns <= 0xffffffff &&
     isNonnegativeInteger(heads.prompt) &&
-    isNonnegativeInteger(heads.archives)
+    heads.prompt <= 0xffffffff &&
+    isNonnegativeInteger(heads.archives) &&
+    heads.archives <= 0xffffffff
   );
 }

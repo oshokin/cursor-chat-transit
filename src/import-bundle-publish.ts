@@ -1,3 +1,7 @@
+import {
+  rewriteHistoricalTerminalReferences,
+  rewriteHistoricalTranscriptReferences,
+} from './historical-artifacts';
 import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -37,6 +41,7 @@ import {
   parseItemObject,
 } from './import-commit';
 import { sha256Text } from './import-policy';
+import { rendererHeaderCollision } from './import-reconcile';
 import { JournalStore } from './journal-db';
 import { KV_ROW_MISMATCH_SQL } from './kv-compare';
 import { readNdjson } from './ndjson-io';
@@ -91,6 +96,17 @@ export async function writeOne(opts: {
   onDurable?: () => void;
 }): Promise<void> {
   opts.ctx.onPhase?.('prepare', { chats: 1 });
+  if (
+    await rendererHeaderCollision({
+      targetComposerId: opts.row.targetId,
+      workspace: opts.workspace,
+      connWs: opts.pair.connWs,
+      connGl: opts.pair.connGl,
+      wsInfo: opts.pair.wsInfo.layout,
+      glInfo: opts.pair.glInfo.layout,
+    })
+  )
+    throw new Error('Refusing import: destination header collision.');
   await assertKvCompatible(opts);
   const dir = path.join(opts.root, 'chats', ordinalName(opts.ordinal));
 
@@ -165,6 +181,7 @@ export async function writeOne(opts: {
     const remappedHeader = remapFamilyRecord(
       header as Record<string, unknown>,
       headerFamilyMap,
+      true,
     ) as unknown as ComposerHeader;
 
     const bound = bindWorkspace(
@@ -320,6 +337,18 @@ export async function writeOne(opts: {
     let lastError: unknown;
 
     for (let attempt = 0; attempt < CAS_ATTEMPTS && !committed; attempt++) {
+      if (
+        await rendererHeaderCollision({
+          targetComposerId: opts.row.targetId,
+          workspace: opts.workspace,
+          connWs: opts.pair.connWs,
+          connGl: opts.pair.connGl,
+          wsInfo: opts.pair.wsInfo.layout,
+          glInfo: opts.pair.glInfo.layout,
+        })
+      )
+        throw new Error('Refusing import: destination header collision.');
+
       const headerRaw = opts.pair.glInfo.layout.itemTable
         ? await db.reads.readItemText(
             opts.pair.connGl,
@@ -820,6 +849,8 @@ export async function remapValue(
     canvases: Map<string, string>;
     /** Image basename to the destination file path. */
     images: Map<string, string>;
+    historical: Map<string, string>;
+    transcripts: Map<string, string>;
   },
 ): Promise<Record<string, unknown>> {
   const record = asObject(value, 'chat record');
@@ -928,7 +959,7 @@ export async function remapValue(
       },
     );
 
-    rewritten = remapFamilyRecord(rewritten, familyMap);
+    rewritten = remapFamilyRecord(rewritten, familyMap, true);
   }
 
   if (rewritten.conversationState !== undefined) {
@@ -941,6 +972,16 @@ export async function remapValue(
   }
 
   if (maps) {
+    rewritten = rewriteHistoricalTranscriptReferences(
+      rewritten,
+      maps.transcripts,
+    ) as Record<string, unknown>;
+
+    rewritten = rewriteHistoricalTerminalReferences(
+      rewritten,
+      maps.historical,
+    ) as Record<string, unknown>;
+
     rewritten = rewritePlanReferences(rewritten, maps.plans) as Record<
       string,
       unknown

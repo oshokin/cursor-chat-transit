@@ -11,7 +11,7 @@ import {
 } from './types';
 
 /**
- * Import an in-memory fixture by writing a v4 archive and reading that archive.
+ * Import an in-memory fixture by writing a v5 archive and reading that archive.
  * On-disk JSON exports are not accepted. Callers that already have a ZIP use
  * `importFromBundle`.
  */

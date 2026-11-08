@@ -41,6 +41,12 @@ export async function deleteManagedChats(
   operations: TransitLog,
   /** Workspace data and individual chats. An empty workspace is not a no-op. */
   requests: ManagedDeleteRequest[],
+  /** Explicit user action to clear the blocked selection in Manage Chats. */
+  deselectBlocked?: (
+    blocked: NonNullable<
+      Extract<ManagedPrepareResult, { ok: false }>['blocked']
+    >,
+  ) => void,
 ): Promise<boolean> {
   if (!requests.length) {
     notifyCompletion(() =>
@@ -126,8 +132,19 @@ export async function deleteManagedChats(
                 detail: prepared.detail,
               },
               { title: 'Close', isCloseAffordance: true },
+              ...(prepared.blocked?.length && deselectBlocked
+                ? [{ title: 'Deselect blocked selection' }]
+                : []),
             ),
-          ).then(() => undefined),
+          ).then((decision) => {
+            if (
+              decision?.title === 'Deselect blocked selection' &&
+              prepared.blocked
+            )
+              deselectBlocked?.(prepared.blocked);
+
+            return undefined;
+          }),
         );
 
         return;

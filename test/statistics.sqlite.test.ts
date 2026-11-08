@@ -162,7 +162,13 @@ test('cancellation stops before the next chat and releases the read transaction'
 
   await assert.rejects(
     runStatistics(
-      { ...ctx, kind: 'chat-statistics', workspace, chats: headers },
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        workspace,
+        chats: headers,
+        deepCheck: true,
+      },
       abort.signal,
       (r) => {
         rows.push(r);
@@ -199,6 +205,99 @@ function conversationState(...ids: string[]): string {
     ),
   ).toString('base64')}`;
 }
+
+test('unsupported transfer state preserves metadata without reporting corruption or read failure', async (t) => {
+  const { ctx, workspace } = await fixture(t);
+  const composerId = healthId('unsupported-state');
+
+  const body = {
+    _v: 18,
+    isNAL: true,
+    conversationState: '~not-supported',
+    fullConversationHeadersOnly: [{ bubbleId: 'message', type: 1 }],
+  };
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES(${sqlText('composerData:' + composerId)},${sqlText(JSON.stringify(body))});
+INSERT INTO cursorDiskKV VALUES(${sqlText('bubbleId:' + composerId + ':message')},'{"type":1,"text":"hello"}');`,
+  });
+
+  for (const deepCheck of [false, true]) {
+    const rows: StatisticsUpdate[] = [];
+
+    const result = await runStatistics(
+      {
+        ...ctx,
+        kind: 'chat-statistics',
+        workspace,
+        chats: [{ composerId }],
+        deepCheck,
+      },
+      new AbortController().signal,
+      (row) => rows.push(row),
+    );
+
+    assert.equal(result.failed, 0);
+    assert.equal(rows[0].failed, undefined);
+    assert.match(rows[0].detail, /^1 user message · Agent format/);
+
+    if (deepCheck) {
+      assert.equal(rows[0].health, 'unknown');
+      assert.equal(rows[0].eligible, false);
+      assert.match(rows[0].detail, /Transfer check unsupported/);
+      assert.doesNotMatch(rows[0].detail, /Incomplete|Statistics unavailable/);
+    } else {
+      assert.equal(rows[0].health, undefined);
+      assert.equal(rows[0].detail, '1 user message · Agent format');
+    }
+  }
+});
+
+test('deep-check property limits and database read errors remain failures', async (t) => {
+  const { ctx, workspace, headers } = await fixture(t);
+  const rows: StatisticsUpdate[] = [];
+
+  const job: StatisticsJob = {
+    ...ctx,
+    kind: 'chat-statistics',
+    workspace,
+    chats: [headers[0]],
+    deepCheck: true,
+    maxJsonProperties: 1,
+  };
+
+  assert.equal(
+    (
+      await runStatistics(job, new AbortController().signal, (r) =>
+        rows.push(r),
+      )
+    ).failed,
+    1,
+  );
+
+  await execSqlScript({
+    ...ctx,
+    database: workspace.globalDbPath,
+    sql: 'DROP TABLE cursorDiskKV;',
+  });
+
+  assert.equal(
+    (
+      await runStatistics(job, new AbortController().signal, (r) =>
+        rows.push(r),
+      )
+    ).failed,
+    1,
+  );
+
+  for (const row of rows) {
+    assert.equal(row.failed, true);
+    assert.equal(row.health, undefined);
+    assert.match(row.detail, /Statistics unavailable/);
+  }
+});
 
 test('deep checks distinguish complete legacy history, empty chats, missing messages and lost bodies', async (t) => {
   const { ctx, workspace } = await fixture(t);
@@ -547,7 +646,7 @@ test('whitespace conversation state does not abort the check', async (t) => {
   );
 });
 
-test('an unreadable conversation state still fails the check', async (t) => {
+test('unsupported state and future versions retain statistics with unknown transfer health', async (t) => {
   const { ctx, workspace } = await fixture(t);
   const future = healthId('future-messages');
   const unknown = healthId('unknown-version');
@@ -593,17 +692,24 @@ test('an unreadable conversation state still fails the check', async (t) => {
     },
   );
 
-  assert.equal(result.failed, 2);
-  assert.equal(rows[0].failed, true);
-  assert.equal(rows[1].failed, true);
-  assert.equal(rows[0].detail, 'Statistics unavailable — see operation log');
-  assert.equal(rows[1].detail, 'Statistics unavailable — see operation log');
+  assert.equal(result.failed, 0);
+
+  for (const row of rows) {
+    assert.equal(row.failed, undefined);
+    assert.equal(row.health, 'unknown');
+    assert.equal(row.eligible, false);
+
+    assert.match(
+      row.detail,
+      /^1 user message · Format unknown · Transfer check unsupported/,
+    );
+  }
 
   assert.deepEqual(
     events
       .filter((event) => event.action === 'Statistics unavailable')
       .map((event) => event.errorCode),
-    ['UNSUPPORTED_STATE', 'UNSUPPORTED_STATE'],
+    [],
   );
 });
 
@@ -836,8 +942,10 @@ test('deep selection excludes a chat with a missing image and rejects unknown st
 
   assert.equal(rows[0].eligible, false);
   assert.match(rows[0].detail, /Incomplete/);
-  assert.equal(rows[1].failed, true);
-  assert.notEqual(rows[1].eligible, true);
+  assert.equal(rows[1].failed, undefined);
+  assert.equal(rows[1].health, 'unknown');
+  assert.equal(rows[1].eligible, false);
+  assert.match(rows[1].detail, /Transfer check unsupported/);
 });
 
 test('a referenced canvas without a workspace canvas directory is incomplete', async (t) => {

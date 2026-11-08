@@ -9,6 +9,7 @@ test('remap keeps UUID text, timestamps and unknown fields; rewrites references'
   const oldB2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
   const obj = {
+    formatVersion: 5,
     allComposers: [
       {
         composerId: oldC,
@@ -95,6 +96,7 @@ test('malformed bubble JSON is rejected before copy', async () => {
   await assert.rejects(
     () =>
       cloneExportObjectForCopy({
+        formatVersion: 5,
         allComposers: [{ composerId: '11111111-1111-4111-8111-111111111111' }],
         composers: {
           '11111111-1111-4111-8111-111111111111': JSON.stringify({
@@ -117,6 +119,7 @@ test('malformed bubble JSON is rejected before copy', async () => {
 
 test('missing composer body is incomplete, not fabricated', async () => {
   const obj = {
+    formatVersion: 5,
     allComposers: [{ composerId: '11111111-1111-4111-8111-111111111111' }],
     composers: {},
     bubbles: {},
@@ -140,6 +143,7 @@ const Y = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 /** Export whose composer JSON points at bubbles X and Y. */
 function linkedPayload(ids = [A]) {
   return {
+    formatVersion: 5,
     allComposers: ids.map((composerId) => ({ composerId })),
     composers: Object.fromEntries(
       ids.map((id) => [

@@ -23,7 +23,15 @@ export type ConversationLayout = 'absent' | 'empty' | 'ndjson';
 
 /** One resource pointer stored beside a chat. Bytes live under `blobs/`. */
 export interface BundleResourceRef {
-  class: 'kv' | 'image' | 'plan' | 'canvas' | 'host-snapshot';
+  class:
+    | 'kv'
+    | 'image'
+    | 'plan'
+    | 'canvas'
+    | 'visualization'
+    | 'host-snapshot'
+    | 'transcript'
+    | 'terminal-history';
   /** KV key, image id, or file basename. */
   id: string;
   /** SHA-256 of the blob bytes. */
@@ -42,7 +50,7 @@ export interface BundleResourceRef {
   aliases?: string[];
 }
 
-/** Streaming writer for one v4 archive. */
+/** Streaming writer for one v5 archive. */
 export class BundleWriter {
   /** Staging directory that is packed into the archive. */
   private readonly root: string;
@@ -327,7 +335,12 @@ export class BundleWriter {
       createdAt: new Date().toISOString(),
       source: this.source ?? undefined,
       capabilities: {
-        required: ['sqlite-index-v1', 'content-addressed-blobs-v1'],
+        required: [
+          'sqlite-index-v1',
+          'content-addressed-blobs-v1',
+          'visualization-html-v1',
+          'historical-artifacts-v1',
+        ],
         optional: [],
       },
       index: {

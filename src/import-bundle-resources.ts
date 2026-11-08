@@ -1,3 +1,16 @@
+import {
+  assertVisualizationScope,
+  readVisualizationFile,
+  provisionVisualizationScope,
+  visualizationScopeFiles,
+} from './visualizations';
+import {
+  historicalDestination,
+  historicalProjectRoot,
+  parseHistoricalResourceId,
+  assertDistinctTranscriptOwners,
+  transcriptRelativePath,
+} from './historical-artifacts';
 import { readFile } from './trace-fs';
 import { MAX_SQLITE_VALUE_BYTES } from './bundle-limits';
 import { TRANSFER_PROGRESS_THROTTLE_MS } from './progress-model';
@@ -28,6 +41,97 @@ import { traceIO, transferEvent } from './transfer-events';
 import type { SqliteConn, TransferContext, WorkspaceEntry } from './types';
 import { TransferError } from './types';
 
+interface FileResourceRow {
+  class: string;
+  id: string;
+  sha256: string;
+  filename: string;
+  extension: string;
+}
+
+/** Journal identity of one destination path, independent of its display filename. */
+export function fileEffectId(target: string): string {
+  return `file:${sha256Hex(Buffer.from(path.resolve(target)))}`;
+}
+
+/** Absolute destination. Missing optional roots return null and are not planned. */
+export async function resourceFileTarget(opts: {
+  ctx: TransferContext;
+  workspace: WorkspaceEntry;
+  plansDir: string;
+  canvasesDir: string | null;
+  owner: string;
+  ownerMap: ReadonlyMap<string, string>;
+  row: Pick<FileResourceRow, 'class' | 'id' | 'filename' | 'extension'>;
+}): Promise<string | null> {
+  const filename = path.basename(
+    opts.row.filename ||
+      (opts.row.class === 'image'
+        ? `${opts.row.id}.${opts.row.extension || 'bin'}`
+        : opts.row.id),
+  );
+
+  if (
+    opts.row.class === 'transcript' ||
+    opts.row.class === 'terminal-history'
+  ) {
+    const project = historicalProjectRoot(opts.ctx, opts.workspace);
+
+    if (!project)
+      throw new Error('Destination project artifact root unavailable.');
+
+    return historicalDestination(
+      project,
+      opts.row.class,
+      opts.row.id,
+      opts.owner,
+      opts.ownerMap,
+    );
+  }
+
+  if (opts.row.class === 'visualization') {
+    return path.join(
+      await visualizationScopeFiles(opts.ctx, opts.workspace, opts.owner),
+      'visualizations',
+      filename,
+    );
+  }
+
+  if (opts.row.class === 'plan') return path.join(opts.plansDir, filename);
+
+  if (opts.row.class === 'canvas') {
+    return opts.canvasesDir ? path.join(opts.canvasesDir, filename) : null;
+  }
+
+  return path.join(
+    path.dirname(opts.workspace.workspaceDbPath),
+    'images',
+    filename,
+  );
+}
+
+async function importedOwnerContext(
+  work: SqliteSession,
+  ordinal: number,
+): Promise<{ owner: string; ownerMap: Map<string, string> }> {
+  const owner = (
+    await work.exec(`SELECT target_id FROM chat WHERE ordinal=${ordinal};`)
+  ).trim();
+
+  const ownerMap = new Map<string, string>();
+
+  await work.queryLines(
+    "SELECT json_object('source',source_id,'target',target_id) FROM chat;",
+    (line) => {
+      const row = json<{ source: string; target: string }>(line);
+
+      ownerMap.set(row.source, row.target);
+    },
+  );
+
+  return { owner, ownerMap };
+}
+
 /** Destination paths for plans, canvases, and images already written. */
 export async function resourceMaps(opts: {
   /** Catalog ordinal of this chat. */
@@ -40,6 +144,7 @@ export async function resourceMaps(opts: {
   canvasesDir: string | null;
   /** Destination workspace, used to locate images. */
   workspace: WorkspaceEntry;
+  ctx?: TransferContext;
 }): Promise<{
   /** Plan basename to the destination file path. */
   plans: Map<string, string>;
@@ -47,10 +152,38 @@ export async function resourceMaps(opts: {
   canvases: Map<string, string>;
   /** Image basename to the destination file path. */
   images: Map<string, string>;
+  historical: Map<string, string>;
+  transcripts: Map<string, string>;
 }> {
   const plans = new Map<string, string>();
   const canvases = new Map<string, string>();
   const images = new Map<string, string>();
+  const historical = new Map<string, string>();
+  const transcripts = new Map<string, string>();
+
+  const owner = (
+    await opts.work.exec(
+      `SELECT target_id FROM chat WHERE ordinal=${opts.ordinal};`,
+    )
+  ).trim();
+
+  const sourceOwner = (
+    await opts.work.exec(
+      `SELECT source_id FROM chat WHERE ordinal=${opts.ordinal};`,
+    )
+  ).trim();
+
+  const ownerMap = new Map<string, string>();
+
+  await opts.work.queryLines(
+    "SELECT json_object('source',source_id,'target',target_id) FROM chat;",
+    (line) => {
+      const row = json<{ source: string; target: string }>(line);
+
+      ownerMap.set(row.source, row.target);
+    },
+  );
+
   const imageRoot = attachmentDirectory(opts.workspace);
 
   try {
@@ -88,6 +221,47 @@ export async function resourceMaps(opts: {
         plans.set(row.filename, planFilePath(opts.plansDir, row.filename));
       }
 
+      if (row.class === 'transcript' || row.class === 'terminal-history') {
+        const project = historicalProjectRoot(opts.ctx || {}, opts.workspace);
+
+        if (!project)
+          throw new Error('Destination project artifact root unavailable.');
+        const metadata = parseHistoricalResourceId(row.id, row.class);
+
+        const destination = historicalDestination(
+          project,
+          row.class,
+          row.id,
+          owner,
+          ownerMap,
+        );
+
+        if (metadata.terminalName && metadata.sourceRoot)
+          historical.set(
+            metadata.sourceFile ||
+              path.join(
+                metadata.sourceRoot,
+                'terminals',
+                metadata.terminalName,
+              ),
+            destination,
+          );
+        if (row.class === 'transcript' && metadata.sourceRoot)
+          transcripts.set(
+            path.join(
+              metadata.sourceRoot,
+              'agent-transcripts',
+              transcriptRelativePath(
+                sourceOwner,
+                metadata.layout!,
+                metadata.extension!,
+                metadata.parent,
+              ),
+            ),
+            destination,
+          );
+      }
+
       if (row.class === 'canvas' && row.filename && opts.canvasesDir) {
         canvases.set(
           row.filename,
@@ -106,7 +280,7 @@ export async function resourceMaps(opts: {
     },
   );
 
-  return { plans, canvases, images };
+  return { plans, canvases, images, historical, transcripts };
 }
 
 /** Copy image, plan, and canvas bytes into the workspace. */
@@ -146,6 +320,13 @@ export async function copyResources(opts: {
     (line) => rows.push(json(line)),
   );
 
+  const { owner, ownerMap } = await importedOwnerContext(
+    opts.work,
+    opts.ordinal,
+  );
+
+  assertDistinctTranscriptOwners(ownerMap.values());
+
   for (const row of rows) {
     if (row.class === 'kv') continue;
 
@@ -160,15 +341,60 @@ export async function copyResources(opts: {
       row.filename ||
       (row.class === 'image' ? `${row.id}.${row.extension || 'bin'}` : row.id);
 
-    const root =
-      row.class === 'plan'
-        ? opts.plansDir
-        : row.class === 'canvas'
-          ? opts.canvasesDir || ''
-          : path.join(path.dirname(opts.workspace.workspaceDbPath), 'images');
+    if (row.class === 'transcript' || row.class === 'terminal-history') {
+      const destination = await resourceFileTarget({
+        ...opts,
+        owner,
+        ownerMap,
+        row,
+      });
 
-    if (!root) continue;
-    const effectId = `file:${row.class}:${filename}`;
+      if (!destination)
+        throw new Error('Destination project artifact root unavailable.');
+
+      await assertVisualizationScope(path.dirname(destination));
+      const effectId = fileEffectId(destination);
+
+      await opts.journal.setEffectState(opts.operationId, effectId, 'prepared');
+
+      await installBlobFile(
+        path.dirname(destination),
+        destination,
+        blob,
+        opts.ctx.signal,
+      );
+
+      const observed = await hashFile(destination, opts.ctx.signal);
+
+      if (observed.sha256 !== row.sha256)
+        throw new Error('Historical artifact verification failed.');
+
+      await opts.journal.setEffectState(
+        opts.operationId,
+        effectId,
+        'verified',
+        observed.sha256,
+      );
+
+      continue;
+    }
+
+    const destination = await resourceFileTarget({
+      ...opts,
+      owner,
+      ownerMap,
+      row,
+    });
+
+    if (!destination) continue;
+
+    if (row.class === 'visualization') {
+      await provisionVisualizationScope(opts.ctx, opts.workspace, owner);
+      await assertVisualizationScope(path.dirname(destination));
+    }
+
+    const root = path.dirname(destination);
+    const effectId = fileEffectId(destination);
 
     await opts.journal.setEffectState(opts.operationId, effectId, 'prepared');
 
@@ -196,34 +422,37 @@ export async function planResourceEffects(opts: {
   work: SqliteSession;
   journal: JournalStore;
   operationId: string;
+  ctx: TransferContext;
+  workspace: WorkspaceEntry;
+  plansDir: string;
+  canvasesDir: string | null;
 }): Promise<void> {
+  const rows: FileResourceRow[] = [];
+
   await opts.work.queryLines(
     `SELECT json_object('class',class,'id',id,'sha256',sha256,'filename',filename,'extension',extension)
      FROM res WHERE ordinal=${opts.ordinal} AND class <> 'kv';`,
-    async (line) => {
-      const row = json<{
-        class: string;
-        id: string;
-        sha256: string;
-        filename: string;
-        extension: string;
-      }>(line);
-
-      const filename =
-        row.filename ||
-        (row.class === 'image'
-          ? `${row.id}.${row.extension || 'bin'}`
-          : row.id);
-
-      await opts.journal.planEffect({
-        operationId: opts.operationId,
-        effectId: `file:${row.class}:${filename}`,
-        kind: 'file',
-        target: `${row.class}:${filename}`,
-        desiredHash: row.sha256,
-      });
-    },
+    (line) => rows.push(json(line)),
   );
+
+  const { owner, ownerMap } = await importedOwnerContext(
+    opts.work,
+    opts.ordinal,
+  );
+
+  for (const row of rows) {
+    const target = await resourceFileTarget({ ...opts, owner, ownerMap, row });
+
+    if (!target) continue;
+
+    await opts.journal.planEffect({
+      operationId: opts.operationId,
+      effectId: fileEffectId(target),
+      kind: 'file',
+      target,
+      desiredHash: row.sha256,
+    });
+  }
 }
 
 /** Insert cursorDiskKV blob rows that are not already present. */
@@ -342,6 +571,7 @@ export async function reusedSha(
     /** Transfer hooks and cancellation. */
     ctx: TransferContext;
     workspace: WorkspaceEntry;
+    targetComposerId?: string;
     /** Open destination databases and their layouts. */
     pair: Awaited<ReturnType<typeof inspectPair>>;
   },
@@ -359,6 +589,20 @@ export async function reusedSha(
     const file = await readPlanFile(plansDirOf(opts.ctx), id);
 
     return file ? file.sha256 : null;
+  }
+
+  if (kind === 'visualization') {
+    if (!opts.targetComposerId) return null;
+
+    const scope = await visualizationScopeFiles(
+      opts.ctx,
+      opts.workspace,
+      opts.targetComposerId,
+    );
+
+    return (
+      (await readVisualizationFile(scope, id, opts.ctx.signal))?.sha256 ?? null
+    );
   }
 
   if (kind === 'canvas') {

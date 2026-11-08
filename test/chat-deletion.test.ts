@@ -10,6 +10,8 @@ import { deleteSelectedChats } from '../src/chat-deletion';
 import { deleteHeaderReferences, deleteMessageRows } from '../src/deletion-sql';
 import { execSql, execSqlScript } from '../src/sqlite';
 import { sqlText } from '../src/core';
+import { exportToFile, importFromBundle } from '../src/transfer';
+import { readJsonFile } from '../src/format';
 import type { Layout, WorkspaceEntry, TransferContext } from '../src/types';
 
 /** Fixture cleanup retry policy for transient Windows filesystem locks. */
@@ -143,6 +145,84 @@ const C = '33333333-3333-4333-8333-333333333333';
 const D = '44444444-4444-4444-8444-444444444444';
 const E = '55555555-5555-4555-8555-555555555555';
 
+test('contradictory global id and URI retain selected history', async (t) => {
+  const { ctx, entries, globalDbPath, dump } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE ItemTable SET value=${sqlText(JSON.stringify({ allComposers: [{ composerId: A, workspaceIdentifier: { id: 'one', uri: 'file:///two' } }] }))} WHERE key='composer.composerHeaders';`,
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.deepEqual(result.deleted, []);
+  assert.equal(result.skipped.length, 1);
+  assert.deepEqual(await dump(), before);
+});
+
+test('contradictory table-only workspace ownership retains history', async (t) => {
+  const { ctx, entries, dump } = await setup(t);
+
+  await execSqlScript({
+    ...ctx,
+    database: entries[0].workspaceDbPath,
+    sql: `CREATE TABLE composerHeaders(composerId TEXT PRIMARY KEY,value BLOB); INSERT INTO composerHeaders VALUES (${sqlText(A)},${sqlText(JSON.stringify({ composerId: A, workspaceIdentifier: { id: 'two' } }))});`,
+  });
+
+  const before = await dump();
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.deepEqual(result.deleted, []);
+  assert.equal(result.skipped.length, 1);
+  assert.deepEqual(await dump(), before);
+});
+
+test('matching composer id leaves native and shared resources untouched', async (t) => {
+  const { ctx, entries, globalDbPath, root, read } = await setup(t);
+  const native = path.join(root, 'agent-transcripts', A, 'store.db');
+  const shared = path.join(root, 'cursor_agent_stores', A, 'files', 'keep');
+
+  for (const file of [native, shared]) {
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, 'synthetic retained resource');
+  }
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `INSERT INTO cursorDiskKV VALUES ('agentKv:blob:${A}','KEEP'),('agentHost:anchor:${A}','KEEP');`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.deleted.length, 1);
+  for (const file of [native, shared])
+    assert.equal(
+      await fs.readFile(file, 'utf8'),
+      'synthetic retained resource',
+    );
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE value='KEEP';`,
+      )
+    ).trim(),
+    '3',
+  );
+});
+
 /** Layout passed straight into the header writer. */
 function writerLayout(
   /** When true, the writer also deletes composerHeaders rows. */
@@ -212,6 +292,32 @@ CREATE TEMP TABLE selected(id TEXT PRIMARY KEY);`,
 
   return { ctx, database, workspaceDb, session };
 }
+
+test('table-only parents detach deleted subagents without legacy lists', async (t) => {
+  const parent = { composerId: B, subagentComposerIds: [A, C], name: 'kept' };
+
+  const { session } = await writerFixture(
+    t,
+    `INSERT INTO composerHeaders VALUES (${sqlText(B)}, ${sqlText(JSON.stringify(parent))}), (${sqlText(A)}, '{}');`,
+  );
+
+  await session.exec(`INSERT INTO selected VALUES (${sqlText(A)});`);
+
+  for (const schema of ['main', 'workspace'] as const) {
+    await deleteHeaderReferences(
+      session,
+      schema,
+      writerLayout(true),
+      new Set([A]),
+    );
+
+    const raw = await session.exec(
+      `SELECT value FROM ${schema}.composerHeaders WHERE composerId=${sqlText(B)};`,
+    );
+
+    assert.deepEqual(JSON.parse(raw), { ...parent, subagentComposerIds: [C] });
+  }
+});
 
 /** Read one ItemTable value back through the open writer session. */
 async function storedText(
@@ -1592,6 +1698,276 @@ test('a chat indexed only by the global table is deleted when the workspace list
     ).trim(),
     '0',
   );
+});
+
+test('SQL NULL composer tombstones do not block unrelated deletion', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    localHeaderIds: [A],
+    globalHeaders: [{ composerId: A, storageId: 'migrated' }],
+    keys: [`composerData:${A}`, `composerData:${D}`],
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE cursorDiskKV SET value=NULL WHERE key=${sqlText(`composerData:${D}`)};`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined, JSON.stringify(result));
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        `SELECT count(*) FROM cursorDiskKV WHERE key=${sqlText(`composerData:${D}`)} AND value IS NULL;`,
+      )
+    ).trim(),
+    '1',
+  );
+});
+
+for (const field of ['subagentComposerIds', 'subComposerIds']) {
+  test(`body-only ${field} without backlink refuses before writes`, async (t) => {
+    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+      localHeaderIds: [A, D],
+      globalHeaders: [
+        { composerId: A, storageId: 'migrated' },
+        { composerId: D, storageId: 'migrated' },
+      ],
+      keys: [
+        `composerData:${A}`,
+        `composerData:${D}`,
+        'composerData:unrelated',
+      ],
+    });
+
+    await execSqlScript({
+      ...ctx,
+      database: globalDbPath,
+      sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ composerId: D, [field]: [A], conversationState: '~' }))} WHERE key=${sqlText(`composerData:${D}`)}; UPDATE cursorDiskKV SET value='KEEP' WHERE key='composerData:unrelated';`,
+    });
+
+    const snapshot = async () =>
+      Promise.all([
+        read(globalDbPath, 'SELECT key,value FROM cursorDiskKV ORDER BY key;'),
+        read(
+          globalDbPath,
+          'SELECT * FROM composerHeaders ORDER BY composerId;',
+        ),
+        read(
+          entries[0].workspaceDbPath,
+          'SELECT key,value FROM ItemTable ORDER BY key;',
+        ),
+      ]);
+
+    const before = await snapshot();
+
+    const result = await deleteSelectedChats(ctx, entries, [
+      { workspace: entries[0], ids: [A] },
+    ]);
+
+    assert.match(
+      result.error || '',
+      /retained composer|Retained composer/,
+      JSON.stringify(result),
+    );
+
+    assert.deepEqual(result.deleted, []);
+    assert.deepEqual(await snapshot(), before);
+  });
+}
+
+test('table membership without a child backlink detaches the retained parent body', async (t) => {
+  const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+    localHeaderIds: [A, D],
+    globalHeaders: [
+      { composerId: A, storageId: 'migrated' },
+      { composerId: D, storageId: 'migrated' },
+    ],
+    keys: [`composerData:${A}`, `composerData:${D}`, 'composerData:unrelated'],
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE composerHeaders SET value=json_set(value,'$.subagentComposerIds',json(${sqlText(JSON.stringify([A]))})) WHERE composerId=${sqlText(D)};
+UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ _v: 18, composerId: D, fullConversationHeadersOnly: [], subagentComposerIds: [A], conversationState: '~', keep: 'untouched' }))} WHERE key=${sqlText(`composerData:${D}`)};
+UPDATE cursorDiskKV SET value='KEEP' WHERE key='composerData:unrelated';`,
+  });
+
+  const result = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.deleted.length, 1);
+
+  const parent = JSON.parse(
+    (
+      await read(
+        globalDbPath,
+        `SELECT value FROM cursorDiskKV WHERE key=${sqlText(`composerData:${D}`)};`,
+      )
+    ).trim(),
+  );
+
+  assert.deepEqual(parent.subagentComposerIds, []);
+  assert.equal(parent.keep, 'untouched');
+  assert.equal(parent.conversationState, '~');
+
+  assert.equal(
+    (
+      await read(
+        globalDbPath,
+        "SELECT value FROM cursorDiskKV WHERE key='composerData:unrelated';",
+      )
+    ).trim(),
+    'KEEP',
+  );
+
+  const repeated = await deleteSelectedChats(ctx, entries, [
+    { workspace: entries[0], ids: [A] },
+  ]);
+
+  assert.equal(repeated.error, undefined);
+  assert.equal(repeated.deleted.length, 0);
+
+  const directory = path.dirname(globalDbPath);
+  const archive = path.join(directory, 'detached.cursor-chat.zip');
+  const exported = await exportToFile(ctx, entries[0], archive, [D]);
+
+  assert.ok('complete' in exported && exported.complete);
+
+  const target = {
+    ...entries[0],
+    storageRoot: path.join(directory, 'target'),
+    storageId: 'target',
+    key: 'target',
+    globalDbPath: path.join(directory, 'target', 'global.vscdb'),
+    workspaceDbPath: path.join(directory, 'target', 'workspace.vscdb'),
+  };
+
+  await fs.mkdir(target.storageRoot);
+
+  await execSqlScript({
+    ...ctx,
+    database: target.globalDbPath,
+    sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB); CREATE TABLE cursorDiskKV(key TEXT PRIMARY KEY,value BLOB);',
+  });
+
+  await execSqlScript({
+    ...ctx,
+    database: target.workspaceDbPath,
+    sql: 'CREATE TABLE ItemTable(key TEXT PRIMARY KEY,value BLOB);',
+  });
+
+  assert.equal((await importFromBundle(ctx, archive, target)).imported, 1);
+  assert.equal((await importFromBundle(ctx, archive, target)).imported, 0);
+  const rearchive = path.join(directory, 'roundtrip.cursor-chat.zip');
+  const reexported = await exportToFile(ctx, target, rearchive);
+
+  assert.ok('complete' in reexported && reexported.complete);
+
+  for (const file of [archive, rearchive]) {
+    const payload = (await readJsonFile(file)) as {
+      composers: Record<string, string>;
+    };
+
+    assert.equal(Object.keys(payload.composers).length, 1);
+    const body = JSON.parse(Object.values(payload.composers)[0]);
+
+    assert.deepEqual(body.subagentComposerIds, []);
+    assert.equal(body.keep, 'untouched');
+  }
+});
+
+for (const stateKind of ['typed child reference', 'unknown encoding'] as const)
+  test(`table-only parent safely refuses deletion with ${stateKind}`, async (t) => {
+    const { ctx, entries, globalDbPath, read } = await liveWorkspace(t, {
+      localHeaderIds: [A, D],
+      globalHeaders: [
+        { composerId: A, storageId: 'migrated' },
+        { composerId: D, storageId: 'migrated' },
+      ],
+      keys: [`composerData:${A}`, `composerData:${D}`],
+    });
+
+    const entry = Buffer.concat([Buffer.from([10, A.length]), Buffer.from(A)]);
+
+    const state =
+      stateKind === 'unknown encoding'
+        ? { unsupported: true }
+        : `~${Buffer.concat([Buffer.from([130, 1, entry.length]), entry]).toString('base64')}`;
+
+    await execSqlScript({
+      ...ctx,
+      database: globalDbPath,
+      sql: `UPDATE composerHeaders SET value=json_set(value,'$.subagentComposerIds',json(${sqlText(JSON.stringify([A]))})) WHERE composerId=${sqlText(D)};
+UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ composerId: D, subagentComposerIds: [A], conversationState: state }))} WHERE key=${sqlText(`composerData:${D}`)};`,
+    });
+
+    const snapshot = async () =>
+      Promise.all([
+        read(globalDbPath, 'SELECT key,value FROM cursorDiskKV ORDER BY key;'),
+        read(
+          globalDbPath,
+          'SELECT composerId,value FROM composerHeaders ORDER BY composerId;',
+        ),
+        read(
+          entries[0].workspaceDbPath,
+          'SELECT composerId,value FROM composerHeaders ORDER BY composerId;',
+        ),
+        read(
+          entries[0].workspaceDbPath,
+          'SELECT key,value FROM ItemTable ORDER BY key;',
+        ),
+      ]);
+
+    const before = await snapshot();
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await deleteSelectedChats(ctx, entries, [
+        { workspace: entries[0], ids: [A] },
+      ]);
+
+      assert.match(result.error || '', /conversation state/);
+      assert.equal(result.deleted.length, 0);
+      assert.deepEqual(await snapshot(), before);
+    }
+  });
+
+test('deleting an issue child cannot strand retained parent conversation state', async (t) => {
+  const { ctx, entries, globalDbPath, dump } = await setup(t);
+  // Sanitized protobuf ConversationStateStructure.subagentStates map entry.
+  const entry = Buffer.concat([Buffer.from([10, A.length]), Buffer.from(A)]);
+  const state = `~${Buffer.concat([Buffer.from([130, 1, entry.length]), entry]).toString('base64')}`;
+
+  await execSqlScript({
+    ...ctx,
+    database: globalDbPath,
+    sql: `UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ composerId: A, subagentInfo: { parentComposerId: C } }))} WHERE key=${sqlText(`composerData:${A}`)};
+UPDATE cursorDiskKV SET value=${sqlText(JSON.stringify({ composerId: C, subagentComposerIds: [A], conversationState: state }))} WHERE key=${sqlText(`composerData:${C}`)};`,
+  });
+
+  const before = await dump();
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await deleteSelectedChats(ctx, entries, [
+      { workspace: entries[0], ids: [A] },
+    ]);
+
+    assert.match(
+      result.error || '',
+      /references selected subagent .*conversation state/,
+    );
+
+    assert.equal(result.deleted.length, 0);
+    assert.deepEqual(await dump(), before);
+  }
 });
 
 test('a nullable unknown composerHeaders column still allows deletion', async (t) => {

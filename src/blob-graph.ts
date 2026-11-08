@@ -1,16 +1,24 @@
 import { decodeState, readFields, type WireField } from './conversation-state';
+import { descriptorRefs, type DescriptorKind } from './blob-descriptors';
 
 /**
  * Blob roles taken from Cursor's `agent.v1` descriptors
  * (`ConversationStateStructure`, `ConversationTurnStructure`,
  * `AgentConversationTurnStructure`, `UserMessage`, `ConversationSummaryArchive`,
  * `FileStateStructure`). A 32-byte length-delimited value in one of these
- * fields is an `agentKv:blob` id. Other 32-byte values are followed only when
- * that id is already stored.
+ * fields is an `agentKv:blob` id. Unregistered byte fields are opaque.
  */
 
 /** How a blob id should be parsed once its bytes are loaded. */
-type Kind = 'state' | 'turn' | 'user-message' | 'summary-archive' | 'scan';
+type Kind =
+  | DescriptorKind
+  | 'state'
+  | 'turn'
+  | 'user-message'
+  | 'summary-archive'
+  | 'scan'
+  | 'step'
+  | 'subagent';
 
 /** One id discovered while walking a chat. */
 interface Node {
@@ -89,7 +97,8 @@ function refsFromState(
     const digest = digestOf(field.bytes);
 
     if (kind && digest) out.push({ digest, kind, required: true });
-    if (field.field === 12 || field.field === 31) pushMapBlob(field.bytes, out);
+    if (field.field === 12 || field.field === 31)
+      pushMapBlob(field.bytes, out, field.field === 31 ? 'subagent' : 'scan');
     if (field.field === 15) pushFileState(field.bytes, out);
 
     if (field.field === 16) {
@@ -114,11 +123,12 @@ function pushMapBlob(
   entry: Buffer,
   /** Collected blob ids. */
   out: Node[],
+  kind: Kind,
 ): void {
   const value = mapValue(entry);
   const digest = value ? digestOf(value) : null;
 
-  if (digest) out.push({ digest, kind: 'scan', required: true });
+  if (digest) out.push({ digest, kind, required: true });
 }
 
 /** `file_states_v2`: content and initial_content are blob ids. */
@@ -148,6 +158,26 @@ function schemaRefs(kind: Kind, bytes: Buffer): Node[] {
   if (kind === 'turn') return turnRefs(bytes);
   if (kind === 'user-message') return userMessageRefs(bytes);
   if (kind === 'summary-archive') return summaryRefs(bytes);
+  if (kind === 'invocation' || kind === 'pr' || kind === 'diff')
+    return descriptorRefs(kind, bytes);
+
+  if (kind === 'subagent') {
+    return [...readFields(bytes)].flatMap((row) =>
+      row.field === 1 && row.wire === 2 ? refsFromState(row.bytes) : [],
+    );
+  }
+
+  if (kind === 'step') {
+    const out: Node[] = [];
+
+    for (const row of readFields(bytes)) {
+      if (row.field < 1 || row.field > 3 || row.wire !== 2)
+        throw new Error('Unsupported conversation step wrapper.');
+      if (row.field === 2) out.push(...descriptorRefs('tool', row.bytes));
+    }
+
+    return out;
+  }
 
   return [];
 }
@@ -174,7 +204,11 @@ function turnRefs(bytes: Buffer): Node[] {
 
       out.push({
         digest,
-        kind: userMessage ? 'user-message' : 'scan',
+        kind: userMessage
+          ? 'user-message'
+          : field.field === 1
+            ? 'step'
+            : 'scan',
         required: true,
       });
     }
@@ -191,6 +225,13 @@ function userMessageRefs(bytes: Buffer): Node[] {
   const out: Node[] = [];
 
   for (const field of fields) {
+    if (field.field === 3) {
+      if (field.wire !== 2)
+        throw new Error('Invalid selected context wrapper.');
+      out.push(...descriptorRefs('selected', field.bytes));
+      continue;
+    }
+
     if (field.wire !== 2) continue;
     const digest = digestOf(field.bytes);
 
@@ -219,43 +260,6 @@ function summaryRefs(bytes: Buffer): Node[] {
 
     if (digest) out.push({ digest, kind: 'scan', required: true });
   }
-
-  return out;
-}
-
-/**
- * Every 32-byte length-delimited field in a blob that parses as protobuf.
- * Callers must not treat a miss as incomplete: strings and hashes also fit.
- */
-function looseDigests(bytes: Buffer): string[] {
-  const out: string[] = [];
-
-  /** Nested length-delimited fields. A 32-byte payload is recorded and not opened. */
-  const walk = (
-    /** Raw bytes of one nested field. */
-    buf: Buffer,
-    /** Current walk depth. */
-    depth: number,
-  ): void => {
-    if (depth > MAX_BLOB_SCAN_DEPTH) return;
-    const fields = tryFields(buf);
-
-    if (!fields) return;
-
-    for (const field of fields) {
-      if (field.wire !== 2) continue;
-      const digest = digestOf(field.bytes);
-
-      if (digest) {
-        out.push(digest);
-        continue;
-      }
-
-      if (field.bytes.length > 32) walk(field.bytes, depth + 1);
-    }
-  };
-
-  walk(bytes, 0);
 
   return out;
 }
@@ -397,10 +401,6 @@ function createGraph(
 
           return;
         }
-
-        if (node.kind === 'state') continue;
-        for (const digest of looseDigests(bytes))
-          push({ digest, kind: 'scan', required: false });
       }
     },
     finish: () => ({

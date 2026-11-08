@@ -51,13 +51,13 @@ An archive contains a manifest, per-chat metadata, and supported binary resource
 
 - Chat headers, conversation entries, and message records. A valid external header log is expanded into that conversation during export.
 - Referenced local conversation blobs and portable renderer records that belong to the chat.
-- Chat images, Cursor plan files, and canvases when available and supported. Visualization HTML, terminal files, and transcript files are not restored as artifacts.
+- Chat images, Cursor plan files, canvases, and visualization HTML when available and supported. See [Artifact support and limitations](artifacts.md) for platform restrictions and historical terminal snapshots and external transcript support.
 - A committed agent-host session, as `session.sqlite` plus `meta.json`, when that store passes validation. The profile-global agent-host database is not included.
 
-This build writes archive format version 5 and reads versions 5 and 4. Version 5
-uses a hashed SQLite inventory and content-addressed payloads; version 4 remains
-readable through its bounded NDJSON inventory. Monolithic JSON files and other
-archive versions are not accepted. The archive as a whole can exceed 1 GiB; an
+This build writes and reads only archive format version 5, which uses a hashed
+SQLite inventory and content-addressed payloads. Re-export chats with the current
+extension instead of importing older archives or monolithic JSON files.
+The archive as a whole can exceed 1 GiB; an
 individual JSON record or SQLite value is limited to 32 MiB. The expanded
 archive is limited to 64 GiB, and a non-empty ZIP member may expand at most
 1,000 times. See the
@@ -85,6 +85,11 @@ host-owned session is exported as a separately validated SQLite snapshot; it is
 restored only when its original session ID is free. Unsupported layouts, collisions,
 and renderer-only exports cannot prove that the renderer mirror contains every
 host-authoritative write.
+
+Native closure support is deliberately conservative: an unrecognized structured
+state is not treated as complete merely because its root blob exists. The
+[storage compatibility checklist](storage-compatibility.md) separates automated
+local-integrity checks from disposable-profile rendering and continuation tests.
 
 ## Repeat imports and recovery
 
@@ -153,6 +158,10 @@ Deletion runs through the existing cancellable transfer worker, with progress an
 After a modifying operation, use **Quit Cursor** in the existing sidebar and reopen the IDE. The extension never quits automatically. If the host cannot expose that native action, quit through the application menu. Completion notifications do not retain the operation lock.
 
 Chat-only deletion removes supported, exclusively owned composer and message records. Shared chats, unresolved ownership, unreadable metadata, changed index rows, relevant triggers and foreign-key dependencies are retained or stop that chat. The workspace directory stays.
+
+Matching a composer ID alone does not establish ownership of a native session.
+Profile-global agent-host data, unknown native stores, and remote-session state
+are not deleted as an incidental part of renderer chat deletion.
 
 **Delete workspace data** removes one inactive `User/workspaceStorage/<storageId>` directory and the supported history that belongs only to it. That includes saved editor state, local resources and other extensions’ data stored in that directory. It does not delete the project, a `.code-workspace` file, Git data, SSH files, global settings, shared agent blobs or the global plans folder. An empty supported workspace can be deleted. Shared or unreadable history blocks deletion of that workspace directory; nothing in that workspace-data plan is deleted. Deleting selected chats still removes chats that belong only to the workspace and reports shared chats as skipped. SQLite commits and directory removal are not one transaction: a later filesystem error is reported as partial and is not rolled back. Opening the project again can create a new empty local storage directory. Deleting chats does not immediately shrink `state.vscdb`: SQLite keeps freed pages for reuse inside the file. No VACUUM runs. There is no undo.
 

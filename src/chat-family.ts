@@ -255,8 +255,7 @@ export function buildFamily(headers: readonly ComposerHeader[]): FamilyGraph {
 
     const root = parent ? resolveRoot(item.composerId) : item.composerId;
 
-    const rootDisagrees =
-      !!parent && !!item.root && raw.has(item.root) && item.root !== root;
+    const rootDisagrees = !!parent && !!item.root && item.root !== root;
 
     if (rootDisagrees)
       diagnostics.push({
@@ -378,6 +377,8 @@ export function remapFamilyRecord(
   record: Record<string, unknown>,
   /** Source composer id to the destination composer id. */
   composerIds: ReadonlyMap<string, string>,
+  /** Import membership is limited to chats present in the accepted archive. */
+  includedMembersOnly = false,
 ): Record<string, unknown> {
   const next = { ...record };
   const info = next.subagentInfo;
@@ -396,7 +397,13 @@ export function remapFamilyRecord(
   }
 
   if (Array.isArray(next.subagentComposerIds)) {
-    next.subagentComposerIds = next.subagentComposerIds.map((id) =>
+    const members = includedMembersOnly
+      ? next.subagentComposerIds.filter(
+          (id) => typeof id === 'string' && composerIds.has(id),
+        )
+      : next.subagentComposerIds;
+
+    next.subagentComposerIds = members.map((id) =>
       typeof id === 'string' && composerIds.has(id) ? composerIds.get(id) : id,
     );
   }
@@ -903,8 +910,10 @@ export function applyBodyFamily(
     next.isSubagent = true;
   }
 
-  if (!header.subagentComposerIds?.length && body.children?.length)
-    next.subagentComposerIds = body.children;
+  if (body.children?.length)
+    next.subagentComposerIds = [
+      ...new Set([...(header.subagentComposerIds || []), ...body.children]),
+    ];
   if (body.isSubagent) next.isSubagent = true;
 
   return next;
