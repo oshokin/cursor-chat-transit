@@ -47,16 +47,13 @@ Workspace filtering checks for stored history without reading message bodies or 
 
 ## Archive contents and limits
 
-An archive contains a manifest, per-chat metadata, and supported binary resources. Format 5 also contains a hashed SQLite index and content-addressed payloads. Format 4 contains bounded NDJSON parts:
+An archive contains a manifest, a hashed SQLite index, content-addressed payloads, per-chat metadata, and supported binary resources. This build writes and reads only format 5. Re-export chats with the current extension instead of importing older archives or monolithic JSON files.
 
 - Chat headers, conversation entries, and message records. A valid external header log is expanded into that conversation during export.
 - Referenced local conversation blobs and portable renderer records that belong to the chat.
 - Chat images, Cursor plan files, canvases, and visualization HTML when available and supported. See [Artifact support and limitations](artifacts.md) for platform restrictions and historical terminal snapshots and external transcript support.
 - A committed agent-host session, as `session.sqlite` plus `meta.json`, when that store passes validation. The profile-global agent-host database is not included.
 
-This build writes and reads only archive format version 5, which uses a hashed
-SQLite inventory and content-addressed payloads. Re-export chats with the current
-extension instead of importing older archives or monolithic JSON files.
 The archive as a whole can exceed 1 GiB; an
 individual JSON record or SQLite value is limited to 32 MiB. The expanded
 archive is limited to 64 GiB, and a non-empty ZIP member may expand at most
@@ -157,7 +154,7 @@ Deletion runs through the existing cancellable transfer worker, with progress an
 
 After a modifying operation, use **Quit Cursor** in the existing sidebar and reopen the IDE. The extension never quits automatically. If the host cannot expose that native action, quit through the application menu. Completion notifications do not retain the operation lock.
 
-Chat-only deletion removes supported, exclusively owned composer and message records. Shared chats, unresolved ownership, unreadable metadata, changed index rows, relevant triggers and foreign-key dependencies are retained or stop that chat. The workspace directory stays.
+Chat-only deletion removes supported, exclusively owned composer and message records. Shared chats, unresolved ownership, unreadable metadata, changed index rows, relevant triggers and foreign-key dependencies are retained or stop that chat. The workspace directory stays. A family hidden from the catalogue is included before confirmation when its composer records belong to the selected workspace. A refusal names the blocked chats and owning workspace and can clear only that family's checks. An absent SQL NULL composer body does not block unrelated chats.
 
 Matching a composer ID alone does not establish ownership of a native session.
 Profile-global agent-host data, unknown native stores, and remote-session state

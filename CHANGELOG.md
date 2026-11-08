@@ -6,12 +6,17 @@
 
 - Show the storage id in the sidebar and in the export chat pickers. Chat descriptions keep the date and duplicate-title distinction; Cursor's edited-file subtitle is not treated as identity.
 - Selecting chats with transfer issues skips a descendant whose check failed or is still unknown.
+- Write and read only archive format 5. Format 4 and older JSON exports are rejected; export the chats again with this version.
+- Require `visualization-html-v1` and `historical-artifacts-v1` in every format 5 manifest, in addition to the SQLite index and content-addressed blob capabilities. The private import journal is schema 3.
 
 ### Fixed
 
 - Distinguish an unsupported native snapshot codec from corruption. A history-only renderer fallback is allowed only when that omission is explicit and the renderer dependency closure is present, supported, and complete. A corrupt native snapshot stays fatal, including during read-only inspection.
 - Follow the Cursor 3.29.9 typed wrappers for read-success, truncated calls, and selected context. Traversal stays bounded. Unimplemented variants and malformed wrappers are rejected. A matching digest is not evidence of a dependency.
-- Report structured visualization HTML that is omitted from an export. The HTML is not read, exported, executed, or restored. Arbitrary text and paths do not imply ownership.
+- Transfer supported visualization HTML as opaque bytes into the destination composer's agent-store `files/visualizations` directory. The transfer does not parse or execute the HTML. Identical bytes are reused; different bytes at the same path are not overwritten. Arbitrary text and paths do not imply ownership.
+- Copy owned agent transcripts and explicitly referenced terminal snapshots. Transcript ownership follows the composer database and parent id. Terminal snapshots are stored outside Cursor's live `terminals` directory and do not restore a process or shell.
+- Resolve a deletion family from composer records when the visible catalogue is stale. Name a blocked family and its owning workspace. An absent SQL NULL composer body does not block deletion of unrelated chats.
+- Identify an installed file by its destination path, so chats can keep visualization or transcript files that share a display name.
 - Validate supported native roots, manifest list ranges, and content hashes. A root that merely exists is not a complete snapshot. Unsupported structured closure is rejected instead of guessed.
 - Record the native publication intent and the exact hashed recovery bytes before the renderer is published. An interrupted import checks the database and metadata hashes and does not replace an occupied or changed native destination. A header-only renderer catalogue entry still reserves its destination id.
 - Decode canonical hex renderer state as well as `~`-prefixed base64. Protobuf identity remapping stays limited to evidenced subagent map-key fields. A UUID-shaped value or an unrelated 32-byte value is not an identity or a blob dependency just because a matching record exists.

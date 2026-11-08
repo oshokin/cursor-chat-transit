@@ -6,23 +6,23 @@ For setup, validation, packaging, and releases, see [Development](development.md
 
 ## Components
 
-| Area             | Modules                                                                                            | Responsibility                                                                       |
-| ---------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Host integration | `extension*.ts`, `quit-cursor.ts`                                                                  | Commands, native dialogs, settings, and application actions                          |
-| Sidebar          | `sidebar-provider.ts`, `webview/`, `resources/sidebar.html`                                        | Themed transfer status and a restricted action interface                             |
-| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                                            | Stable ordering, labels, identity, and disambiguation                                |
-| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`                                 | Read-only analysis, native picker lifecycle, and operation logging                   |
-| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                                        | Isolated work, incremental IPC events, and cancellation                              |
-| Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts`                  | Header resolution, consistent database reads, and archive creation                   |
-| Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                                      | Validation, preparation, bounded writes, and interrupted-import reconciliation       |
-| Archive          | `bundle-*.ts`, `blob-store.ts`, `ndjson-io.ts`                                                     | Format 5 index and content-addressed payloads; older archives are rejected           |
-| Host sessions    | `host-snapshots.ts`                                                                                | WAL snapshot and exact restore of a committed agent-host session                     |
-| Renderer keys    | `chat-kv-registry.ts`                                                                              | Classify and remap portable per-chat KV families                                     |
-| Artifacts        | `artifact-source.ts`, `artifact-support.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`           | Stable file reads and the supported, degraded, and unsupported artifact boundary     |
-| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                                         | Bundled native SQLite, supervised queries, read views, and schema checks             |
-| Resources        | `dependencies.ts`, `resource-*.ts`, `blob-graph.ts`                                                | Reference discovery and byte-preserving resource transfer                            |
-| Receipts         | `journal.ts`, `journal-db.ts`, `import-policy.ts`, `import-reconcile.ts`                           | Snapshot identity (`cct-snapshot-v2`), side effects, and repeat-import decisions     |
-| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`, `diagnostics-*.ts` | Structured facts, readable logs, measured progress, and a copyable diagnostic report |
+| Area             | Modules                                                                                                                                  | Responsibility                                                                       |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Host integration | `extension*.ts`, `quit-cursor.ts`                                                                                                        | Commands, native dialogs, settings, and application actions                          |
+| Sidebar          | `sidebar-provider.ts`, `webview/`, `resources/sidebar.html`                                                                              | Themed transfer status and a restricted action interface                             |
+| Selection        | `picker.ts`, `activity.ts`, `workspace-presentation.ts`                                                                                  | Stable ordering, labels, identity, and disambiguation                                |
+| Statistics       | `statistics.ts`, `statistics-picker.ts`, `extension-statistics.ts`                                                                       | Read-only analysis, native picker lifecycle, and operation logging                   |
+| Worker transport | `transfer-process.ts`, `transfer-worker.ts`                                                                                              | Isolated work, incremental IPC events, and cancellation                              |
+| Export           | `export-transfer.ts`, `export-bundle.ts`, `export-chat.ts`, `export-resources.ts`                                                        | Header resolution, consistent database reads, and archive creation                   |
+| Import           | `import-bundle*.ts`, `import-batches.ts`, `import-cleanup.ts`                                                                            | Validation, preparation, bounded writes, and interrupted-import reconciliation       |
+| Archive          | `bundle-*.ts`, `blob-store.ts`, `ndjson-io.ts`                                                                                           | Format 5 index and content-addressed payloads; older archives are rejected           |
+| Host sessions    | `host-snapshots.ts`                                                                                                                      | WAL snapshot and exact restore of a committed agent-host session                     |
+| Renderer keys    | `chat-kv-registry.ts`                                                                                                                    | Classify and remap portable per-chat KV families                                     |
+| Artifacts        | `artifact-source.ts`, `artifact-support.ts`, `attachments.ts`, `plans.ts`, `canvases.ts`, `visualizations.ts`, `historical-artifacts.ts` | Stable file reads and the supported artifact boundary                                |
+| Database access  | `sqlite*.ts`, `read-transaction.ts`, `db*.ts`, `schema.ts`                                                                               | Bundled native SQLite, supervised queries, read views, and schema checks             |
+| Resources        | `dependencies.ts`, `resource-*.ts`, `blob-graph.ts`                                                                                      | Reference discovery and byte-preserving resource transfer                            |
+| Receipts         | `journal.ts`, `journal-db.ts`, `import-policy.ts`, `import-reconcile.ts`                                                                 | Snapshot identity (`cct-snapshot-v2`), side effects, and repeat-import decisions     |
+| Observability    | `operation-log.ts`, `log-format.ts`, `transfer-events.ts`, `progress-model.ts`, `diagnostics-*.ts`                                       | Structured facts, readable logs, measured progress, and a copyable diagnostic report |
 
 Sources compile from `src/` to `out/`. The sidebar client compiles from `webview/` to `resources/sidebar-client.js`. Small object-based helpers support fixtures; they do not provide an alternative monolithic JSON file-import path.
 
@@ -41,7 +41,7 @@ A storage entry pairs one workspace database with the global database from the s
 | Transfer archive                  | User-selected `*.cursor-chat.zip`                                                                                                      |
 | Committed agent-host session      | `User/globalStorage/anysphere.cursor-agent-host/sessions/<sessionId>/`                                                                 |
 | Profile-global agent-host store   | `User/globalStorage/anysphere.cursor-agent-host/data.sqlite`; never copied or merged                                                   |
-| Receipts and pending import state | `<user-data>/cursor-chat-transit/import-v4-<hash>.sqlite`. The filename prefix is historical. The schema inside the file is version 2. |
+| Receipts and pending import state | `<user-data>/cursor-chat-transit/import-v4-<hash>.sqlite`. The filename prefix is historical. The schema inside the file is version 3. |
 
 The local storage root, project URI, and archive location are separate concepts. An SSH project URI does not imply a remote chat database. `extensionKind: ["ui"]` keeps the extension on the local side of the editor.
 
@@ -198,12 +198,12 @@ Snapshot comparison ignores known presentation-only changes such as `grouping.te
 
 ## Archive contract
 
-Current code writes format version 5 and reads versions 5 and 4. Version 5 uses a
-hashed `index.sqlite` as the authoritative inventory and catalog, declares required
-`sqlite-index-v1` and `content-addressed-blobs-v1` capabilities, and stores immutable
-payloads by SHA-256. A reader rejects an unknown required capability. Version 4 uses
-the bounded NDJSON inventory. Other versions are rejected; there is no monolithic
-JSON import fallback.
+Current code writes and reads only format version 5. Version 5 uses a hashed
+`index.sqlite` as the authoritative inventory and catalog, stores immutable payloads
+by SHA-256, and requires `sqlite-index-v1`, `content-addressed-blobs-v1`,
+`visualization-html-v1`, and `historical-artifacts-v1`. A reader rejects an unknown
+required capability. Format 4 and monolithic JSON exports are rejected; export the
+chats again with the current extension.
 
 | Limit                   | Value                                                                                  |
 | ----------------------- | -------------------------------------------------------------------------------------- |
@@ -366,7 +366,7 @@ The transfer scope owns cancellation subscriptions and timers. Terminal results 
 
 `artifact-support.ts` marks images, plans, canvases, and supported visualization HTML as filesystem artifacts. See [Artifact support and limitations](artifacts.md) for visualization discovery, provisioning, and historical terminal snapshots and external transcript support. `artifact-source.ts` reads an allowlisted file twice and accepts it only when device, inode, size, and timestamps still match.
 
-`host-snapshots.ts` accepts a committed session only when `meta.json` has `schemaVersion` 1 and an origin of `migrated-from-renderer-cas` or `host-native`, the database `user_version` is 1, and both `ItemTable` and `cursorDiskKV` are `key TEXT, value BLOB`. The `agentHost:sessionManifest` value must have `manifestVersion` 1 or 2, and its root blob must be present and equal to `latestRootBlobIdHex`. Publication copies the snapshot into a private `sessions/.cct-…` directory and renames that directory onto `sessions/<sessionId>` only when the destination does not already exist. `journal-db.ts` schema 2 records `db`, `file`, and `session` effects. A host restore is a `session` effect, not an edit of both authorities.
+`host-snapshots.ts` accepts a committed session only when `meta.json` has `schemaVersion` 1 and an origin of `migrated-from-renderer-cas` or `host-native`, the database `user_version` is 1, and both `ItemTable` and `cursorDiskKV` are `key TEXT, value BLOB`. The `agentHost:sessionManifest` value must have `manifestVersion` 1 or 2, and its root blob must be present and equal to `latestRootBlobIdHex`. Publication copies the snapshot into a private `sessions/.cct-…` directory and renames that directory onto `sessions/<sessionId>` only when the destination does not already exist. `journal-db.ts` schema 3 records `db`, `file`, and `session` effects. A file effect identifies its absolute destination, not only its display filename. A host restore is a `session` effect, not an edit of both authorities.
 
 ## Bundled native SQLite
 
