@@ -571,6 +571,6 @@
     "esbuild@0.28.2": true
   },
   "dependencies": {
-    "better-sqlite3": "13.0.3"
+    "better-sqlite3": "13.2.0"
   }
 }
